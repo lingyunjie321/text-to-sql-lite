@@ -155,9 +155,13 @@ def _runtime_model_profile(alias: str, model_config: RuntimeModelConfig) -> Mode
 
 def _resolve_api_key(model_config: RuntimeModelConfig) -> str | None:
     if model_config.api_key is not None:
-        return model_config.api_key.get_secret_value()
+        api_key = model_config.api_key.get_secret_value().strip()
+        return api_key or None
     if model_config.api_key_env:
-        return os.getenv(model_config.api_key_env)
+        api_key = os.getenv(model_config.api_key_env)
+        if api_key is None:
+            return None
+        return api_key.strip() or None
     return None
 
 

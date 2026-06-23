@@ -37,13 +37,13 @@ from text_to_sql_demo.runtime.store import RuntimeConfigStore
 NOW = datetime(2026, 6, 23, tzinfo=UTC)
 
 
-def make_workflow_config() -> WorkflowConfig:
+def make_workflow_config(driver: str = "sqlite") -> WorkflowConfig:
     """构造只包含 resolver 所需字段的 workflow 配置。"""
     return WorkflowConfig(
         workflow=WorkflowSection(name="test", start_node="generate_sql"),
         database=DatabaseConfig(
             default="demo",
-            connections={"demo": DatabaseConnectionConfig(driver="sqlite")},
+            connections={"demo": DatabaseConnectionConfig(driver=driver)},
         ),
         models=ModelsConfig(
             aliases={
@@ -90,6 +90,27 @@ def make_runtime_config(
     )
 
 
+def make_openai_runtime_config(
+    *,
+    light: RuntimeModelConfig,
+    strong: RuntimeModelConfig | None = None,
+) -> RuntimeConfig:
+    """构造 openai_compatible 运行时配置，便于测试密钥解析边界。"""
+    return make_runtime_config(provider="openai_compatible").model_copy(
+        update={
+            "models": RuntimeModelRoutingConfig(
+                light=light,
+                strong=strong
+                or RuntimeModelConfig(
+                    provider="openai_compatible",
+                    model="runtime-strong",
+                    api_key=SecretStr("test-key"),
+                ),
+            )
+        }
+    )
+
+
 def make_resolver(store: RuntimeConfigStore) -> RuntimeConfigResolver:
     """创建带固定时钟的 resolver。"""
     return RuntimeConfigResolver(
@@ -131,6 +152,20 @@ def test_resolve_without_runtime_id_uses_default_dependencies() -> None:
     assert resolved.llm_client is default_client
     assert resolved.model_profiles["light"].model_name == "workflow-light"
     assert resolved.model_profiles["strong"].model_name == "workflow-strong"
+
+
+def test_resolve_without_runtime_id_uses_default_workflow_driver_dialect() -> None:
+    resolver = RuntimeConfigResolver(
+        workflow_config=make_workflow_config(driver="postgresql"),
+        store=RuntimeConfigStore(),
+        default_database_url="postgresql://demo:secret@localhost/demo",
+        default_llm_client=MockLLMClient(),
+        now_provider=lambda: NOW,
+    )
+
+    resolved = resolver.resolve()
+
+    assert resolved.target_dialect == "postgres"
 
 
 def test_resolve_runtime_config_uses_runtime_database_models_and_routing_client() -> None:
@@ -177,9 +212,48 @@ def test_openai_compatible_missing_api_key_raises_secret_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("MISSING_RUNTIME_API_KEY", raising=False)
-    config = make_runtime_config(provider="openai_compatible")
-    config.models.light.api_key = None
-    config.models.light.api_key_env = "MISSING_RUNTIME_API_KEY"
+    config = make_openai_runtime_config(
+        light=RuntimeModelConfig(
+            provider="openai_compatible",
+            model="runtime-light",
+            api_key_env="MISSING_RUNTIME_API_KEY",
+        )
+    )
+    store = RuntimeConfigStore()
+    store.save(config)
+    resolver = make_resolver(store)
+
+    with pytest.raises(RuntimeSecretMissingError):
+        resolver.resolve(runtime_config_id="runtime-1")
+
+
+def test_openai_compatible_whitespace_api_key_raises_secret_missing() -> None:
+    config = make_openai_runtime_config(
+        light=RuntimeModelConfig(
+            provider="openai_compatible",
+            model="runtime-light",
+            api_key=SecretStr("   "),
+        )
+    )
+    store = RuntimeConfigStore()
+    store.save(config)
+    resolver = make_resolver(store)
+
+    with pytest.raises(RuntimeSecretMissingError):
+        resolver.resolve(runtime_config_id="runtime-1")
+
+
+def test_openai_compatible_whitespace_env_api_key_raises_secret_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("WHITESPACE_RUNTIME_API_KEY", "   ")
+    config = make_openai_runtime_config(
+        light=RuntimeModelConfig(
+            provider="openai_compatible",
+            model="runtime-light",
+            api_key_env="WHITESPACE_RUNTIME_API_KEY",
+        )
+    )
     store = RuntimeConfigStore()
     store.save(config)
     resolver = make_resolver(store)
