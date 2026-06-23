@@ -173,6 +173,15 @@ class RuntimeModelSelection(BaseModel):
         if self.mode == "preset":
             if not _has_text(self.preset_id):
                 raise ValueError("模型 preset 模式必须提供 preset_id")
+            custom_fields = {
+                "provider",
+                "model",
+                "base_url",
+                "api_key",
+                "api_key_env",
+                "temperature",
+                "max_tokens",
+            }
             if any(
                 value is not None
                 for value in (
@@ -182,7 +191,7 @@ class RuntimeModelSelection(BaseModel):
                     self.api_key,
                     self.api_key_env,
                 )
-            ):
+            ) or bool(custom_fields & self.model_fields_set):
                 raise ValueError("模型 preset 模式不能提供自定义字段")
             return self
 

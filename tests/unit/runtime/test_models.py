@@ -64,6 +64,12 @@ def test_model_selection_requires_either_preset_or_custom() -> None:
     with pytest.raises(ValidationError, match="模型 preset 模式不能提供自定义字段"):
         RuntimeModelSelection(mode="preset", preset_id="light", provider="mock", model="demo")
 
+    with pytest.raises(ValidationError, match="模型 preset 模式不能提供自定义字段"):
+        RuntimeModelSelection(mode="preset", preset_id="light", temperature=0.2)
+
+    with pytest.raises(ValidationError, match="模型 preset 模式不能提供自定义字段"):
+        RuntimeModelSelection(mode="preset", preset_id="light", max_tokens=1024)
+
     with pytest.raises(ValidationError, match="模型 custom 模式不能提供 preset_id"):
         RuntimeModelSelection(
             mode="custom",
@@ -87,6 +93,17 @@ def test_sqlite_custom_without_sqlite_path_fails() -> None:
 def test_custom_model_without_api_key_or_env_fails() -> None:
     with pytest.raises(ValidationError, match="api_key 或 api_key_env"):
         RuntimeModelSelection(mode="custom", provider="mock", model="demo")
+
+
+def test_runtime_model_config_requires_provider_model_and_secret_source() -> None:
+    with pytest.raises(ValidationError, match="provider 不能为空"):
+        RuntimeModelConfig(provider="", model="x", api_key_env="KEY")
+
+    with pytest.raises(ValidationError, match="模型名称不能为空"):
+        RuntimeModelConfig(provider="mock", model="", api_key_env="KEY")
+
+    with pytest.raises(ValidationError, match="api_key 或 api_key_env"):
+        RuntimeModelConfig(provider="mock", model="x")
 
 
 def test_runtime_config_rejects_naive_expires_at() -> None:
@@ -117,4 +134,13 @@ def test_secret_str_output_does_not_expose_secrets() -> None:
 
     assert "db-password" not in combined_output
     assert "sk-secret" not in combined_output
+    assert "**********" in combined_output
+
+
+def test_runtime_model_config_secret_output_does_not_expose_api_key() -> None:
+    model = RuntimeModelConfig(provider="mock", model="demo", api_key=SecretStr("secret"))
+
+    combined_output = f"{model!r} {model.model_dump_json()}"
+
+    assert "secret" not in combined_output
     assert "**********" in combined_output
