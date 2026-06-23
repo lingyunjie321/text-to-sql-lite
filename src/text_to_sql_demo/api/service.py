@@ -30,6 +30,12 @@ from text_to_sql_demo.observability.events import (
     log_database_url_resolve_failed,
     log_database_url_resolved,
 )
+from text_to_sql_demo.runtime.exceptions import (
+    RuntimeConfigExpiredError,
+    RuntimeConfigNotFoundError,
+    RuntimeProviderUnsupportedError,
+    RuntimeSecretMissingError,
+)
 from text_to_sql_demo.runtime.models import (
     RuntimeConfig,
     RuntimeConfigCreateRequest,
@@ -46,6 +52,8 @@ from text_to_sql_demo.runtime.resolver import (
     MOCK_PROVIDER,
     OPENAI_COMPATIBLE_PROVIDER,
     RUNTIME_MODEL_ALIASES,
+    ResolvedRuntimeConfig,
+    RuntimeConfigResolver,
     driver_to_dialect,
 )
 from text_to_sql_demo.runtime.store import RuntimeConfigStore
@@ -110,6 +118,12 @@ class TextToSQLApiService:
         self.llm_client = llm_client or build_llm_client(self.config)
         self.run_store = run_store or InMemoryRunStore()
         self.runtime_store = runtime_store or RuntimeConfigStore()
+        self.runtime_resolver = RuntimeConfigResolver(
+            workflow_config=self.config,
+            store=self.runtime_store,
+            default_database_url=self.database_url,
+            default_llm_client=self.llm_client,
+        )
         self.runtime_tester = RuntimeConfigTester()
 
         # 导入节点包触发 register_node 装饰器，避免默认注册表为空。
@@ -209,22 +223,27 @@ class TextToSQLApiService:
 
     def run_query(self, request: QueryRequest) -> dict[str, Any]:
         """执行 Text-to-SQL 工作流并返回演示响应。"""
-        self.ensure_database()
-        schema = self.read_schema()
+        resolved = self._resolve_runtime_config(request.runtime_config_id)
+        self.ensure_database(database_url=resolved.database_url)
+        schema = self.read_schema(database_url=resolved.database_url)
         request_id = get_log_context().get("request_id") or str(uuid4())
         state = WorkflowState(
             request_id=str(request_id),
             user_question=request.question,
             data={
                 "schema": schema.model_dump(mode="python"),
-                "target_dialect": request.target_dialect,
+                "target_dialect": resolved.target_dialect,
+                "runtime_config_id": resolved.runtime_config_id,
                 "max_repair_attempts": request.max_attempts,
                 "debug": request.debug,
             },
         )
         engine = WorkflowEngine(
-            config=self._config_for_request(max_attempts=request.max_attempts),
-            node_factory=NodeFactory(dependencies=self._node_dependencies()),
+            config=self._config_for_request(
+                max_attempts=request.max_attempts,
+                target_dialect=resolved.target_dialect,
+            ),
+            node_factory=NodeFactory(dependencies=self._node_dependencies(resolved=resolved)),
         )
         final_state = engine.run(state)
         self.run_store.save(final_state)
@@ -244,12 +263,13 @@ class TextToSQLApiService:
 
     def execute_sql(self, request: ExecuteSQLRequest) -> dict[str, Any]:
         """校验并执行用户编辑后的只读 SQL，不进入 Agent 工作流。"""
-        self.ensure_database()
-        schema = self.read_schema()
+        resolved = self._resolve_runtime_config(request.runtime_config_id)
+        self.ensure_database(database_url=resolved.database_url)
+        schema = self.read_schema(database_url=resolved.database_url)
         validation = SQLValidator().validate(
             sql=request.sql,
             schema=schema,
-            dialect=request.target_dialect,
+            dialect=resolved.target_dialect,
         )
         if not validation.success:
             return _serialize_direct_sql(
@@ -262,7 +282,7 @@ class TextToSQLApiService:
         executable_sql = validation.rendered_sql or validation.normalized_sql or request.sql
         result = SQLExecutor().execute(
             sql=executable_sql,
-            database_url=self.database_url,
+            database_url=resolved.database_url,
             max_rows=request.max_rows,
         )
         return _serialize_direct_sql(
@@ -272,34 +292,91 @@ class TextToSQLApiService:
             error=result.error,
         )
 
-    def read_schema(self) -> DatabaseSchemaMetadata:
-        """读取当前 demo 数据库 Schema。"""
-        return read_schema_metadata(self.database_url)
+    def get_schema(self, *, runtime_config_id: str | None = None) -> DatabaseSchemaMetadata:
+        """按可选 runtime_config_id 返回对应数据库 Schema。"""
+        resolved = self._resolve_runtime_config(runtime_config_id)
+        self.ensure_database(database_url=resolved.database_url)
+        return self.read_schema(database_url=resolved.database_url)
 
-    def ensure_database(self) -> None:
+    def read_schema(self, *, database_url: str | None = None) -> DatabaseSchemaMetadata:
+        """读取当前 demo 数据库 Schema。"""
+        return read_schema_metadata(database_url or self.database_url)
+
+    def ensure_database(self, *, database_url: str | None = None) -> None:
         """初始化缺失的 SQLite demo 数据库。"""
-        db_path = _sqlite_path_from_url(self.database_url)
+        db_path = _sqlite_path_from_url(database_url or self.database_url)
         if db_path is not None and not db_path.exists():
             initialize_database(db_path)
 
-    def _node_dependencies(self) -> NodeDependencies:
+    def _node_dependencies(self, *, resolved: ResolvedRuntimeConfig) -> NodeDependencies:
         return NodeDependencies(
             values={
-                "database_url": self.database_url,
-                "llm_client": self.llm_client,
-                "model_profiles": _model_profiles(self.config),
+                "database_url": resolved.database_url,
+                "llm_client": resolved.llm_client,
+                "model_profiles": resolved.model_profiles,
             }
         )
 
-    def _config_for_request(self, *, max_attempts: int) -> WorkflowConfig:
+    def _config_for_request(
+        self,
+        *,
+        max_attempts: int,
+        target_dialect: str,
+    ) -> WorkflowConfig:
         config = self.config.model_copy(deep=True)
+        config.dialect.name = target_dialect
+        config.dialect.target_dialect = target_dialect
         config.workflow.max_repair_attempts = max_attempts
         for node_name, node_config in list(config.nodes.items()):
+            raw_config = node_config.model_dump(mode="python")
+            original_config = dict(raw_config)
+            if node_config.type in {"sql_generation", "sql_validation"}:
+                raw_config["target_dialect"] = target_dialect
+            if node_config.type == "sql_validation":
+                raw_config["render_dialect"] = target_dialect
+            if node_config.type == "sql_execution":
+                raw_config["execution_dialect"] = target_dialect
             if node_config.type in {"error_reflection", "error_classification"}:
-                raw_config = node_config.model_dump(mode="python")
                 raw_config["max_repair_attempts"] = max_attempts
+            if raw_config != original_config:
                 config.nodes[node_name] = NodeConfig.model_validate(raw_config)
         return config
+
+    def _resolve_runtime_config(
+        self,
+        runtime_config_id: str | None,
+    ) -> ResolvedRuntimeConfig:
+        """解析 runtime config，并在 API service 边界转换为统一错误。"""
+        try:
+            return self.runtime_resolver.resolve(runtime_config_id)
+        except RuntimeConfigNotFoundError as exc:
+            raise ApiError(
+                status_code=404,
+                code="runtime_config_not_found",
+                message="运行时配置不存在",
+                details={"runtime_config_id": runtime_config_id},
+            ) from exc
+        except RuntimeConfigExpiredError as exc:
+            raise ApiError(
+                status_code=410,
+                code="runtime_config_expired",
+                message="运行时配置已过期",
+                details={"runtime_config_id": runtime_config_id},
+            ) from exc
+        except RuntimeSecretMissingError as exc:
+            raise ApiError(
+                status_code=400,
+                code="runtime_secret_missing",
+                message="运行时模型密钥未配置",
+                details={"runtime_config_id": runtime_config_id},
+            ) from exc
+        except RuntimeProviderUnsupportedError as exc:
+            raise ApiError(
+                status_code=400,
+                code="runtime_provider_unsupported",
+                message="不支持的运行时模型 provider",
+                details={"runtime_config_id": runtime_config_id},
+            ) from exc
 
     def _runtime_database_config(
         self,

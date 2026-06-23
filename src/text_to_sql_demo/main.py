@@ -115,11 +115,11 @@ def create_app(
         return get_service().get_run(request_id)
 
     @app.get("/api/v1/schema")
-    def get_schema() -> dict[str, Any]:
+    def get_schema(runtime_config_id: str | None = None) -> dict[str, Any]:
         """返回当前 demo 数据库 Schema 元数据。"""
-        app_service = get_service()
-        app_service.ensure_database()
-        return app_service.read_schema().model_dump(mode="python")
+        return get_service().get_schema(runtime_config_id=runtime_config_id).model_dump(
+            mode="python"
+        )
 
     @app.get("/api/v1/runtime/options")
     def get_runtime_options() -> dict[str, Any]:

@@ -12,6 +12,7 @@ class QueryRequest(BaseModel):
     target_dialect: DialectName = "sqlite"
     max_attempts: int = Field(default=3, ge=0, le=3)
     debug: bool = False
+    runtime_config_id: str | None = None
 
 
 class TranspileRequest(BaseModel):
@@ -28,6 +29,7 @@ class ExecuteSQLRequest(BaseModel):
     sql: str = Field(min_length=1)
     target_dialect: DialectName = "sqlite"
     max_rows: int = Field(default=100, ge=1, le=500)
+    runtime_config_id: str | None = None
 
 
 class ErrorBody(BaseModel):
