@@ -13,7 +13,7 @@ class RuntimeConfigExpiredError(RuntimeConfigError):
     """请求的运行时配置已经过期。"""
 
 
-class RuntimeConfigInvalidError(RuntimeConfigError, ValueError):
+class RuntimeConfigInvalidError(RuntimeConfigError):
     """运行时配置内容不满足校验规则。"""
 
 

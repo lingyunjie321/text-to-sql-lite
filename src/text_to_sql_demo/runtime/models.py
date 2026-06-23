@@ -5,7 +5,6 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, SecretStr, model_validator
 
-from text_to_sql_demo.runtime.exceptions import RuntimeConfigInvalidError
 from text_to_sql_demo.sql.dialect import DialectName
 
 RuntimeDriver = Literal["sqlite", "postgresql", "mysql"]
@@ -31,11 +30,11 @@ class RuntimeModelConfig(BaseModel):
     def validate_model_config(self) -> RuntimeModelConfig:
         """确保运行时模型具备可调用的最小信息。"""
         if not _has_text(self.provider):
-            raise RuntimeConfigInvalidError("运行时模型 provider 不能为空")
+            raise ValueError("运行时模型 provider 不能为空")
         if not _has_text(self.model):
-            raise RuntimeConfigInvalidError("运行时模型名称不能为空")
+            raise ValueError("运行时模型名称不能为空")
         if self.api_key is None and not _has_text(self.api_key_env):
-            raise RuntimeConfigInvalidError("运行时模型必须提供 api_key 或 api_key_env")
+            raise ValueError("运行时模型必须提供 api_key 或 api_key_env")
         return self
 
 
@@ -71,6 +70,13 @@ class RuntimeConfig(BaseModel):
     models: RuntimeModelRoutingConfig
     display: RuntimeConfigDisplay
 
+    @model_validator(mode="after")
+    def validate_expires_at(self) -> RuntimeConfig:
+        """运行时配置过期时间必须使用带时区的绝对时间。"""
+        if self.expires_at.tzinfo is None or self.expires_at.utcoffset() is None:
+            raise ValueError("expires_at 必须包含时区信息")
+        return self
+
 
 class RuntimePresetSelection(BaseModel):
     """从服务端预设中选择运行时配置。"""
@@ -82,7 +88,7 @@ class RuntimePresetSelection(BaseModel):
     def validate_preset(self) -> RuntimePresetSelection:
         """preset 模式必须声明可解析的 preset_id。"""
         if self.mode == "preset" and not _has_text(self.preset_id):
-            raise RuntimeConfigInvalidError("preset 模式必须提供 preset_id")
+            raise ValueError("preset 模式必须提供 preset_id")
         return self
 
 
@@ -104,7 +110,7 @@ class RuntimeCustomDatabaseInput(BaseModel):
         """按数据库类型校验必需连接字段。"""
         if self.driver == "sqlite":
             if not _has_text(self.sqlite_path):
-                raise RuntimeConfigInvalidError("自定义 sqlite 数据库必须提供 sqlite_path")
+                raise ValueError("自定义 sqlite 数据库必须提供 sqlite_path")
             return self
 
         missing_fields: list[str] = []
@@ -120,7 +126,7 @@ class RuntimeCustomDatabaseInput(BaseModel):
             missing_fields.append("password")
         if missing_fields:
             joined = ", ".join(missing_fields)
-            raise RuntimeConfigInvalidError(f"自定义服务型数据库缺少字段: {joined}")
+            raise ValueError(f"自定义服务型数据库缺少字段: {joined}")
         return self
 
 
@@ -134,10 +140,17 @@ class RuntimeDatabaseSelection(BaseModel):
     @model_validator(mode="after")
     def validate_database_selection(self) -> RuntimeDatabaseSelection:
         """确保数据库选择与 mode 匹配。"""
-        if self.mode == "preset" and not _has_text(self.preset_id):
-            raise RuntimeConfigInvalidError("数据库 preset 模式必须提供 preset_id")
-        if self.mode == "custom" and self.config is None:
-            raise RuntimeConfigInvalidError("数据库 custom 模式必须提供 config")
+        if self.mode == "preset":
+            if not _has_text(self.preset_id):
+                raise ValueError("数据库 preset 模式必须提供 preset_id")
+            if self.config is not None:
+                raise ValueError("数据库 preset 模式不能提供 config")
+            return self
+
+        if _has_text(self.preset_id):
+            raise ValueError("数据库 custom 模式不能提供 preset_id")
+        if self.config is None:
+            raise ValueError("数据库 custom 模式必须提供 config")
         return self
 
 
@@ -159,8 +172,22 @@ class RuntimeModelSelection(BaseModel):
         """确保模型选择与 mode 匹配。"""
         if self.mode == "preset":
             if not _has_text(self.preset_id):
-                raise RuntimeConfigInvalidError("模型 preset 模式必须提供 preset_id")
+                raise ValueError("模型 preset 模式必须提供 preset_id")
+            if any(
+                value is not None
+                for value in (
+                    self.provider,
+                    self.model,
+                    self.base_url,
+                    self.api_key,
+                    self.api_key_env,
+                )
+            ):
+                raise ValueError("模型 preset 模式不能提供自定义字段")
             return self
+
+        if _has_text(self.preset_id):
+            raise ValueError("模型 custom 模式不能提供 preset_id")
 
         missing_fields: list[str] = []
         if not _has_text(self.provider):
@@ -171,7 +198,7 @@ class RuntimeModelSelection(BaseModel):
             missing_fields.append("api_key 或 api_key_env")
         if missing_fields:
             joined = ", ".join(missing_fields)
-            raise RuntimeConfigInvalidError(f"自定义模型缺少字段: {joined}")
+            raise ValueError(f"自定义模型缺少字段: {joined}")
         return self
 
 
