@@ -25,6 +25,10 @@ import type {
   DialectName,
   QueryCellValue,
   QueryRunResponse,
+  RuntimeConfigCreateRequest,
+  RuntimeConfigResponse,
+  RuntimeMode,
+  RuntimeOptionsResponse,
   SchemaResponse,
   TableSchemaPayload,
   TraceEventPayload
@@ -49,7 +53,7 @@ interface QuerySession {
   raw: QueryRunResponse;
 }
 
-type SidePanel = "demo" | "debug" | "history" | null;
+type SidePanel = "runtime" | "demo" | "debug" | "history" | null;
 
 const DATA_SOURCES: DataSourceOption[] = [
   { id: "sqlite-demo", label: "SQLite Demo", dialect: "sqlite" }
@@ -94,6 +98,7 @@ export function App({ client = DEFAULT_CLIENT }: AppProps): JSX.Element {
   const [historyItems, setHistoryItems] = useState<QuerySession[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
   const [activePanel, setActivePanel] = useState<SidePanel>(null);
+  const [runtimeConfig, setRuntimeConfig] = useState<RuntimeConfigResponse | null>(null);
   const questionRef = useRef<HTMLTextAreaElement>(null);
 
   const selectedDataSource = useMemo(
@@ -139,7 +144,8 @@ export function App({ client = DEFAULT_CLIENT }: AppProps): JSX.Element {
     await runRequest(async () => {
       const response = await client.runQuery({
         question: trimmedQuestion,
-        targetDialect: selectedDataSource.dialect
+        targetDialect: selectedDataSource.dialect,
+        ...(runtimeConfig ? { runtimeConfigId: runtimeConfig.runtime_config_id } : {})
       });
       applyResponse({
         response,
@@ -158,7 +164,8 @@ export function App({ client = DEFAULT_CLIENT }: AppProps): JSX.Element {
     await runRequest(async () => {
       const response = await client.runEditedSql({
         sql,
-        targetDialect: selectedDataSource.dialect
+        targetDialect: selectedDataSource.dialect,
+        ...(runtimeConfig ? { runtimeConfigId: runtimeConfig.runtime_config_id } : {})
       });
       applyResponse({
         response,
@@ -219,6 +226,11 @@ export function App({ client = DEFAULT_CLIENT }: AppProps): JSX.Element {
 
   function closePanel(): void {
     setActivePanel(null);
+  }
+
+  async function applyRuntimeConfig(nextConfig: RuntimeConfigResponse): Promise<void> {
+    setRuntimeConfig(nextConfig);
+    setSchema(await client.getSchema(nextConfig.runtime_config_id));
   }
 
   function copySql(): void {
@@ -284,6 +296,10 @@ export function App({ client = DEFAULT_CLIENT }: AppProps): JSX.Element {
                 <button type="button" onClick={() => openPanel("demo")}>
                   <Play size={16} />
                   演示中心
+                </button>
+                <button type="button" onClick={() => openPanel("runtime")}>
+                  <Database size={16} />
+                  运行配置
                 </button>
                 <button type="button" onClick={() => openPanel("debug")}>
                   <Settings2 size={16} />
@@ -393,6 +409,31 @@ export function App({ client = DEFAULT_CLIENT }: AppProps): JSX.Element {
             closePanel();
             void runQuestion(scenarioQuestion);
           }}
+        />
+      ) : null}
+      {activePanel === "runtime" ? (
+        <RuntimeConfigPanel
+          client={client}
+          currentConfig={runtimeConfig}
+          onApply={(nextConfig) => {
+            void applyRuntimeConfig(nextConfig)
+              .then(closePanel)
+              .catch((error: unknown) => {
+                setRuntimeError(errorToUserMessage(error));
+                setTechnicalError(errorToTechnicalDetail(error));
+              });
+          }}
+          onClear={() => {
+            setRuntimeConfig(null);
+            void client
+              .getSchema()
+              .then(setSchema)
+              .catch((error: unknown) => {
+                setRuntimeError(errorToUserMessage(error));
+                setTechnicalError(errorToTechnicalDetail(error));
+              });
+          }}
+          onClose={closePanel}
         />
       ) : null}
       {activePanel === "debug" ? (
@@ -603,6 +644,385 @@ function ResultCell({ value }: { value: QueryCellValue }): JSX.Element {
     return <td className="cellNumeric">{value}</td>;
   }
   return <td>{String(value)}</td>;
+}
+
+function RuntimeConfigPanel({
+  client,
+  currentConfig,
+  onApply,
+  onClear,
+  onClose
+}: {
+  client: TextToSqlClient;
+  currentConfig: RuntimeConfigResponse | null;
+  onApply: (config: RuntimeConfigResponse) => void;
+  onClear: () => void;
+  onClose: () => void;
+}): JSX.Element {
+  const [options, setOptions] = useState<RuntimeOptionsResponse | null>(null);
+  const [databaseMode, setDatabaseMode] = useState<RuntimeMode>("preset");
+  const [databasePresetId, setDatabasePresetId] = useState("");
+  const [databaseDriver, setDatabaseDriver] = useState<"sqlite" | "postgresql" | "mysql">("sqlite");
+  const [sqlitePath, setSqlitePath] = useState("");
+  const [dbHost, setDbHost] = useState("");
+  const [dbPort, setDbPort] = useState("5432");
+  const [dbName, setDbName] = useState("");
+  const [dbUser, setDbUser] = useState("");
+  const [dbPassword, setDbPassword] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [lightForm, setLightForm] = useState<ModelFormState>(() => makeModelForm());
+  const [strongForm, setStrongForm] = useState<ModelFormState>(() => makeModelForm());
+  const [isSaving, setIsSaving] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    client
+      .getRuntimeOptions()
+      .then((nextOptions) => {
+        if (!active) {
+          return;
+        }
+        setOptions(nextOptions);
+        setDatabasePresetId(nextOptions.database_presets[0]?.id ?? "");
+        setLightForm((form) => ({ ...form, presetId: nextOptions.model_presets.light[0]?.id ?? "" }));
+        setStrongForm((form) => ({ ...form, presetId: nextOptions.model_presets.strong[0]?.id ?? "" }));
+      })
+      .catch((error: unknown) => {
+        if (active) {
+          setFormError(errorToUserMessage(error));
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [client]);
+
+  const canSave = options !== null && !isSaving && isRuntimeRequestComplete(buildRuntimeRequest());
+
+  async function saveRuntimeConfig(): Promise<void> {
+    const request = buildRuntimeRequest();
+    if (!isRuntimeRequestComplete(request)) {
+      setFormError("请完整配置数据库、轻量模型和强模型。");
+      return;
+    }
+
+    setIsSaving(true);
+    setFormError(null);
+    try {
+      onApply(await client.createRuntimeConfig(request));
+    } catch (error: unknown) {
+      setFormError(errorToUserMessage(error));
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  function buildRuntimeRequest(): RuntimeConfigCreateRequest {
+    return {
+      database:
+        databaseMode === "preset"
+          ? { mode: "preset", preset_id: databasePresetId }
+          : {
+              mode: "custom",
+              config:
+                databaseDriver === "sqlite"
+                  ? {
+                      driver: "sqlite",
+                      sqlite_path: sqlitePath.trim(),
+                      display_name: displayName.trim() || undefined,
+                      target_dialect: "sqlite"
+                    }
+                  : {
+                      driver: databaseDriver,
+                      host: dbHost.trim(),
+                      port: Number(dbPort),
+                      database_name: dbName.trim(),
+                      username: dbUser.trim(),
+                      password: dbPassword,
+                      display_name: displayName.trim() || undefined,
+                      target_dialect: databaseDriver === "postgresql" ? "postgres" : "mysql"
+                    }
+            },
+      models: {
+        light: buildModelSelection(lightForm),
+        strong: buildModelSelection(strongForm)
+      }
+    };
+  }
+
+  return (
+    <SidePanelFrame title="运行配置" onClose={onClose}>
+      <div className="runtimeStack">
+        {currentConfig ? (
+          <section className="runtimeSummary">
+            <strong>当前配置：{currentConfig.database.display_name}</strong>
+            <span>
+              light {currentConfig.models.light.provider}/{currentConfig.models.light.model}
+            </span>
+            <span>
+              strong {currentConfig.models.strong.provider}/{currentConfig.models.strong.model}
+            </span>
+            <button className="secondaryButton" type="button" onClick={onClear}>
+              清除运行配置
+            </button>
+          </section>
+        ) : null}
+
+        <section className="runtimeSection">
+          <h3>数据库</h3>
+          <div className="segmentedControl" aria-label="数据库配置模式">
+            <button
+              className={databaseMode === "preset" ? "isActive" : ""}
+              type="button"
+              onClick={() => setDatabaseMode("preset")}
+            >
+              系统预设
+            </button>
+            <button
+              className={databaseMode === "custom" ? "isActive" : ""}
+              type="button"
+              onClick={() => setDatabaseMode("custom")}
+            >
+              自定义
+            </button>
+          </div>
+
+          {databaseMode === "preset" ? (
+            <label className="formField">
+              <span>数据库预设</span>
+              <select value={databasePresetId} onChange={(event) => setDatabasePresetId(event.target.value)}>
+                {(options?.database_presets ?? []).map((preset) => (
+                  <option key={preset.id} value={preset.id}>
+                    {preset.display_name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : (
+            <div className="formGrid">
+              <label className="formField">
+                <span>数据库类型</span>
+                <select
+                  value={databaseDriver}
+                  onChange={(event) => setDatabaseDriver(event.target.value as "sqlite" | "postgresql" | "mysql")}
+                >
+                  <option value="sqlite">SQLite</option>
+                  <option value="postgresql">PostgreSQL</option>
+                  <option value="mysql">MySQL</option>
+                </select>
+              </label>
+              {databaseDriver === "sqlite" ? (
+                <label className="formField">
+                  <span>SQLite 路径</span>
+                  <input value={sqlitePath} onChange={(event) => setSqlitePath(event.target.value)} />
+                </label>
+              ) : (
+                <>
+                  <label className="formField">
+                    <span>地址</span>
+                    <input value={dbHost} onChange={(event) => setDbHost(event.target.value)} />
+                  </label>
+                  <label className="formField">
+                    <span>端口</span>
+                    <input value={dbPort} inputMode="numeric" onChange={(event) => setDbPort(event.target.value)} />
+                  </label>
+                  <label className="formField">
+                    <span>数据库名</span>
+                    <input value={dbName} onChange={(event) => setDbName(event.target.value)} />
+                  </label>
+                  <label className="formField">
+                    <span>用户名</span>
+                    <input value={dbUser} onChange={(event) => setDbUser(event.target.value)} />
+                  </label>
+                  <label className="formField">
+                    <span>密码</span>
+                    <input
+                      type="password"
+                      value={dbPassword}
+                      onChange={(event) => setDbPassword(event.target.value)}
+                    />
+                  </label>
+                </>
+              )}
+              <label className="formField">
+                <span>显示名称</span>
+                <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
+              </label>
+            </div>
+          )}
+        </section>
+
+        <ModelConfigSection
+          title="轻量模型"
+          alias="light"
+          form={lightForm}
+          presets={options?.model_presets.light ?? []}
+          onChange={setLightForm}
+        />
+        <ModelConfigSection
+          title="强模型"
+          alias="strong"
+          form={strongForm}
+          presets={options?.model_presets.strong ?? []}
+          onChange={setStrongForm}
+        />
+
+        {formError ? <div className="runtimeError">{formError}</div> : null}
+
+        <div className="panelActions">
+          <button className="secondaryButton" type="button" onClick={onClose}>
+            取消
+          </button>
+          <button
+            className="primaryButton"
+            type="button"
+            disabled={!canSave}
+            onClick={() => {
+              void saveRuntimeConfig();
+            }}
+          >
+            <Database size={16} />
+            {isSaving ? "保存中" : "保存运行配置"}
+          </button>
+        </div>
+      </div>
+    </SidePanelFrame>
+  );
+}
+
+interface ModelFormState {
+  mode: RuntimeMode;
+  presetId: string;
+  provider: string;
+  model: string;
+  baseUrl: string;
+  apiKey: string;
+  apiKeyEnv: string;
+}
+
+function makeModelForm(): ModelFormState {
+  return {
+    mode: "preset",
+    presetId: "",
+    provider: "openai_compatible",
+    model: "",
+    baseUrl: "",
+    apiKey: "",
+    apiKeyEnv: ""
+  };
+}
+
+function ModelConfigSection({
+  title,
+  alias,
+  form,
+  presets,
+  onChange
+}: {
+  title: string;
+  alias: "light" | "strong";
+  form: ModelFormState;
+  presets: RuntimeOptionsResponse["model_presets"]["light"];
+  onChange: (form: ModelFormState) => void;
+}): JSX.Element {
+  function update(patch: Partial<ModelFormState>): void {
+    onChange({ ...form, ...patch });
+  }
+
+  return (
+    <section className="runtimeSection">
+      <h3>{title}</h3>
+      <div className="segmentedControl" aria-label={`${title}配置模式`}>
+        <button className={form.mode === "preset" ? "isActive" : ""} type="button" onClick={() => update({ mode: "preset" })}>
+          系统预设
+        </button>
+        <button className={form.mode === "custom" ? "isActive" : ""} type="button" onClick={() => update({ mode: "custom" })}>
+          自定义
+        </button>
+      </div>
+
+      {form.mode === "preset" ? (
+        <label className="formField">
+          <span>{alias} 预设</span>
+          <select value={form.presetId} onChange={(event) => update({ presetId: event.target.value })}>
+            {presets.map((preset) => (
+              <option key={preset.id} value={preset.id}>
+                {preset.display_name}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : (
+        <div className="formGrid">
+          <label className="formField">
+            <span>Provider</span>
+            <select value={form.provider} onChange={(event) => update({ provider: event.target.value })}>
+              <option value="openai_compatible">OpenAI Compatible</option>
+              <option value="mock">Mock</option>
+            </select>
+          </label>
+          <label className="formField">
+            <span>模型名</span>
+            <input value={form.model} onChange={(event) => update({ model: event.target.value })} />
+          </label>
+          <label className="formField">
+            <span>Base URL</span>
+            <input value={form.baseUrl} onChange={(event) => update({ baseUrl: event.target.value })} />
+          </label>
+          <label className="formField">
+            <span>API Key</span>
+            <input type="password" value={form.apiKey} onChange={(event) => update({ apiKey: event.target.value })} />
+          </label>
+          <label className="formField">
+            <span>API Key 环境变量</span>
+            <input value={form.apiKeyEnv} onChange={(event) => update({ apiKeyEnv: event.target.value })} />
+          </label>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function buildModelSelection(form: ModelFormState): RuntimeConfigCreateRequest["models"]["light"] {
+  if (form.mode === "preset") {
+    return { mode: "preset", preset_id: form.presetId };
+  }
+  return {
+    mode: "custom",
+    provider: form.provider.trim(),
+    model: form.model.trim(),
+    base_url: form.baseUrl.trim() || undefined,
+    api_key: form.apiKey,
+    api_key_env: form.apiKeyEnv.trim() || undefined
+  };
+}
+
+function isRuntimeRequestComplete(request: RuntimeConfigCreateRequest): boolean {
+  const databaseReady =
+    request.database.mode === "preset"
+      ? Boolean(request.database.preset_id)
+      : request.database.config?.driver === "sqlite"
+        ? Boolean(request.database.config.sqlite_path?.trim())
+        : Boolean(
+            request.database.config?.host?.trim() &&
+              request.database.config.port &&
+              request.database.config.database_name?.trim() &&
+              request.database.config.username?.trim() &&
+              request.database.config.password?.trim()
+          );
+  return databaseReady && isModelSelectionComplete(request.models.light) && isModelSelectionComplete(request.models.strong);
+}
+
+function isModelSelectionComplete(selection: RuntimeConfigCreateRequest["models"]["light"]): boolean {
+  if (selection.mode === "preset") {
+    return Boolean(selection.preset_id);
+  }
+  return Boolean(
+    selection.provider?.trim() &&
+      selection.model?.trim() &&
+      (selection.api_key?.trim() || selection.api_key_env?.trim())
+  );
 }
 
 function DemoPanel({

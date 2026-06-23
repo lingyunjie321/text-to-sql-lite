@@ -112,6 +112,85 @@ export interface SchemaResponse {
   tables: Record<string, TableSchemaPayload>;
 }
 
+export interface RuntimeDatabasePreset {
+  id: string;
+  driver: "sqlite" | "postgresql" | "mysql";
+  display_name: string;
+  target_dialect: DialectName;
+  read_only: boolean;
+}
+
+export interface RuntimeModelPreset {
+  id: string;
+  provider: string;
+  model: string;
+  display_name: string;
+  requires_secret: boolean;
+}
+
+export interface RuntimeOptionsResponse {
+  database_presets: RuntimeDatabasePreset[];
+  model_presets: {
+    light: RuntimeModelPreset[];
+    strong: RuntimeModelPreset[];
+  };
+}
+
+export type RuntimeMode = "preset" | "custom";
+
+export interface RuntimeDatabaseSelection {
+  mode: RuntimeMode;
+  preset_id?: string;
+  config?: {
+    driver: "sqlite" | "postgresql" | "mysql";
+    sqlite_path?: string;
+    host?: string;
+    port?: number;
+    database_name?: string;
+    username?: string;
+    password?: string;
+    display_name?: string;
+    target_dialect?: DialectName;
+  };
+}
+
+export interface RuntimeModelSelection {
+  mode: RuntimeMode;
+  preset_id?: string;
+  provider?: string;
+  model?: string;
+  base_url?: string;
+  api_key?: string;
+  api_key_env?: string;
+  temperature?: number;
+  max_tokens?: number;
+}
+
+export interface RuntimeConfigCreateRequest {
+  database: RuntimeDatabaseSelection;
+  models: {
+    light: RuntimeModelSelection;
+    strong: RuntimeModelSelection;
+  };
+}
+
+export interface RuntimeConfigResponse {
+  runtime_config_id: string;
+  expires_at: string;
+  database: {
+    display_name: string;
+    driver: string;
+    target_dialect: DialectName;
+    table_count: number;
+    column_count: number;
+    tables: string[];
+  };
+  models: {
+    light: { provider: string; model: string };
+    strong: { provider: string; model: string };
+  };
+}
+
 export interface ApiErrorResponse {
   error: {
     code: string;

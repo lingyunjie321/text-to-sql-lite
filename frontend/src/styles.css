@@ -31,6 +31,7 @@ body {
 
 button,
 select,
+input,
 textarea {
   font: inherit;
 }
@@ -665,12 +666,15 @@ button:focus-visible {
 }
 
 .demoList,
-.debugStack {
+.debugStack,
+.runtimeStack {
   display: grid;
   gap: 14px;
 }
 
-.demoCard {
+.demoCard,
+.runtimeSection,
+.runtimeSummary {
   display: grid;
   gap: 16px;
   border: 1px solid #dce3ea;
@@ -680,10 +684,96 @@ button:focus-visible {
 }
 
 .demoCard h3,
-.debugSection h3 {
+.debugSection h3,
+.runtimeSection h3 {
   margin: 0;
   color: #111827;
   font-size: 15px;
+}
+
+.runtimeSummary {
+  gap: 8px;
+  background: #f6fbf8;
+  border-color: #d6eadf;
+}
+
+.runtimeSummary strong {
+  color: #14532d;
+  font-size: 14px;
+}
+
+.runtimeSummary span {
+  color: #4b5563;
+  font-size: 13px;
+}
+
+.segmentedControl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  border: 1px solid #dce3ea;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 4px;
+}
+
+.segmentedControl button {
+  min-height: 34px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #4b5563;
+  font-weight: 650;
+}
+
+.segmentedControl button.isActive {
+  background: #0f766e;
+  color: #ffffff;
+}
+
+.formGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.formField {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.formField span {
+  color: #4b5563;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.formField input,
+.formField select {
+  width: 100%;
+  min-width: 0;
+  height: 38px;
+  border: 1px solid #dce3ea;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #111827;
+  padding: 0 10px;
+}
+
+.formField input:focus,
+.formField select:focus {
+  outline: 3px solid rgba(13, 148, 136, 0.18);
+  outline-offset: 2px;
+}
+
+.runtimeError {
+  border: 1px solid #f1d4d4;
+  border-radius: 8px;
+  background: #fff8f7;
+  color: #991b1b;
+  padding: 12px;
+  font-size: 13px;
 }
 
 .demoCard p {
@@ -963,5 +1053,9 @@ button:focus-visible {
   .panelActions .secondaryButton,
   .demoCard .primaryButton {
     width: 100%;
+  }
+
+  .formGrid {
+    grid-template-columns: 1fr;
   }
 }

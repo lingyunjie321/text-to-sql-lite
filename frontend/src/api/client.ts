@@ -1,17 +1,28 @@
-import type { DialectName, QueryRunResponse, SchemaResponse } from "./types";
+import type {
+  DialectName,
+  QueryRunResponse,
+  RuntimeConfigCreateRequest,
+  RuntimeConfigResponse,
+  RuntimeOptionsResponse,
+  SchemaResponse
+} from "./types";
 
 export interface RunQueryRequest {
   question: string;
   targetDialect: DialectName;
+  runtimeConfigId?: string | null;
 }
 
 export interface RunEditedSqlRequest {
   sql: string;
   targetDialect: DialectName;
+  runtimeConfigId?: string | null;
 }
 
 export interface TextToSqlClient {
-  getSchema: () => Promise<SchemaResponse>;
+  getSchema: (runtimeConfigId?: string | null) => Promise<SchemaResponse>;
+  getRuntimeOptions: () => Promise<RuntimeOptionsResponse>;
+  createRuntimeConfig: (request: RuntimeConfigCreateRequest) => Promise<RuntimeConfigResponse>;
   runQuery: (request: RunQueryRequest) => Promise<QueryRunResponse>;
   runEditedSql: (request: RunEditedSqlRequest) => Promise<QueryRunResponse>;
 }
@@ -30,7 +41,17 @@ export class ApiClientError extends Error {
 
 export function createTextToSqlClient(baseUrl = ""): TextToSqlClient {
   return {
-    getSchema: () => requestJson<SchemaResponse>(`${baseUrl}/api/v1/schema`),
+    getSchema: (runtimeConfigId) => {
+      const query = runtimeConfigId ? `?runtime_config_id=${encodeURIComponent(runtimeConfigId)}` : "";
+      return requestJson<SchemaResponse>(`${baseUrl}/api/v1/schema${query}`);
+    },
+    getRuntimeOptions: () => requestJson<RuntimeOptionsResponse>(`${baseUrl}/api/v1/runtime/options`),
+    createRuntimeConfig: (request) =>
+      requestJson<RuntimeConfigResponse>(`${baseUrl}/api/v1/runtime/configs`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(request)
+      }),
     runQuery: (request) =>
       requestJson<QueryRunResponse>(`${baseUrl}/api/v1/query`, {
         method: "POST",
@@ -39,7 +60,8 @@ export function createTextToSqlClient(baseUrl = ""): TextToSqlClient {
           question: request.question,
           target_dialect: request.targetDialect,
           max_attempts: 3,
-          debug: true
+          debug: true,
+          runtime_config_id: request.runtimeConfigId ?? null
         })
       }),
     runEditedSql: (request) =>
@@ -49,7 +71,8 @@ export function createTextToSqlClient(baseUrl = ""): TextToSqlClient {
         body: JSON.stringify({
           sql: request.sql,
           target_dialect: request.targetDialect,
-          max_rows: 100
+          max_rows: 100,
+          runtime_config_id: request.runtimeConfigId ?? null
         })
       })
   };

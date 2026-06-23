@@ -14,7 +14,8 @@
 - SQL 安全链路：`SQLValidator` 基于 SQLGlot 做方言解析、单语句、只读 SELECT 和 schema 引用校验；`SQLExecutor` 只执行已校验 SQL。
 - 修复闭环：校验或执行失败后进入 `ReflectErrorNode` 和 `FixSQLNode`，最多 3 次修复尝试，失败后明确终止。
 - 可观测 Trace：每个节点执行后由 `WorkflowEngine` 记录节点名、outcome、耗时、输入输出摘要和错误摘要。
-- 前端演示：React/Vite 页面支持自然语言查询、SQL 查看/编辑、结果展示、修复提示和开发者 Trace 展开。
+- 运行时配置：前端可临时配置数据库连接和 `light/strong` 双模型路由，请求通过 `runtime_config_id` 使用对应配置。
+- 前端演示：React/Vite 页面支持自然语言查询、运行配置、SQL 查看/编辑、结果展示、修复提示和开发者 Trace 展开。
 
 ## 技术栈
 
@@ -189,6 +190,22 @@ curl http://127.0.0.1:8000/api/v1/runs/<request_id>
 ```bash
 curl http://127.0.0.1:8000/api/v1/schema
 ```
+
+创建临时运行配置：
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/runtime/configs \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "database": {"mode": "preset", "preset_id": "demo_sqlite"},
+    "models": {
+      "light": {"mode": "preset", "preset_id": "light"},
+      "strong": {"mode": "preset", "preset_id": "strong"}
+    }
+  }'
+```
+
+返回的 `runtime_config_id` 可用于 `/api/v1/query`、`/api/v1/schema` 和 `/api/v1/sql/execute`。运行时配置只保存在后端内存中，用户提交的数据库密码和模型 API Key 不会写入配置文件，也不会回传给前端。
 
 执行用户编辑后的只读 SQL：
 

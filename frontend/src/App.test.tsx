@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
 import type { TextToSqlClient } from "./api/client";
-import type { QueryRunResponse, SchemaResponse } from "./api/types";
+import type { QueryRunResponse, RuntimeConfigResponse, RuntimeOptionsResponse, SchemaResponse } from "./api/types";
 
 const schemaResponse: SchemaResponse = {
   tables: {
@@ -179,7 +179,9 @@ const failedResponse: QueryRunResponse = {
 function buildClient(responses: QueryRunResponse[] = [successResponse]): TextToSqlClient {
   const queue = [...responses];
   return {
-    getSchema: vi.fn<() => Promise<SchemaResponse>>().mockResolvedValue(schemaResponse),
+    getSchema: vi.fn<TextToSqlClient["getSchema"]>().mockResolvedValue(schemaResponse),
+    getRuntimeOptions: vi.fn<TextToSqlClient["getRuntimeOptions"]>().mockResolvedValue(runtimeOptionsResponse),
+    createRuntimeConfig: vi.fn<TextToSqlClient["createRuntimeConfig"]>().mockResolvedValue(runtimeConfigResponse),
     runQuery: vi.fn<TextToSqlClient["runQuery"]>().mockImplementation(() => {
       const next = queue.shift() ?? responses.at(-1) ?? successResponse;
       return Promise.resolve(next);
@@ -187,6 +189,55 @@ function buildClient(responses: QueryRunResponse[] = [successResponse]): TextToS
     runEditedSql: vi.fn<TextToSqlClient["runEditedSql"]>().mockResolvedValue(successResponse)
   };
 }
+
+const runtimeOptionsResponse: RuntimeOptionsResponse = {
+  database_presets: [
+    {
+      id: "demo_sqlite",
+      driver: "sqlite",
+      display_name: "demo_sqlite",
+      target_dialect: "sqlite",
+      read_only: true
+    }
+  ],
+  model_presets: {
+    light: [
+      {
+        id: "light",
+        provider: "mock",
+        model: "mock-light",
+        display_name: "mock/mock-light",
+        requires_secret: false
+      }
+    ],
+    strong: [
+      {
+        id: "strong",
+        provider: "mock",
+        model: "mock-strong",
+        display_name: "mock/mock-strong",
+        requires_secret: false
+      }
+    ]
+  }
+};
+
+const runtimeConfigResponse: RuntimeConfigResponse = {
+  runtime_config_id: "rt_frontend",
+  expires_at: "2026-06-23T12:00:00Z",
+  database: {
+    display_name: "demo_sqlite",
+    driver: "sqlite",
+    target_dialect: "sqlite",
+    table_count: 3,
+    column_count: 9,
+    tables: ["orders", "customers", "regions"]
+  },
+  models: {
+    light: { provider: "mock", model: "mock-light" },
+    strong: { provider: "mock", model: "mock-strong" }
+  }
+};
 
 describe("App", () => {
   it("以用户查询工作台作为首页，并只显示轻量 Schema 提示", async () => {
@@ -326,5 +377,57 @@ describe("App", () => {
     });
     expect(await screen.findByText("9 ms")).toBeInTheDocument();
     expect(screen.getByText("7")).toHaveClass("cellNumeric");
+  });
+
+  it("创建运行配置后，Schema、查询和手动 SQL 都使用 runtimeConfigId", async () => {
+    const user = userEvent.setup();
+    const client = buildClient([successResponse]);
+    const runtimeSchema: SchemaResponse = {
+      tables: {
+        runtime_orders: {
+          columns: {
+            id: { type: "INTEGER", nullable: false }
+          }
+        }
+      }
+    };
+    vi.mocked(client.getSchema).mockResolvedValueOnce(schemaResponse).mockResolvedValueOnce(runtimeSchema);
+
+    render(<App client={client} />);
+
+    await user.click(screen.getByRole("button", { name: "打开工作台菜单" }));
+    await user.click(screen.getByRole("button", { name: "运行配置" }));
+    const panel = screen.getByRole("dialog", { name: "运行配置" });
+    await screen.findByText("demo_sqlite");
+    await user.click(within(panel).getByRole("button", { name: "保存运行配置" }));
+
+    expect(client.createRuntimeConfig).toHaveBeenCalledWith({
+      database: { mode: "preset", preset_id: "demo_sqlite" },
+      models: {
+        light: { mode: "preset", preset_id: "light" },
+        strong: { mode: "preset", preset_id: "strong" }
+      }
+    });
+    expect(client.getSchema).toHaveBeenLastCalledWith("rt_frontend");
+    expect(await screen.findByText("runtime_orders")).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText("用自然语言描述你需要的数据"), "列出运行时订单");
+    await user.click(screen.getByRole("button", { name: "生成并验证" }));
+
+    expect(client.runQuery).toHaveBeenCalledWith({
+      question: "列出运行时订单",
+      targetDialect: "sqlite",
+      runtimeConfigId: "rt_frontend"
+    });
+
+    await screen.findByText("SQL 已生成并通过验证");
+    await user.click(screen.getByRole("button", { name: "编辑 SQL" }));
+    await user.click(screen.getByRole("button", { name: "运行修改后的 SQL" }));
+
+    expect(client.runEditedSql).toHaveBeenCalledWith({
+      sql: "SELECT id, amount, NULL AS note FROM orders ORDER BY id",
+      targetDialect: "sqlite",
+      runtimeConfigId: "rt_frontend"
+    });
   });
 });
