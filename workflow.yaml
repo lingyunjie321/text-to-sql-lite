@@ -51,7 +51,7 @@ schema:
     include_foreign_keys: true
 
 retrieval:
-  examples_path: data/examples/historical_sql.jsonl
+  examples_path: configs/examples.yaml
   top_k: 5
   strategy: lexical_overlap
 
@@ -98,7 +98,9 @@ nodes:
   sql_generation:
     type: sql_generation
     target_dialect: sqlite
-    prompt_template: generate_sql.md
+    prompt_template: configs/prompts/generate_sql.yaml
+    patterns_path: configs/dialect_patterns.yaml
+    patterns_top_k: 3
   sql_validation:
     type: sql_validation
     target_dialect: sqlite
@@ -114,7 +116,7 @@ nodes:
   reflection_fix:
     type: reflection_fix
     model_alias: strong
-    prompt_template: fix_sql.md
+    prompt_template: configs/prompts/fix_sql.yaml
   finalization:
     type: finalization
 

@@ -12,7 +12,7 @@
 - `database.default`: `demo_sqlite`
 - `models.aliases`: `light`、`strong`
 - `schema.catalog_source`: `database`
-- `retrieval.examples_path`: 配置模型中存在该字段；当前 `ExampleRetrievalNode` 没有消费顶层 retrieval 配置，实际默认读取 `configs/examples.yaml`
+- `retrieval.examples_path`: 默认 `configs/examples.yaml`，请求级配置构建时会注入到 `example_retrieval` 节点
 
 维护提示：如果修改 `workflow.yaml` 的节点名、outcome 边或最大尝试次数，必须同步更新本文档、[面试演示场景](面试演示场景.md) 和相关集成测试。
 
@@ -22,7 +22,7 @@
 | --- | --- | --- | --- | --- |
 | `schema_linking` | `SchemaLinkingNode` | `user_question`、`state.data.schema` | `schema_linking` | `success` |
 | `example_retrieval` | `ExampleRetrievalNode` | 问题、linked tables、`configs/examples.yaml` | `retrieved_examples`、`available_example_count` | `success` |
-| `sql_generation` | `GenerateSQLNode` | 问题、linked schema、examples、model profiles | `generated_sql`、`selected_model`、`prompt_summary` | `success` |
+| `sql_generation` | `GenSQLAgenticNode` | 问题、linked schema、examples、业务方言范式、model profiles | `generated_sql`、`selected_model`、`prompt_summary` | `success` |
 | `sql_validation` | `ValidateSQLNode` | `generated_sql/current_sql`、schema、dialect | `validated_sql` 或 `last_error` | `validation_success`、`validation_failed` |
 | `sql_execution` | `ExecuteSQLNode` | `validated_sql`、database URL | `execution_result` 或 `last_error` | `execution_success`、`execution_failed` |
 | `error_classification` | `ReflectErrorNode` | `last_error`、`attempt_count` | `repair_instruction` 或 `termination_reason` | `reflect_retry`、`attempts_exhausted` |
@@ -57,7 +57,7 @@
                                          │ success
                              ┌───────────▼──────────┐
                              │ sql_generation       │
-                             │ GenerateSQLNode      │
+                             │ GenSQLAgenticNode    │
                              └───────────┬──────────┘
                                          │ success
                              ┌───────────▼──────────┐
@@ -114,7 +114,7 @@ Mermaid 渲染版如下：
 flowchart TD
     Start["POST /api/v1/query\nTextToSQLApiService.run_query"] --> Schema["schema_linking\nSchemaLinkingNode"]
     Schema -- success --> Examples["example_retrieval\nExampleRetrievalNode"]
-    Examples -- success --> Generate["sql_generation\nGenerateSQLNode"]
+    Examples -- success --> Generate["sql_generation\nGenSQLAgenticNode"]
     Generate -- success --> Validate["sql_validation\nValidateSQLNode"]
 
     Validate -- validation_success --> Execute["sql_execution\nExecuteSQLNode"]
@@ -140,14 +140,14 @@ flowchart TD
 2. `WorkflowEngine.run` 从 `schema_linking` 开始执行。
 3. `SchemaLinkingNode.run` 使用 `SchemaLinker` 选出相关表列。
 4. `ExampleRetrievalNode.run` 使用 `ExampleStore` 返回 Top-K 本地 SQL 示例。
-5. `GenerateSQLNode.run` 完成复杂度分类、模型 alias 路由、prompt 构建和 Mock LLM 调用。
+5. `GenSQLAgenticNode.run` 完成复杂度分类、模型 alias 路由、业务方言范式检索、prompt 构建和 Mock LLM 调用。
 6. `ValidateSQLNode.run` 用 SQLGlot 校验语法、方言、只读 SELECT 和 schema 引用。
 7. `ExecuteSQLNode.run` 用 SQLAlchemy 执行已校验 SQLite SQL。
 8. `FinalizeNode.run` 收敛 `final_status=success`、`final_sql` 和 `final_result`。
 
 成功路径集成测试见 `tests/integration/test_api_workflow.py` 和 `tests/integration/test_demo_scenarios.py`。
 
-维护提示：如果修改 `TextToSQLApiService.run_query` 的初始化数据、`GenerateSQLNode.run` 的内部步骤或 `serialize_run` 的响应字段，需要同步更新本节和 [SQL 生成过程代码追踪](SQL生成过程代码追踪.md)。
+维护提示：如果修改 `TextToSQLApiService.run_query` 的初始化数据、`GenSQLAgenticNode.run` 的内部步骤或 `serialize_run` 的响应字段，需要同步更新本节和 [SQL 生成过程代码追踪](SQL生成过程代码追踪.md)。
 
 ## 修复路径
 
@@ -155,7 +155,7 @@ flowchart TD
 
 1. `ValidateSQLNode.run` 或 `ExecuteSQLNode.run` 返回失败 outcome，并把结构化 `SQLError` 写入 `state.data.last_error`。
 2. `ReflectErrorNode.run` 读取 `last_error`，如果 `attempt_count < max_repair_attempts`，生成 `repair_instruction`。
-3. `FixSQLNode.run` 使用 `strong` 模型 alias 和修复 prompt 调用 LLM，写入新 `generated_sql/current_sql`。
+3. `FixSQLNode.run` 使用 `strong` 模型 alias 和模板化修复 prompt 调用 LLM，写入新 `generated_sql/current_sql`。
 4. `attempt_count` 加 1，并把 old/new SQL、错误类型和原因写入 `repair_history`。
 5. 工作流回到 `sql_validation`，成功后继续执行并 finalization。
 

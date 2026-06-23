@@ -1,0 +1,31 @@
+patterns:
+  - name: sqlite_region_rank_window
+    dialect: sqlite
+    description: 地区内 Top-N 排名优先使用窗口函数，先聚合再排名。
+    pattern: |
+      SELECT *
+      FROM (
+        SELECT region, customer_name, total_amount,
+               RANK() OVER (PARTITION BY region ORDER BY total_amount DESC) AS region_rank
+        FROM region_customer_totals
+      ) ranked
+      WHERE region_rank <= 3
+    tags: ["地区", "排名", "Top-N", "窗口函数"]
+    involved_tables: ["regions", "customers", "orders"]
+  - name: sqlite_order_amount_sum
+    dialect: sqlite
+    description: 订单金额统一使用 orders.amount 聚合，不使用 total_amount 字段名。
+    pattern: |
+      SELECT SUM(o.amount) AS total_amount
+      FROM orders o
+    tags: ["订单", "金额", "聚合"]
+    involved_tables: ["orders"]
+  - name: postgres_date_bucket_month
+    dialect: postgres
+    description: PostgreSQL 按月统计使用 DATE_TRUNC('month', timestamp_column)。
+    pattern: |
+      SELECT DATE_TRUNC('month', order_date) AS month_start, SUM(amount) AS total_amount
+      FROM orders
+      GROUP BY DATE_TRUNC('month', order_date)
+    tags: ["按月", "时间", "聚合"]
+    involved_tables: ["orders"]

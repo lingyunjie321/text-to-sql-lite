@@ -330,6 +330,10 @@ class TextToSQLApiService:
         for node_name, node_config in list(config.nodes.items()):
             raw_config = node_config.model_dump(mode="python")
             original_config = dict(raw_config)
+            if node_config.type == "example_retrieval":
+                raw_config["examples_path"] = config.retrieval.examples_path
+                raw_config["top_k"] = config.retrieval.top_k
+                raw_config["strategy"] = config.retrieval.strategy
             if node_config.type in {"sql_generation", "sql_validation"}:
                 raw_config["target_dialect"] = target_dialect
             if node_config.type == "sql_validation":

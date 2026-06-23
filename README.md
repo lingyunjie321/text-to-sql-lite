@@ -1,8 +1,6 @@
 # Text-to-SQL Agent Demo
 
-面向面试展示的 Text-to-SQL Agent 演示项目。它不是生产级平台，而是用一套可读、可测、可配置的工程实现，展示从自然语言问题到 SQL 生成、校验、执行、反思修复和 Trace 观测的完整链路。
-
-当前默认使用 `MockLLMClient`，不需要 API Key；默认执行数据库是本地 SQLite demo 数据库。
+当前默认使用 `MockLLMClient`，不需要 API Key；默认执行数据库是本地 SQLite demo 数据库。也支持自定义配置openai协议的api。
 
 ## 核心能力
 
@@ -10,7 +8,7 @@
 - 注册式节点体系：`BaseNode`、`NodeRegistry`、`NodeFactory` 和 `WorkflowEngine` 解耦，新增节点不需要改 engine。
 - 状态驱动通信：节点通过 `WorkflowState.data` 共享 `schema_linking`、`retrieved_examples`、`generated_sql`、`validation_result`、`execution_result` 等中间结果。
 - Prompt 裁剪：`PromptBuilder.build` 只注入 linked schema 和 Top-K 示例，不把完整 schema 和所有样例塞进 prompt。
-- 模型路由：`GenerateSQLNode.run` 内根据 `ComplexityClassifier` 结果选择 `light` 或 `strong` 模型 alias。
+- Agentic SQL 生成：`GenSQLAgenticNode.run` 根据 `ComplexityClassifier` 结果选择 `light` 或 `strong` 模型 alias，并注入 linked schema、Top-K 示例和业务方言范式。
 - SQL 安全链路：`SQLValidator` 基于 SQLGlot 做方言解析、单语句、只读 SELECT 和 schema 引用校验；`SQLExecutor` 只执行已校验 SQL。
 - 修复闭环：校验或执行失败后进入 `ReflectErrorNode` 和 `FixSQLNode`，最多 3 次修复尝试，失败后明确终止。
 - 可观测 Trace：每个节点执行后由 `WorkflowEngine` 记录节点名、outcome、耗时、输入输出摘要和错误摘要。
@@ -117,6 +115,41 @@ nodes:
 ```
 
 完整 URL 环境变量仍然可用，并且优先级最高，例如 `DEMO_DATABASE_URL=postgresql+psycopg://user:password@host:5432/dbname?sslmode=require`。更推荐结构化字段，因为配置更清楚，密码也更容易统一放在环境变量中管理。
+
+## 扩展新的数据库类型（可选开发）
+
+如果只是接入新的 PostgreSQL/MySQL 数据库实例，通常不需要改代码，按上一节新增 `workflow.yaml` 连接即可。只有当项目要支持一种当前没有声明的数据库类型，例如 SQL Server、Oracle、DuckDB 等，才需要扩展 driver、方言和测试。
+
+扩展时不要修改 `WorkflowEngine`、`NodeFactory` 或具体节点流转逻辑。数据库类型属于配置、运行时解析、Schema 读取、SQL 校验和 SQLAlchemy 执行层的能力。
+
+建议按下面顺序修改：
+
+1. 在 `pyproject.toml` 的可选依赖中加入对应 SQLAlchemy 驱动，例如 `mssql+pyodbc`、`oracle+oracledb` 或其他官方推荐驱动。
+2. 在 `src/text_to_sql_demo/config/models.py` 扩展 `DatabaseConnectionConfig.driver` 的允许值。
+3. 在 `src/text_to_sql_demo/runtime/models.py` 扩展 `RuntimeDriver`，让运行时配置 API 可以接收新 driver。
+4. 在 `src/text_to_sql_demo/api/service.py` 的 `SERVER_DRIVER_NAMES` 中加入新 driver 到 SQLAlchemy driver name 的映射；如果新数据库需要额外 URL 参数，也要确保通过 `query` 或安全字段传入。
+5. 在 `src/text_to_sql_demo/runtime/resolver.py` 的 `DRIVER_TO_DIALECT` 中加入 driver 到 SQLGlot 方言名的映射。
+6. 在 `src/text_to_sql_demo/sql/dialect.py` 扩展 `DialectName` 和 `SUPPORTED_DIALECTS`。只有 SQLGlot 能解析并渲染该方言时，才应开放该方言。
+7. 如果前端也要展示或提交该数据库类型，同步更新 `frontend/src/api/types.ts` 里的 driver 和 dialect 联合类型。
+8. 在 `workflow.yaml` 增加一个只读连接预设，并把 `dialect`、`sql_generation`、`sql_validation`、`sql_execution` 的目标方言保持一致。
+9. 为新类型补测试：配置解析、URL 构造、运行时配置 API、Schema introspection、SQL 方言校验和只读执行路径。
+
+安全约束保持不变：数据库密码不要写进 YAML；优先使用 `password_env` 和 `.env.local`；数据库账号应只授予查询权限；日志、Trace 和 API 响应不能输出完整数据库 URL、密码、完整 SQL 或完整结果集。
+
+扩展完成后至少运行：
+
+```bash
+ruff check .
+python -m pytest
+```
+
+如果改了前端类型或页面，还需要运行：
+
+```bash
+cd frontend
+npm test
+npm run build
+```
 
 ## 真实 LLM 配置（可选）
 

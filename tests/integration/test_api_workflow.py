@@ -2,6 +2,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from text_to_sql_demo.api.service import TextToSQLApiService
 from text_to_sql_demo.llm.client import MockLLMClient
 from text_to_sql_demo.main import create_app
 
@@ -155,3 +156,17 @@ def test_api_errors_use_unified_response_shape(tmp_path: Path) -> None:
             "details": {"request_id": "missing-request-id"},
         }
     }
+
+
+def test_request_config_injects_top_level_retrieval_settings(tmp_path: Path) -> None:
+    service = TextToSQLApiService(
+        database_url=f"sqlite:///{tmp_path / 'demo.db'}",
+        llm_client=MockLLMClient(),
+    )
+
+    request_config = service._config_for_request(max_attempts=1, target_dialect="sqlite")
+    retrieval_node = request_config.nodes["example_retrieval"].model_dump(mode="python")
+
+    assert retrieval_node["examples_path"] == "configs/examples.yaml"
+    assert retrieval_node["top_k"] == 5
+    assert retrieval_node["strategy"] == "lexical_overlap"

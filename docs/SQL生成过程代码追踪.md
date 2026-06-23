@@ -88,20 +88,21 @@ def query(request: QueryRequest) -> dict[str, Any]:
 
 维护提示：如果将来接入向量检索或修改 examples 路径，README 和完成度分析必须明确说明当前能力边界变化。
 
-## 6. GenerateSQLNode.run 完成路由、Prompt 和 Mock LLM
+## 6. GenSQLAgenticNode.run 完成路由、Prompt 和 Mock LLM
 
 文件：`src/text_to_sql_demo/nodes/sql_generation.py`
 
-`GenerateSQLNode.run` 是 SQL 生成的核心节点，内部顺序为：
+`GenSQLAgenticNode.run` 是 SQL 生成的核心节点，旧名 `GenerateSQLNode` 保留为兼容别名。内部顺序为：
 
 1. 从依赖容器读取 `llm_client`。
 2. 从依赖或配置读取 `model_profiles`。
 3. 读取 `schema_linking`、`retrieved_examples` 和 `target_dialect`。
-4. 调用 `ComplexityClassifier().classify(question, linked_schema)`。
-5. 调用 `ModelRouter(profiles).route(complexity)`，simple 选择 `light`，medium/complex 选择 `strong`。
-6. 调用 `PromptBuilder().build(...)`。
-7. 调用 `llm_client.complete(...)`。
-8. 把 LLM 返回文本写入 `generated_sql`，并记录 `selected_model`、`complexity_level`、`routing_reason`、`prompt_summary`。
+4. 按配置的 `patterns_path` 检索业务方言范式，结果写入 `business_patterns`。
+5. 调用 `ComplexityClassifier().classify(question, linked_schema)`。
+6. 调用 `ModelRouter(profiles).route(complexity)`，simple 选择 `light`，medium/complex 选择 `strong`。
+7. 调用 `PromptBuilder().build(...)`，可使用 `prompt_template` 指向的 YAML 模板。
+8. 调用 `llm_client.complete(...)`。
+9. 把 LLM 返回文本写入 `generated_sql`，并记录 `selected_model`、`complexity_level`、`routing_reason`、`prompt_summary`。
 
 当前默认 `llm_client` 是 `MockLLMClient`。它按 alias、sequence 或 default response 返回确定性 SQL，并保存请求，方便测试断言。
 
@@ -111,10 +112,11 @@ def query(request: QueryRequest) -> dict[str, Any]:
 
 文件：`src/text_to_sql_demo/prompts/builder.py`
 
-`PromptBuilder.build` 只把 linked schema 和 Top-K examples 放进 prompt：
+`PromptBuilder.build` 只把 linked schema、Top-K examples 和业务方言范式放进 prompt：
 
 - `Linked schema`：只包含 `schema_linking.tables` 中的表和字段。
 - `Top-K examples`：只包含检索结果中的自然语言问题和 SQL。
+- `Business dialect patterns`：只包含按问题、方言和 linked tables 检索到的业务 SQL 范式。
 - `SQL output constraints`：要求只返回一条 SQL，不加解释和代码块，只使用 linked schema。
 
 同时输出 `summary`：
@@ -123,6 +125,7 @@ def query(request: QueryRequest) -> dict[str, Any]:
 - `linked_table_count`
 - `linked_column_count`
 - `example_count`
+- `business_pattern_count`
 - `original_schema_table_count`
 - `injected_schema_table_count`
 - `original_example_count`

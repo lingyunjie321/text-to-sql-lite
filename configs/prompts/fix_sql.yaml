@@ -1,0 +1,25 @@
+system: "你是 SQL 修复节点，只返回修复后的只读 SQL。"
+user: |
+  原始问题:
+  {{ original_question }}
+
+  当前 SQL:
+  {{ current_sql }}
+
+  错误类型:
+  {{ error_category }}
+
+  原始错误:
+  {{ original_error }}
+
+  相关 Schema:
+  {{ related_schema }}
+
+  修复历史:
+  {{ repair_history }}
+
+  修复要求:
+  - 根据错误类型和相关 Schema 定向修复。
+  - 不要改变用户问题含义。
+  - 只返回修复后的 SQL 文本。
+  - 不要使用 Markdown 代码块。

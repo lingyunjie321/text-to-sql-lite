@@ -1,5 +1,6 @@
 from text_to_sql_demo.exceptions import NodeExecutionError
 from text_to_sql_demo.llm.models import ModelProfile
+from text_to_sql_demo.prompts.templates import PromptTemplateRenderer
 from text_to_sql_demo.sql.cleaner import clean_llm_sql_output
 from text_to_sql_demo.workflow.node import BaseNode, NodeResult
 from text_to_sql_demo.workflow.registry import register_node
@@ -23,12 +24,16 @@ class FixSQLNode(BaseNode):
         if not isinstance(profiles, dict) or model_alias not in profiles:
             raise NodeExecutionError(f"FixSQLNode requires model profile alias: {model_alias}")
         profile = ModelProfile.model_validate(profiles[model_alias])
+        system_prompt, user_prompt = _build_fix_prompt(
+            instruction,
+            template_path=self.config.get("prompt_template"),
+        )
 
         response = llm_client.complete(
             model_alias=profile.alias,
             model_name=profile.model_name,
-            system_prompt="You repair SQL and return only SQL text.",
-            user_prompt=_build_fix_prompt(instruction),
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
             temperature=profile.temperature,
             max_tokens=profile.max_tokens,
         )
@@ -56,15 +61,35 @@ class FixSQLNode(BaseNode):
         )
 
 
-def _build_fix_prompt(instruction: dict) -> str:
-    return "\n".join(
-        [
-            f"Original question: {instruction['original_question']}",
-            f"Current SQL: {instruction['current_sql']}",
-            f"Error category: {instruction['error_category']}",
-            f"Original error: {instruction['original_error']}",
-            f"Relevant schema: {instruction['related_schema']}",
-            f"Repair history: {instruction['repair_history']}",
-            "Return only the corrected SQL. Do not change the user question.",
-        ]
+def _build_fix_prompt(
+    instruction: dict,
+    *,
+    template_path: str | None = None,
+) -> tuple[str, str]:
+    context = {
+        "original_question": instruction["original_question"],
+        "current_sql": instruction["current_sql"],
+        "error_category": instruction["error_category"],
+        "original_error": instruction["original_error"],
+        "related_schema": instruction["related_schema"],
+        "repair_history": instruction["repair_history"],
+        "reason": instruction["reason"],
+    }
+    if template_path:
+        rendered_prompt = PromptTemplateRenderer.from_path(template_path).render(context)
+        return rendered_prompt.system, rendered_prompt.user
+
+    return (
+        "You repair SQL and return only SQL text.",
+        "\n".join(
+            [
+                f"Original question: {instruction['original_question']}",
+                f"Current SQL: {instruction['current_sql']}",
+                f"Error category: {instruction['error_category']}",
+                f"Original error: {instruction['original_error']}",
+                f"Relevant schema: {instruction['related_schema']}",
+                f"Repair history: {instruction['repair_history']}",
+                "Return only the corrected SQL. Do not change the user question.",
+            ]
+        ),
     )
