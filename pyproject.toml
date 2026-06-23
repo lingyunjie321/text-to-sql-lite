@@ -18,6 +18,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+db = [
+  "psycopg[binary]>=3",
+  "PyMySQL>=1",
+]
 dev = [
   "pytest>=8",
   "ruff>=0.6",

@@ -17,6 +17,16 @@ database:
       url_env: DEMO_DATABASE_URL
       fallback_url: sqlite:///data/sqlite/demo.db
       read_only: true
+    demo_postgres:
+      driver: postgresql
+      host: localhost
+      port: 5432
+      database_name: text_to_sql_demo
+      username: readonly_user
+      password_env: TEXT_TO_SQL_DB_PASSWORD
+      query:
+        sslmode: prefer
+      read_only: true
 
 models:
   aliases:

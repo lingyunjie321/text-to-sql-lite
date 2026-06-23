@@ -23,9 +23,16 @@ class DialectConfig(BaseModel):
 class DatabaseConnectionConfig(BaseModel):
     """具名数据库连接配置。"""
 
-    driver: Literal["sqlite", "postgresql"] = "sqlite"
+    driver: Literal["sqlite", "postgresql", "mysql"] = "sqlite"
     url_env: str | None = None
-    fallback_url: str
+    fallback_url: str | None = None
+    host: str | None = None
+    port: int | None = Field(default=None, ge=1, le=65535)
+    database_name: str | None = None
+    username: str | None = None
+    username_env: str | None = None
+    password_env: str | None = None
+    query: dict[str, str] = Field(default_factory=dict)
     read_only: bool = True
 
 

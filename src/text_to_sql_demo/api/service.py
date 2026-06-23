@@ -5,9 +5,12 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from sqlalchemy.engine import URL
+
 from text_to_sql_demo.api.models import ExecuteSQLRequest, QueryRequest
+from text_to_sql_demo.config.env import load_env_files
 from text_to_sql_demo.config.loader import load_workflow_config
-from text_to_sql_demo.config.models import NodeConfig, WorkflowConfig
+from text_to_sql_demo.config.models import DatabaseConnectionConfig, NodeConfig, WorkflowConfig
 from text_to_sql_demo.db.init_db import initialize_database
 from text_to_sql_demo.execution.sql_executor import SQLExecutor
 from text_to_sql_demo.llm.client import LLMClient
@@ -66,6 +69,7 @@ class TextToSQLApiService:
         llm_client: LLMClient | None = None,
         run_store: InMemoryRunStore | None = None,
     ) -> None:
+        load_env_files()
         self.config = load_workflow_config(config_path)
         self.database_url = database_url or _resolve_database_url(self.config)
         self.llm_client = llm_client or build_llm_client(self.config)
@@ -281,13 +285,106 @@ def _model_profiles(config: WorkflowConfig) -> dict[str, ModelProfile]:
     }
 
 
+SERVER_DRIVER_NAMES = {
+    "postgresql": "postgresql+psycopg",
+    "mysql": "mysql+pymysql",
+}
+
+
 def _resolve_database_url(config: WorkflowConfig) -> str:
     connection = config.database.connections[config.database.default]
     if connection.url_env:
         env_value = os.getenv(connection.url_env)
         if env_value:
             return env_value
-    return connection.fallback_url
+
+    structured_url = _build_structured_database_url(connection)
+    if structured_url is not None:
+        return structured_url
+
+    if connection.fallback_url:
+        return connection.fallback_url
+
+    raise ValueError(f"数据库连接 {config.database.default} 缺少可用的连接配置")
+
+
+def _build_structured_database_url(connection: DatabaseConnectionConfig) -> str | None:
+    """根据 host/port/username/password_env 生成 SQLAlchemy 数据库 URL。"""
+    driver_name = SERVER_DRIVER_NAMES.get(connection.driver)
+    if driver_name is None:
+        return None
+
+    has_structured_fields = any(
+        value is not None
+        for value in (
+            connection.host,
+            connection.port,
+            connection.database_name,
+            connection.username,
+            connection.username_env,
+            connection.password_env,
+        )
+    )
+    if not has_structured_fields:
+        return None
+
+    host = _required_config_value(connection.host, "host")
+    port = connection.port
+    if port is None:
+        raise ValueError("服务型数据库连接缺少 port")
+
+    database_name = _required_config_value(connection.database_name, "database_name")
+    username = _resolve_value_or_env(
+        value=connection.username,
+        env_name=connection.username_env,
+        label="username",
+    )
+    password = _resolve_required_env(connection.password_env, "password_env")
+    url = URL.create(
+        drivername=driver_name,
+        username=username,
+        password=password,
+        host=host,
+        port=port,
+        database=database_name,
+        query=connection.query,
+    )
+    return url.render_as_string(hide_password=False)
+
+
+def _required_config_value(value: str | None, field_name: str) -> str:
+    if value:
+        return value
+    raise ValueError(f"服务型数据库连接缺少 {field_name}")
+
+
+def _resolve_value_or_env(
+    *,
+    value: str | None,
+    env_name: str | None,
+    label: str,
+) -> str:
+    if env_name:
+        env_value = os.getenv(env_name)
+        if env_value:
+            return env_value
+        raise ValueError(f"数据库连接 {label} 环境变量未设置: {env_name}")
+
+    if value:
+        return value
+
+    raise ValueError(f"服务型数据库连接缺少 {label}")
+
+
+def _resolve_required_env(env_name: str | None, label: str) -> str:
+    if not env_name:
+        raise ValueError(f"服务型数据库连接必须配置 {label}，避免在配置文件中明文写入密码")
+
+    env_value = os.getenv(env_name)
+    if env_value:
+        return env_value
+
+    raise ValueError(f"数据库连接 {label} 环境变量未设置: {env_name}")
 
 
 def _sqlite_path_from_url(database_url: str) -> Path | None:

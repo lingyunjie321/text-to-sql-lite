@@ -2,6 +2,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 from sqlalchemy import create_engine, inspect
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import ArgumentError
 
 
 class ColumnMetadata(BaseModel):
@@ -78,4 +80,12 @@ def read_schema_metadata(database_url: str) -> DatabaseSchemaMetadata:
     finally:
         engine.dispose()
 
-    return DatabaseSchemaMetadata(database_url=database_url, tables=tables)
+    return DatabaseSchemaMetadata(database_url=_redact_database_url(database_url), tables=tables)
+
+
+def _redact_database_url(database_url: str) -> str:
+    """返回可展示的数据库 URL，避免把密码带入 API 响应或 prompt。"""
+    try:
+        return make_url(database_url).render_as_string(hide_password=True)
+    except ArgumentError:
+        return database_url

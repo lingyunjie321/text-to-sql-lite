@@ -66,6 +66,57 @@ npm run dev
 
 Vite 已把 `/api` 代理到 `http://127.0.0.1:8000`，所以前端和后端需要同时运行。
 
+## 连接服务型数据库（可选）
+
+默认仍使用本地 SQLite。若要连接带 `host + port + username + password` 的 Postgres/MySQL，先安装数据库驱动：
+
+```bash
+pip install -e ".[dev,db]"
+```
+
+结构化连接配置写在 `workflow.yaml` 的 `database.connections` 下，密码不要明文写进 YAML，只放到本地 `.env.local` 或 shell 环境变量：
+
+```bash
+TEXT_TO_SQL_DB_PASSWORD=你的数据库密码
+```
+
+Postgres 示例：
+
+```yaml
+database:
+  default: demo_postgres
+  connections:
+    demo_postgres:
+      driver: postgresql
+      host: localhost
+      port: 5432
+      database_name: text_to_sql_demo
+      username: readonly_user
+      password_env: TEXT_TO_SQL_DB_PASSWORD
+      query:
+        sslmode: prefer
+      read_only: true
+```
+
+切换工作流执行方言时，需要让生成、校验和执行保持一致：
+
+```yaml
+dialect:
+  name: postgres
+  target_dialect: postgres
+
+nodes:
+  sql_generation:
+    target_dialect: postgres
+  sql_validation:
+    target_dialect: postgres
+    render_dialect: postgres
+  sql_execution:
+    execution_dialect: postgres
+```
+
+完整 URL 环境变量仍然可用，并且优先级最高，例如 `DEMO_DATABASE_URL=postgresql+psycopg://user:password@host:5432/dbname?sslmode=require`。更推荐结构化字段，因为配置更清楚，密码也更容易统一放在环境变量中管理。
+
 ## 真实 LLM 配置（可选）
 
 默认配置仍使用 `MockLLMClient`，不需要 API Key。若要调用 OpenAI-compatible Chat Completions API，请先创建本地 `.env.local`，该文件已被 `.gitignore` 忽略：

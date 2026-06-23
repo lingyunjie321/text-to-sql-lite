@@ -4,6 +4,8 @@ from text_to_sql_demo.workflow.node import BaseNode, NodeResult
 from text_to_sql_demo.workflow.registry import register_node
 from text_to_sql_demo.workflow.state import WorkflowState
 
+SUPPORTED_EXECUTION_DIALECTS = {"sqlite", "postgres", "mysql"}
+
 
 @register_node("sql_execution")
 class ExecuteSQLNode(BaseNode):
@@ -17,10 +19,13 @@ class ExecuteSQLNode(BaseNode):
 
         execution_dialect = str(self.config.get("execution_dialect", "sqlite"))
         validated_sql_dialect = str(state.data.get("validated_sql_dialect") or execution_dialect)
-        if execution_dialect != "sqlite" or validated_sql_dialect != "sqlite":
+        if (
+            execution_dialect not in SUPPORTED_EXECUTION_DIALECTS
+            or validated_sql_dialect != execution_dialect
+        ):
             error = SQLError(
                 category="dialect_error",
-                message="当前本地 demo 只执行 SQLite 方言 SQL",
+                message="执行方言必须受支持，并且与已校验 SQL 方言一致",
                 raw_message=(
                     f"execution_dialect={execution_dialect}, "
                     f"validated_sql_dialect={validated_sql_dialect}"
