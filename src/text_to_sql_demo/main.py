@@ -17,6 +17,8 @@ from text_to_sql_demo.observability.events import (
 )
 from text_to_sql_demo.observability.logging import configure_logging
 from text_to_sql_demo.observability.middleware import add_request_logging_middleware
+from text_to_sql_demo.runtime.models import RuntimeConfigCreateRequest
+from text_to_sql_demo.runtime.store import RuntimeConfigStore
 from text_to_sql_demo.sql.dialect import DialectRenderResult, DialectService
 
 
@@ -25,7 +27,8 @@ def create_app(
     config_path: str | Path = "workflow.yaml",
     database_url: str | None = None,
     llm_client: LLMClient | None = None,
-    ) -> FastAPI:
+    runtime_store: RuntimeConfigStore | None = None,
+) -> FastAPI:
     """创建 demo 服务的 FastAPI 应用。"""
     app = FastAPI(title="Text-to-SQL Agent Demo", version="0.1.0")
     configure_logging(load_workflow_config(config_path).logging)
@@ -42,6 +45,7 @@ def create_app(
                     config_path=config_path,
                     database_url=database_url,
                     llm_client=llm_client,
+                    runtime_store=runtime_store,
                 )
                 log_service_initialization_completed()
             except (TextToSQLDemoError, ValueError) as exc:
@@ -103,6 +107,16 @@ def create_app(
         app_service = get_service()
         app_service.ensure_database()
         return app_service.read_schema().model_dump(mode="python")
+
+    @app.get("/api/v1/runtime/options")
+    def get_runtime_options() -> dict[str, Any]:
+        """返回运行时配置可选项。"""
+        return get_service().get_runtime_options()
+
+    @app.post("/api/v1/runtime/configs")
+    def create_runtime_config(request: RuntimeConfigCreateRequest) -> dict[str, Any]:
+        """创建短生命周期运行时配置。"""
+        return get_service().create_runtime_config(request)
 
     @app.post("/api/v1/sql/execute")
     def execute_sql(request: ExecuteSQLRequest) -> dict[str, Any]:

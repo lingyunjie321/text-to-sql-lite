@@ -1,27 +1,54 @@
 from __future__ import annotations
 
 import os
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from pydantic import SecretStr
 from sqlalchemy.engine import URL
 
 from text_to_sql_demo.api.models import ExecuteSQLRequest, QueryRequest
 from text_to_sql_demo.config.env import load_env_files
 from text_to_sql_demo.config.loader import load_workflow_config
-from text_to_sql_demo.config.models import DatabaseConnectionConfig, NodeConfig, WorkflowConfig
+from text_to_sql_demo.config.models import (
+    DatabaseConnectionConfig,
+    ModelAliasConfig,
+    NodeConfig,
+    WorkflowConfig,
+)
 from text_to_sql_demo.db.init_db import initialize_database
 from text_to_sql_demo.exceptions import DatabaseConfigurationError
 from text_to_sql_demo.execution.sql_executor import SQLExecutor
-from text_to_sql_demo.llm.client import LLMClient
+from text_to_sql_demo.llm.client import LLMClient, MockLLMClient
 from text_to_sql_demo.llm.factory import build_llm_client
 from text_to_sql_demo.llm.models import ModelProfile
+from text_to_sql_demo.llm.providers import OpenAICompatibleLLMClient
 from text_to_sql_demo.observability.context import get_log_context
 from text_to_sql_demo.observability.events import (
     log_database_url_resolve_failed,
     log_database_url_resolved,
 )
+from text_to_sql_demo.runtime.models import (
+    RuntimeConfig,
+    RuntimeConfigCreateRequest,
+    RuntimeConfigDisplay,
+    RuntimeCustomDatabaseInput,
+    RuntimeDatabaseConfig,
+    RuntimeDatabaseSelection,
+    RuntimeModelConfig,
+    RuntimeModelRoutingConfig,
+    RuntimeModelSelection,
+)
+from text_to_sql_demo.runtime.resolver import (
+    DEFAULT_OPENAI_COMPATIBLE_BASE_URL,
+    MOCK_PROVIDER,
+    OPENAI_COMPATIBLE_PROVIDER,
+    driver_to_dialect,
+)
+from text_to_sql_demo.runtime.store import RuntimeConfigStore
+from text_to_sql_demo.runtime.tester import RuntimeConfigTester
 from text_to_sql_demo.schema.catalog import DatabaseSchemaMetadata, read_schema_metadata
 from text_to_sql_demo.sql.models import SQLError
 from text_to_sql_demo.sql.validator import SQLValidator
@@ -74,15 +101,104 @@ class TextToSQLApiService:
         database_url: str | None = None,
         llm_client: LLMClient | None = None,
         run_store: InMemoryRunStore | None = None,
+        runtime_store: RuntimeConfigStore | None = None,
     ) -> None:
         load_env_files()
         self.config = load_workflow_config(config_path)
         self.database_url = database_url or _resolve_database_url(self.config)
         self.llm_client = llm_client or build_llm_client(self.config)
         self.run_store = run_store or InMemoryRunStore()
+        self.runtime_store = runtime_store or RuntimeConfigStore()
+        self.runtime_tester = RuntimeConfigTester()
 
         # 导入节点包触发 register_node 装饰器，避免默认注册表为空。
         import text_to_sql_demo.nodes  # noqa: F401
+
+    def get_runtime_options(self) -> dict[str, Any]:
+        """返回前端可选择的运行时预设，所有字段均不包含真实密钥。"""
+        return {
+            "database_presets": [
+                {
+                    "id": preset_id,
+                    "driver": connection.driver,
+                    "display_name": preset_id,
+                    "target_dialect": driver_to_dialect(connection.driver),
+                    "read_only": connection.read_only,
+                }
+                for preset_id, connection in self.config.database.connections.items()
+            ],
+            "model_presets": {
+                alias: {
+                    "id": alias,
+                    "provider": model_config.provider,
+                    "model": model_config.model,
+                    "display_name": f"{model_config.provider}/{model_config.model}",
+                    "requires_secret": bool(model_config.api_key_env),
+                }
+                for alias, model_config in self.config.models.aliases.items()
+                if alias in {"light", "strong"}
+            },
+        }
+
+    def create_runtime_config(self, request: RuntimeConfigCreateRequest) -> dict[str, Any]:
+        """创建短生命周期运行时配置，并先执行数据库和模型连通性测试。"""
+        database = self._runtime_database_config(request.database)
+        models = RuntimeModelRoutingConfig(
+            light=self._runtime_model_config(request.models.light),
+            strong=self._runtime_model_config(request.models.strong),
+        )
+
+        database_summary = self.runtime_tester.test_database(
+            database.database_url.get_secret_value()
+        )
+        model_summaries = {
+            "light": self.runtime_tester.test_model(
+                client=self._runtime_model_client(models.light),
+                model_alias="light",
+                model_name=models.light.model,
+            ),
+            "strong": self.runtime_tester.test_model(
+                client=self._runtime_model_client(models.strong),
+                model_alias="strong",
+                model_name=models.strong.model,
+            ),
+        }
+        ttl_seconds = request.ttl_seconds if "ttl_seconds" in request.model_fields_set else 7200
+        expires_at = datetime.now(UTC) + timedelta(seconds=ttl_seconds)
+        runtime_config = RuntimeConfig(
+            id=f"rt_{uuid4().hex}",
+            expires_at=expires_at,
+            database=database,
+            models=models,
+            display=RuntimeConfigDisplay(
+                database=database.display_name,
+                models={
+                    "light": f"{models.light.provider}/{models.light.model}",
+                    "strong": f"{models.strong.provider}/{models.strong.model}",
+                },
+            ),
+        )
+        self.runtime_store.save(runtime_config)
+
+        return {
+            "runtime_config_id": runtime_config.id,
+            "expires_at": runtime_config.expires_at.isoformat(),
+            "database": {
+                "display_name": database.display_name,
+                "driver": database.driver,
+                "target_dialect": database.target_dialect,
+                "table_count": database_summary["table_count"],
+                "column_count": database_summary["column_count"],
+                "tables": database_summary["tables"],
+            },
+            "models": {
+                alias: {
+                    "provider": summary["provider"],
+                    "model": summary["model"],
+                }
+                for alias, summary in model_summaries.items()
+            },
+        }
 
     def run_query(self, request: QueryRequest) -> dict[str, Any]:
         """执行 Text-to-SQL 工作流并返回演示响应。"""
@@ -177,6 +293,122 @@ class TextToSQLApiService:
                 raw_config["max_repair_attempts"] = max_attempts
                 config.nodes[node_name] = NodeConfig.model_validate(raw_config)
         return config
+
+    def _runtime_database_config(
+        self,
+        selection: RuntimeDatabaseSelection,
+    ) -> RuntimeDatabaseConfig:
+        if selection.mode == "preset":
+            assert selection.preset_id is not None
+            return self._preset_database_config(selection.preset_id)
+
+        assert selection.config is not None
+        return self._custom_database_config(selection.config)
+
+    def _preset_database_config(self, preset_id: str) -> RuntimeDatabaseConfig:
+        if preset_id not in self.config.database.connections:
+            raise ApiError(
+                status_code=404,
+                code="runtime_preset_not_found",
+                message="数据库预设不存在",
+                details={"preset_id": preset_id},
+            )
+        connection = self.config.database.connections[preset_id]
+        return RuntimeDatabaseConfig(
+            driver=connection.driver,
+            database_url=SecretStr(_resolve_database_url(self.config, connection_name=preset_id)),
+            target_dialect=driver_to_dialect(connection.driver),
+            display_name=preset_id,
+        )
+
+    def _custom_database_config(
+        self,
+        config: RuntimeCustomDatabaseInput,
+    ) -> RuntimeDatabaseConfig:
+        target_dialect = config.target_dialect or driver_to_dialect(config.driver)
+        if config.driver == "sqlite":
+            assert config.sqlite_path is not None
+            return RuntimeDatabaseConfig(
+                driver="sqlite",
+                database_url=SecretStr(_sqlite_url_from_path(config.sqlite_path)),
+                target_dialect=target_dialect,
+                display_name=config.display_name or Path(config.sqlite_path).name,
+            )
+
+        assert config.host is not None
+        assert config.port is not None
+        assert config.database_name is not None
+        assert config.username is not None
+        assert config.password is not None
+        return RuntimeDatabaseConfig(
+            driver=config.driver,
+            database_url=SecretStr(
+                URL.create(
+                    drivername=SERVER_DRIVER_NAMES[config.driver],
+                    username=config.username,
+                    password=config.password.get_secret_value(),
+                    host=config.host,
+                    port=config.port,
+                    database=config.database_name,
+                ).render_as_string(hide_password=False)
+            ),
+            target_dialect=target_dialect,
+            display_name=config.display_name or config.database_name,
+        )
+
+    def _runtime_model_config(
+        self,
+        selection: RuntimeModelSelection,
+    ) -> RuntimeModelConfig:
+        if selection.mode == "preset":
+            assert selection.preset_id is not None
+            return self._preset_model_config(selection.preset_id)
+
+        assert selection.provider is not None
+        assert selection.model is not None
+        return RuntimeModelConfig(
+            provider=selection.provider,
+            model=selection.model,
+            base_url=selection.base_url,
+            api_key=selection.api_key,
+            api_key_env=selection.api_key_env,
+            temperature=selection.temperature,
+            max_tokens=selection.max_tokens,
+        )
+
+    def _preset_model_config(self, preset_id: str) -> RuntimeModelConfig:
+        model_config = self.config.models.aliases.get(preset_id)
+        if model_config is None:
+            raise ApiError(
+                status_code=404,
+                code="runtime_preset_not_found",
+                message="模型预设不存在",
+                details={"preset_id": preset_id},
+            )
+        return RuntimeModelConfig(
+            provider=model_config.provider,
+            model=model_config.model,
+            base_url=_runtime_model_base_url(model_config),
+            api_key_env=model_config.api_key_env,
+            temperature=model_config.temperature,
+            max_tokens=model_config.max_tokens,
+        )
+
+    def _runtime_model_client(self, model_config: RuntimeModelConfig) -> LLMClient:
+        if model_config.provider == MOCK_PROVIDER:
+            return MockLLMClient()
+        if model_config.provider == OPENAI_COMPATIBLE_PROVIDER:
+            api_key = _runtime_api_key(model_config)
+            return OpenAICompatibleLLMClient(
+                api_key=api_key,
+                base_url=model_config.base_url or DEFAULT_OPENAI_COMPATIBLE_BASE_URL,
+            )
+        raise ApiError(
+            status_code=400,
+            code="runtime_provider_unsupported",
+            message="不支持的运行时模型 provider",
+            details={"provider": model_config.provider},
+        )
 
 
 def serialize_run(state: WorkflowState) -> dict[str, Any]:
@@ -299,8 +531,12 @@ SERVER_DRIVER_NAMES = {
 }
 
 
-def _resolve_database_url(config: WorkflowConfig) -> str:
-    connection_name = config.database.default
+def _resolve_database_url(
+    config: WorkflowConfig,
+    *,
+    connection_name: str | None = None,
+) -> str:
+    connection_name = connection_name or config.database.default
     connection = config.database.connections[connection_name]
     try:
         if connection.url_env:
@@ -427,3 +663,39 @@ def _sqlite_path_from_url(database_url: str) -> Path | None:
     if not path.is_absolute():
         path = Path.cwd() / path
     return path
+
+
+def _sqlite_url_from_path(sqlite_path: str) -> str:
+    """把用户提交的 sqlite 路径转换为 SQLAlchemy URL。"""
+    if sqlite_path == ":memory:":
+        return "sqlite:///:memory:"
+    path = Path(sqlite_path)
+    if path.is_absolute():
+        return f"sqlite:///{path}"
+    return f"sqlite:///{sqlite_path}"
+
+
+def _runtime_api_key(model_config: RuntimeModelConfig) -> str:
+    """解析运行时模型密钥，避免把明文写入日志或响应。"""
+    if model_config.api_key is not None:
+        api_key = model_config.api_key.get_secret_value().strip()
+        if api_key:
+            return api_key
+    if model_config.api_key_env:
+        api_key = os.getenv(model_config.api_key_env, "").strip()
+        if api_key:
+            return api_key
+    raise ApiError(
+        status_code=400,
+        code="runtime_secret_missing",
+        message="运行时模型密钥未配置",
+    )
+
+
+def _runtime_model_base_url(model_config: ModelAliasConfig) -> str | None:
+    """按 workflow 显式值、环境变量顺序解析运行时模型 base_url。"""
+    if model_config.base_url:
+        return model_config.base_url
+    if model_config.base_url_env:
+        return os.getenv(model_config.base_url_env)
+    return None
