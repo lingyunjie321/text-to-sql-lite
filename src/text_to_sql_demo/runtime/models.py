@@ -15,6 +15,10 @@ def _has_text(value: str | None) -> bool:
     return value is not None and bool(value.strip())
 
 
+def _has_secret_text(value: SecretStr | None) -> bool:
+    return value is not None and bool(value.get_secret_value().strip())
+
+
 class RuntimeModelConfig(BaseModel):
     """工作流运行时实际使用的单个模型配置。"""
 
@@ -203,6 +207,8 @@ class RuntimeModelSelection(BaseModel):
             missing_fields.append("provider")
         if not _has_text(self.model):
             missing_fields.append("model")
+        if self.api_key is not None and not _has_secret_text(self.api_key):
+            missing_fields.append("非空模型密钥")
         if self.api_key is None and not _has_text(self.api_key_env):
             missing_fields.append("api_key 或 api_key_env")
         if missing_fields:
