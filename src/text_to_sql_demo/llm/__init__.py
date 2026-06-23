@@ -4,6 +4,7 @@ from text_to_sql_demo.llm.client import LLMClient, LLMRequest, LLMResponse, Mock
 from text_to_sql_demo.llm.factory import build_llm_client
 from text_to_sql_demo.llm.models import ModelProfile
 from text_to_sql_demo.llm.providers import OpenAICompatibleLLMClient
+from text_to_sql_demo.llm.routing import RoutingLLMClient
 
 __all__ = [
     "LLMClient",
@@ -12,5 +13,6 @@ __all__ = [
     "MockLLMClient",
     "ModelProfile",
     "OpenAICompatibleLLMClient",
+    "RoutingLLMClient",
     "build_llm_client",
 ]
