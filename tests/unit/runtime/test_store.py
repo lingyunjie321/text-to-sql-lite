@@ -5,7 +5,6 @@ from datetime import UTC, datetime, timedelta
 from pydantic import SecretStr
 
 from text_to_sql_demo.runtime import RuntimeConfigStore
-from text_to_sql_demo.runtime.exceptions import RuntimeConfigExpiredError
 from text_to_sql_demo.runtime.models import (
     RuntimeConfig,
     RuntimeConfigDisplay,
@@ -65,12 +64,8 @@ def test_runtime_store_hides_expired_config_and_prunes_it() -> None:
     store.save(expired_config)
     store.save(active_config)
 
-    try:
-        store.get("runtime-1", now=NOW)
-    except RuntimeConfigExpiredError:
-        pass
-    else:
-        raise AssertionError("过期配置应当通过 RuntimeConfigExpiredError 隐藏")
+    assert store.get("runtime-1", now=NOW) is None
+    assert store.get("missing", now=NOW) is None
 
     assert store.get_raw("runtime-1") == expired_config
     assert store.prune_expired(now=NOW) == 1

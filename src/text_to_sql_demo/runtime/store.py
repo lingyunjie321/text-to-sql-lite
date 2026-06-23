@@ -2,10 +2,6 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from text_to_sql_demo.runtime.exceptions import (
-    RuntimeConfigExpiredError,
-    RuntimeConfigNotFoundError,
-)
 from text_to_sql_demo.runtime.models import RuntimeConfig
 
 
@@ -19,15 +15,15 @@ class RuntimeConfigStore:
         """写入或覆盖同 id 的运行时配置。"""
         self._configs[config.id] = config
 
-    def get(self, config_id: str, now: datetime | None = None) -> RuntimeConfig:
-        """读取未过期配置；不存在或过期时抛出明确异常。"""
+    def get(self, config_id: str, now: datetime | None = None) -> RuntimeConfig | None:
+        """读取未过期配置；不存在或过期时返回 None。"""
         config = self.get_raw(config_id)
         if config is None:
-            raise RuntimeConfigNotFoundError(f"运行时配置不存在: {config_id}")
+            return None
 
         current_time = now or datetime.now(UTC)
         if config.expires_at <= current_time:
-            raise RuntimeConfigExpiredError(f"运行时配置已过期: {config_id}")
+            return None
         return config
 
     def get_raw(self, config_id: str) -> RuntimeConfig | None:
