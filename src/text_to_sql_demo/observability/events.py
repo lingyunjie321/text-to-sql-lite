@@ -123,7 +123,7 @@ def log_llm_request_completed(
     model_alias: str,
     model_name: str,
     duration_ms: int,
-    usage: dict[str, int] | None = None,
+    usage: dict[str, Any] | None = None,
 ) -> None:
     _log(
         logging.INFO,

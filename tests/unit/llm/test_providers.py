@@ -7,6 +7,9 @@ from text_to_sql_demo.llm.providers import OpenAICompatibleLLMClient
 
 
 class FakeResponse:
+    def __init__(self, *, usage: dict[str, object] | None = None) -> None:
+        self.usage = usage or {"prompt_tokens": 10, "completion_tokens": 3}
+
     def __enter__(self) -> "FakeResponse":
         return self
 
@@ -18,7 +21,7 @@ class FakeResponse:
             {
                 "id": "chatcmpl-test",
                 "choices": [{"message": {"content": "SELECT 1;"}}],
-                "usage": {"prompt_tokens": 10, "completion_tokens": 3},
+                "usage": self.usage,
             }
         ).encode("utf-8")
 
@@ -70,4 +73,38 @@ def test_openai_compatible_client_sends_chat_completion_request(
         ],
         "temperature": 0.2,
         "max_tokens": 128,
+    }
+
+
+def test_openai_compatible_client_accepts_nested_usage_details(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """兼容 OpenAI-compatible provider 返回的嵌套 usage 详情。"""
+
+    def fake_urlopen(request: Request, timeout: int) -> FakeResponse:
+        return FakeResponse(
+            usage={
+                "prompt_tokens": 1024,
+                "completion_tokens": 300,
+                "prompt_tokens_details": {"cached_tokens": 512},
+                "completion_tokens_details": {"reasoning_tokens": 128},
+            }
+        )
+
+    monkeypatch.setattr("text_to_sql_demo.llm.providers.request.urlopen", fake_urlopen)
+    client = OpenAICompatibleLLMClient(api_key="test-secret-key")
+
+    response = client.complete(
+        model_alias="strong",
+        model_name="demo-model",
+        system_prompt="system",
+        user_prompt="user",
+    )
+
+    assert response.text == "SELECT 1;"
+    assert response.usage == {
+        "prompt_tokens": 1024,
+        "completion_tokens": 300,
+        "prompt_tokens_details": {"cached_tokens": 512},
+        "completion_tokens_details": {"reasoning_tokens": 128},
     }

@@ -1,4 +1,4 @@
-from typing import Protocol
+from typing import Any, Protocol
 
 from pydantic import BaseModel
 
@@ -21,7 +21,7 @@ class LLMResponse(BaseModel):
     model_alias: str
     provider_name: str
     raw_id: str | None = None
-    usage: dict[str, int] | None = None
+    usage: dict[str, Any] | None = None
 
 
 class LLMClient(Protocol):
