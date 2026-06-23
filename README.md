@@ -1,6 +1,6 @@
 # Text-to-SQL Agent Demo
 
-当前默认使用 `MockLLMClient`，不需要 API Key；默认执行数据库是本地 SQLite demo 数据库。也支持自定义配置openai协议的api。
+当前 `workflow.yaml` 默认使用 OpenAI-compatible provider，并通过 `DEEPSEEK_API_KEY` / `DEEPSEEK_BASE_URL` 读取真实模型配置；默认执行数据库是本地 SQLite demo 数据库。测试和 `scripts/run_demo.py` 仍显式注入 `MockLLMClient`，不依赖真实付费 LLM API。
 
 ## 核心能力
 
@@ -21,8 +21,8 @@
 | --- | --- |
 | 后端 API | Python 3.11+、FastAPI、Pydantic |
 | 工作流 | 自研轻量 `WorkflowEngine`，不使用 LangGraph/LangChain |
-| SQL | SQLAlchemy、SQLGlot、SQLite，支持方言解析/转换接口 |
-| LLM | Provider 无关 `LLMClient` 协议，默认 `MockLLMClient` |
+| SQL | SQLAlchemy、SQLGlot、SQLite，支持 PostgreSQL/MySQL 方言校验、转换和只读执行路径 |
+| LLM | Provider 无关 `LLMClient` 协议，默认 workflow 使用 OpenAI-compatible adapter；测试和 demo 脚本使用 `MockLLMClient` |
 | 配置 | YAML + Pydantic config model |
 | 测试与质量 | pytest、ruff |
 | 前端 | React 18、Vite、TypeScript、Vitest |
@@ -42,6 +42,17 @@ pip install -e ".[dev]"
 ```bash
 python scripts/init_db.py --db-path data/sqlite/demo.db
 ```
+
+配置默认 LLM。当前 `workflow.yaml` 的 `light` / `strong` alias 默认读取 `DEEPSEEK_API_KEY` 和 `DEEPSEEK_BASE_URL`；如果你的服务端点不是默认 OpenAI Chat Completions endpoint，需要同时配置 base URL：
+
+```bash
+cp .env.example .env.local
+# 在 .env.local 中填入:
+# DEEPSEEK_API_KEY=你的真实_key
+# DEEPSEEK_BASE_URL=https://你的-openai-compatible-endpoint/v1/chat/completions
+```
+
+如果只是运行内置面试场景，可以直接使用 `python scripts/run_demo.py`，脚本会注入 `MockLLMClient`，不需要 API Key。
 
 启动后端 API。当前项目使用 `src/` 布局；如果没有安装 editable 包，请保留 `PYTHONPATH=src`：
 
@@ -151,35 +162,35 @@ npm test
 npm run build
 ```
 
-## 真实 LLM 配置（可选）
+## 默认 LLM 配置
 
-默认配置仍使用 `MockLLMClient`，不需要 API Key。若要调用 OpenAI-compatible Chat Completions API，请先创建本地 `.env.local`，该文件已被 `.gitignore` 忽略：
+默认配置已经使用 OpenAI-compatible Chat Completions API。请先创建本地 `.env.local`，该文件已被 `.gitignore` 忽略：
 
 ```bash
-OPENAI_API_KEY=你的真实_key
-OPENAI_BASE_URL=https://api.openai.com/v1/chat/completions
+DEEPSEEK_API_KEY=你的真实_key
+DEEPSEEK_BASE_URL=https://你的-openai-compatible-endpoint/v1/chat/completions
 ```
 
-然后把 `workflow.yaml` 中 `models.aliases` 的 provider 改为 `openai_compatible`，模型名按你的账号可用模型配置：
+当前 `workflow.yaml` 中的模型 alias 如下；模型名和环境变量名可以按你的账号可用模型调整，但业务代码只依赖 `light` / `strong` alias：
 
 ```yaml
 models:
   aliases:
     light:
       provider: openai_compatible
-      model: gpt-4.1-mini
+      model: deepseek-v4-flash
       temperature: 0.0
-      api_key_env: OPENAI_API_KEY
-      base_url_env: OPENAI_BASE_URL
+      api_key_env: DEEPSEEK_API_KEY
+      base_url_env: DEEPSEEK_BASE_URL
     strong:
       provider: openai_compatible
-      model: gpt-4.1
+      model: deepseek-v4-pro
       temperature: 0.0
-      api_key_env: OPENAI_API_KEY
-      base_url_env: OPENAI_BASE_URL
+      api_key_env: DEEPSEEK_API_KEY
+      base_url_env: DEEPSEEK_BASE_URL
 ```
 
-如果不配置 `OPENAI_BASE_URL`，项目会使用默认 OpenAI Chat Completions endpoint。测试和内置 demo 场景仍然通过 Mock LLM 执行，不会依赖真实付费 API。
+如果不配置 base URL，项目会使用默认 OpenAI Chat Completions endpoint。测试和内置 demo 场景仍然通过 Mock LLM 执行，不会依赖真实付费 API。
 
 ## Demo 场景
 
@@ -290,4 +301,6 @@ npm run build
 - [SQL 生成过程代码追踪](docs/SQL生成过程代码追踪.md)
 - [面试演示场景](docs/面试演示场景.md)
 - [完成度分析](docs/完成度分析.md)
+- [运行时数据库与模型路由配置方案](docs/运行时数据库与模型路由配置方案.md)
+- [日志系统设计](docs/日志系统设计.md)
 - [文档维护规范](docs/文档维护规范.md)

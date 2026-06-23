@@ -1,6 +1,6 @@
 # SQL 生成过程代码追踪
 
-本文档按真实调用顺序追踪一次 `POST /api/v1/query` 如何从自然语言问题走到 SQL 生成、校验、执行和 finalization。示例调用链以当前默认配置和 `MockLLMClient` 为准。
+本文档按真实调用顺序追踪一次 `POST /api/v1/query` 如何从自然语言问题走到 SQL 生成、校验、执行和 finalization。默认服务调用链以 `workflow.yaml` 的 OpenAI-compatible provider 配置为准；测试和 `scripts/run_demo.py` 会显式注入 `MockLLMClient`。
 
 ## 1. API 请求进入应用服务
 
@@ -20,6 +20,7 @@ def query(request: QueryRequest) -> dict[str, Any]:
 - `target_dialect`，默认 `sqlite`
 - `max_attempts`，范围 `0..3`
 - `debug`
+- `runtime_config_id`，可选，使用前端创建的短生命周期数据库和模型配置
 
 维护提示：如果修改请求字段或路由路径，需要同步更新 README 的 API 示例、前端 `RunQueryRequest` 和本文档。
 
@@ -30,14 +31,15 @@ def query(request: QueryRequest) -> dict[str, Any]:
 `TextToSQLApiService.run_query` 执行以下动作：
 
 1. `ensure_database()`：如果 SQLite demo 文件不存在，调用 `initialize_database` 创建。
-2. `read_schema()`：通过 `read_schema_metadata` 从数据库 introspection 获取 schema。
-3. 创建 `WorkflowState`，把 `schema`、`target_dialect`、`max_repair_attempts`、`debug` 放进 `state.data`。
-4. 创建 `WorkflowEngine`，注入：
+2. `_resolve_runtime_config()`：根据可选 `runtime_config_id` 解析本次数据库 URL、目标方言、LLM client 和模型 profiles；不传时使用 `workflow.yaml` 默认配置。
+3. `read_schema()`：通过 `read_schema_metadata` 从解析后的数据库连接 introspection 获取 schema。
+4. 创建 `WorkflowState`，把 `schema`、`target_dialect`、`runtime_config_id`、`max_repair_attempts`、`debug` 放进 `state.data`。
+5. 创建 `WorkflowEngine`，注入：
    - 当前请求覆盖后的 `WorkflowConfig`
    - `NodeFactory`
    - `NodeDependencies`，包含 `database_url`、`llm_client`、`model_profiles`
-5. 调用 `engine.run(state)`。
-6. 保存最终状态到 `InMemoryRunStore`，并用 `serialize_run` 输出 API payload。
+6. 调用 `engine.run(state)`。
+7. 保存最终状态到 `InMemoryRunStore`，并用 `serialize_run` 输出 API payload。
 
 维护提示：如果 `run_query` 增加新的 state 初始化字段，要同步更新 [工作流文档](文本转SQL工作流.md) 的状态说明和前端 API 类型。
 
@@ -88,7 +90,7 @@ def query(request: QueryRequest) -> dict[str, Any]:
 
 维护提示：如果将来接入向量检索或修改 examples 路径，README 和完成度分析必须明确说明当前能力边界变化。
 
-## 6. GenSQLAgenticNode.run 完成路由、Prompt 和 Mock LLM
+## 6. GenSQLAgenticNode.run 完成路由、Prompt 和 LLM 调用
 
 文件：`src/text_to_sql_demo/nodes/sql_generation.py`
 
@@ -104,7 +106,7 @@ def query(request: QueryRequest) -> dict[str, Any]:
 8. 调用 `llm_client.complete(...)`。
 9. 把 LLM 返回文本写入 `generated_sql`，并记录 `selected_model`、`complexity_level`、`routing_reason`、`prompt_summary`。
 
-当前默认 `llm_client` 是 `MockLLMClient`。它按 alias、sequence 或 default response 返回确定性 SQL，并保存请求，方便测试断言。
+默认服务中的 `llm_client` 由 `TextToSQLApiService` 根据 `workflow.yaml` 或 `runtime_config_id` 解析得到；当前默认 workflow 会构造 OpenAI-compatible adapter。测试和 demo 脚本显式传入 `MockLLMClient`，它按 alias、sequence 或 default response 返回确定性 SQL，并保存请求，方便测试断言。
 
 维护提示：如果将复杂度路由拆成独立节点，或新增模型 alias，必须同步更新 `workflow.yaml`、本文档、README 核心能力和 `tests/unit/routing/test_complexity_routing.py`。
 
@@ -148,11 +150,11 @@ def query(request: QueryRequest) -> dict[str, Any]:
 
 维护提示：如果新增错误类型或改变只读安全规则，需要同步更新完成度分析和修复路径说明。
 
-## 9. ExecuteSQLNode.run 执行 SQLite SQL
+## 9. ExecuteSQLNode.run 执行已校验 SQL
 
 文件：`src/text_to_sql_demo/nodes/sql_execution.py`
 
-`ExecuteSQLNode.run` 只执行 SQLite 方言 SQL。如果 `execution_dialect` 或 `validated_sql_dialect` 不是 `sqlite`，直接返回 `execution_failed`。否则调用 `SQLExecutor.execute`：
+`ExecuteSQLNode.run` 支持 `sqlite`、`postgres`、`mysql` 三类执行方言。节点会先确认 `execution_dialect` 受支持，并且与 `validated_sql_dialect` 一致；不一致时返回 `execution_failed`，避免把按一种方言校验的 SQL 直接发到另一种数据库。通过后调用 `SQLExecutor.execute`：
 
 - 使用 SQLAlchemy 创建 engine。
 - 执行已校验 SQL。
@@ -160,7 +162,7 @@ def query(request: QueryRequest) -> dict[str, Any]:
 - 返回 `columns`、`rows`、`duration_ms`。
 - 捕获 `SQLAlchemyError` 并包装为 `execution_error`。
 
-维护提示：如果将来支持 PostgreSQL 执行，不要只改 executor；还要更新配置说明、只读保障策略、测试矩阵和 README 限制。
+维护提示：如果新增数据库 driver，不要只改 executor；还要更新配置说明、driver 到 SQLGlot dialect 的映射、只读保障策略、测试矩阵和 README 限制。
 
 ## 10. Reflect/Fix 修复闭环
 

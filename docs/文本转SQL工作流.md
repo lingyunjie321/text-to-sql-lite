@@ -10,7 +10,7 @@
 - `workflow.max_steps`: `30`
 - `workflow.max_repair_attempts`: `3`
 - `database.default`: `demo_sqlite`
-- `models.aliases`: `light`、`strong`
+- `models.aliases`: `light`、`strong`，当前默认 provider 为 `openai_compatible`
 - `schema.catalog_source`: `database`
 - `retrieval.examples_path`: 默认 `configs/examples.yaml`，请求级配置构建时会注入到 `example_retrieval` 节点
 
@@ -22,7 +22,7 @@
 | --- | --- | --- | --- | --- |
 | `schema_linking` | `SchemaLinkingNode` | `user_question`、`state.data.schema` | `schema_linking` | `success` |
 | `example_retrieval` | `ExampleRetrievalNode` | 问题、linked tables、`configs/examples.yaml` | `retrieved_examples`、`available_example_count` | `success` |
-| `sql_generation` | `GenSQLAgenticNode` | 问题、linked schema、examples、业务方言范式、model profiles | `generated_sql`、`selected_model`、`prompt_summary` | `success` |
+| `sql_generation` | `GenSQLAgenticNode` | 问题、linked schema、examples、业务方言范式、LLM client、model profiles | `generated_sql`、`selected_model`、`prompt_summary` | `success` |
 | `sql_validation` | `ValidateSQLNode` | `generated_sql/current_sql`、schema、dialect | `validated_sql` 或 `last_error` | `validation_success`、`validation_failed` |
 | `sql_execution` | `ExecuteSQLNode` | `validated_sql`、database URL | `execution_result` 或 `last_error` | `execution_success`、`execution_failed` |
 | `error_classification` | `ReflectErrorNode` | `last_error`、`attempt_count` | `repair_instruction`、`repair_instruction.strategy` 或 `termination_reason` | `reflect_retry`、`attempts_exhausted` |
@@ -140,9 +140,9 @@ flowchart TD
 2. `WorkflowEngine.run` 从 `schema_linking` 开始执行。
 3. `SchemaLinkingNode.run` 使用 `SchemaLinker` 选出相关表列。
 4. `ExampleRetrievalNode.run` 使用 `ExampleStore` 返回 Top-K 本地 SQL 示例。
-5. `GenSQLAgenticNode.run` 完成复杂度分类、模型 alias 路由、业务方言范式检索、prompt 构建和 Mock LLM 调用。
+5. `GenSQLAgenticNode.run` 完成复杂度分类、模型 alias 路由、业务方言范式检索、prompt 构建和 LLM 调用；默认服务按 `workflow.yaml` 构造 OpenAI-compatible client，测试和 demo 脚本可注入 Mock。
 6. `ValidateSQLNode.run` 用 SQLGlot 校验语法、方言、只读 SELECT 和 schema 引用。
-7. `ExecuteSQLNode.run` 用 SQLAlchemy 执行已校验 SQLite SQL。
+7. `ExecuteSQLNode.run` 用 SQLAlchemy 执行已校验 SQL，执行方言必须受支持并与校验方言一致。
 8. `FinalizeNode.run` 收敛 `final_status=success`、`final_sql` 和 `final_result`。
 
 成功路径集成测试见 `tests/integration/test_api_workflow.py` 和 `tests/integration/test_demo_scenarios.py`。
