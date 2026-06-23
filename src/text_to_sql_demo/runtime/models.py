@@ -235,4 +235,4 @@ class RuntimeConfigCreateRequest(BaseModel):
 
     database: RuntimeDatabaseSelection
     models: RuntimeModelRoutingSelection
-    ttl_seconds: int = Field(default=3600, gt=0)
+    ttl_seconds: int = Field(default=7200, gt=0)

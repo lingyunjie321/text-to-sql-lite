@@ -45,6 +45,7 @@ from text_to_sql_demo.runtime.resolver import (
     DEFAULT_OPENAI_COMPATIBLE_BASE_URL,
     MOCK_PROVIDER,
     OPENAI_COMPATIBLE_PROVIDER,
+    RUNTIME_MODEL_ALIASES,
     driver_to_dialect,
 )
 from text_to_sql_demo.runtime.store import RuntimeConfigStore
@@ -127,17 +128,24 @@ class TextToSQLApiService:
                 }
                 for preset_id, connection in self.config.database.connections.items()
             ],
-            "model_presets": {
-                alias: {
+            "model_presets": self._model_preset_options(),
+        }
+
+    def _model_preset_options(self) -> dict[str, list[dict[str, Any]]]:
+        """按轻量/强力槽位返回模型预设数组，保持前端响应结构稳定。"""
+        return {
+            alias: [
+                {
                     "id": alias,
                     "provider": model_config.provider,
                     "model": model_config.model,
                     "display_name": f"{model_config.provider}/{model_config.model}",
                     "requires_secret": bool(model_config.api_key_env),
                 }
-                for alias, model_config in self.config.models.aliases.items()
-                if alias in {"light", "strong"}
-            },
+            ]
+            if (model_config := self.config.models.aliases.get(alias)) is not None
+            else []
+            for alias in RUNTIME_MODEL_ALIASES
         }
 
     def create_runtime_config(self, request: RuntimeConfigCreateRequest) -> dict[str, Any]:
@@ -163,8 +171,7 @@ class TextToSQLApiService:
                 model_name=models.strong.model,
             ),
         }
-        ttl_seconds = request.ttl_seconds if "ttl_seconds" in request.model_fields_set else 7200
-        expires_at = datetime.now(UTC) + timedelta(seconds=ttl_seconds)
+        expires_at = datetime.now(UTC) + timedelta(seconds=request.ttl_seconds)
         runtime_config = RuntimeConfig(
             id=f"rt_{uuid4().hex}",
             expires_at=expires_at,
@@ -299,10 +306,14 @@ class TextToSQLApiService:
         selection: RuntimeDatabaseSelection,
     ) -> RuntimeDatabaseConfig:
         if selection.mode == "preset":
-            assert selection.preset_id is not None
-            return self._preset_database_config(selection.preset_id)
+            return self._preset_database_config(_require_text(selection.preset_id, "preset_id"))
 
-        assert selection.config is not None
+        if selection.config is None:
+            raise ApiError(
+                status_code=400,
+                code="runtime_config_invalid",
+                message="数据库 custom 模式必须提供 config",
+            )
         return self._custom_database_config(selection.config)
 
     def _preset_database_config(self, preset_id: str) -> RuntimeDatabaseConfig:
@@ -327,33 +338,33 @@ class TextToSQLApiService:
     ) -> RuntimeDatabaseConfig:
         target_dialect = config.target_dialect or driver_to_dialect(config.driver)
         if config.driver == "sqlite":
-            assert config.sqlite_path is not None
+            sqlite_path = _require_text(config.sqlite_path, "sqlite_path")
             return RuntimeDatabaseConfig(
                 driver="sqlite",
-                database_url=SecretStr(_sqlite_url_from_path(config.sqlite_path)),
+                database_url=SecretStr(_sqlite_url_from_path(sqlite_path)),
                 target_dialect=target_dialect,
-                display_name=config.display_name or Path(config.sqlite_path).name,
+                display_name=config.display_name or Path(sqlite_path).name,
             )
 
-        assert config.host is not None
-        assert config.port is not None
-        assert config.database_name is not None
-        assert config.username is not None
-        assert config.password is not None
+        host = _require_text(config.host, "host")
+        port = _require_int(config.port, "port")
+        database_name = _require_text(config.database_name, "database_name")
+        username = _require_text(config.username, "username")
+        password = _require_secret(config.password, "password")
         return RuntimeDatabaseConfig(
             driver=config.driver,
             database_url=SecretStr(
                 URL.create(
                     drivername=SERVER_DRIVER_NAMES[config.driver],
-                    username=config.username,
-                    password=config.password.get_secret_value(),
-                    host=config.host,
-                    port=config.port,
-                    database=config.database_name,
+                    username=username,
+                    password=password.get_secret_value(),
+                    host=host,
+                    port=port,
+                    database=database_name,
                 ).render_as_string(hide_password=False)
             ),
             target_dialect=target_dialect,
-            display_name=config.display_name or config.database_name,
+            display_name=config.display_name or database_name,
         )
 
     def _runtime_model_config(
@@ -361,14 +372,13 @@ class TextToSQLApiService:
         selection: RuntimeModelSelection,
     ) -> RuntimeModelConfig:
         if selection.mode == "preset":
-            assert selection.preset_id is not None
-            return self._preset_model_config(selection.preset_id)
+            return self._preset_model_config(_require_text(selection.preset_id, "preset_id"))
 
-        assert selection.provider is not None
-        assert selection.model is not None
+        provider = _require_text(selection.provider, "provider")
+        model = _require_text(selection.model, "model")
         return RuntimeModelConfig(
-            provider=selection.provider,
-            model=selection.model,
+            provider=provider,
+            model=model,
             base_url=selection.base_url,
             api_key=selection.api_key,
             api_key_env=selection.api_key_env,
@@ -699,3 +709,39 @@ def _runtime_model_base_url(model_config: ModelAliasConfig) -> str | None:
     if model_config.base_url_env:
         return os.getenv(model_config.base_url_env)
     return None
+
+
+def _require_text(value: str | None, field_name: str) -> str:
+    """把 Pydantic 已校验字段转成非空文本，避免依赖 assert。"""
+    if value is not None and value.strip():
+        return value
+    raise ApiError(
+        status_code=400,
+        code="runtime_config_invalid",
+        message="运行时配置字段缺失",
+        details={"field": field_name},
+    )
+
+
+def _require_int(value: int | None, field_name: str) -> int:
+    """把 Pydantic 已校验字段转成整数，避免依赖 assert。"""
+    if value is not None:
+        return value
+    raise ApiError(
+        status_code=400,
+        code="runtime_config_invalid",
+        message="运行时配置字段缺失",
+        details={"field": field_name},
+    )
+
+
+def _require_secret(value: SecretStr | None, field_name: str) -> SecretStr:
+    """把 Pydantic 已校验密钥字段转成 SecretStr，避免依赖 assert。"""
+    if value is not None:
+        return value
+    raise ApiError(
+        status_code=400,
+        code="runtime_config_invalid",
+        message="运行时配置字段缺失",
+        details={"field": field_name},
+    )

@@ -17,6 +17,7 @@ from text_to_sql_demo.observability.events import (
 )
 from text_to_sql_demo.observability.logging import configure_logging
 from text_to_sql_demo.observability.middleware import add_request_logging_middleware
+from text_to_sql_demo.runtime.exceptions import RuntimeConnectionTestError
 from text_to_sql_demo.runtime.models import RuntimeConfigCreateRequest
 from text_to_sql_demo.runtime.store import RuntimeConfigStore
 from text_to_sql_demo.sql.dialect import DialectRenderResult, DialectService
@@ -83,7 +84,19 @@ def create_app(
             status_code=422,
             code="validation_error",
             message="请求参数校验失败",
-            details={"errors": exc.errors()},
+            details={"errors": _sanitize_validation_detail(exc.errors())},
+        )
+
+    @app.exception_handler(RuntimeConnectionTestError)
+    def handle_runtime_connection_error(
+        request: object,
+        exc: RuntimeConnectionTestError,
+    ) -> JSONResponse:
+        """把运行时连通性测试失败转换为稳定且脱敏的 API 响应。"""
+        return _error_response(
+            status_code=400,
+            code="runtime_connection_failed",
+            message=str(exc),
         )
 
     @app.get("/health")
@@ -164,6 +177,23 @@ def _error_response(
             }
         },
     )
+
+
+def _sanitize_validation_detail(value: object) -> object:
+    """递归移除 FastAPI/Pydantic 校验错误中的原始输入值。"""
+    if isinstance(value, dict):
+        return {
+            key: _sanitize_validation_detail(item)
+            for key, item in value.items()
+            if key != "input"
+        }
+    if isinstance(value, list):
+        return [_sanitize_validation_detail(item) for item in value]
+    if isinstance(value, tuple):
+        return [_sanitize_validation_detail(item) for item in value]
+    if value is None or isinstance(value, str | int | float | bool):
+        return value
+    return str(value)
 
 
 app = create_app()
