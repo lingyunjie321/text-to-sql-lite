@@ -91,7 +91,7 @@ def test_sqlite_custom_without_sqlite_path_fails() -> None:
 
 
 def test_custom_model_without_api_key_or_env_fails() -> None:
-    with pytest.raises(ValidationError, match="api_key 或 api_key_env"):
+    with pytest.raises(ValidationError, match="模型密钥来源"):
         RuntimeModelSelection(mode="custom", provider="mock", model="demo")
 
 

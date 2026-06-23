@@ -160,6 +160,36 @@ def test_runtime_custom_model_rejects_blank_inline_api_key_without_echoing_input
     assert "input" not in str(payload).lower()
 
 
+def test_runtime_custom_model_missing_secret_source_uses_neutral_validation_message() -> None:
+    client, _store = build_client_with_store()
+
+    response = client.post(
+        "/api/v1/runtime/configs",
+        json={
+            "database": {"mode": "preset", "preset_id": "demo_sqlite"},
+            "models": {
+                "light": {
+                    "mode": "custom",
+                    "provider": "mock",
+                    "model": "runtime-light",
+                },
+                "strong": {
+                    "mode": "custom",
+                    "provider": "mock",
+                    "model": "runtime-strong",
+                    "api_key_env": "MOCK_RUNTIME_KEY",
+                },
+            },
+        },
+    )
+
+    assert response.status_code == 422
+    payload = response.json()
+    assert payload["error"]["code"] == "validation_error"
+    assert_no_secrets(payload)
+    assert "input" not in str(payload).lower()
+
+
 def test_runtime_connection_error_uses_unified_response_without_secrets(tmp_path: Path) -> None:
     client, _store = build_client_with_store()
     missing_parent = tmp_path / "missing" / "secret-db-password.db"

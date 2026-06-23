@@ -210,7 +210,7 @@ class RuntimeModelSelection(BaseModel):
         if self.api_key is not None and not _has_secret_text(self.api_key):
             missing_fields.append("非空模型密钥")
         if self.api_key is None and not _has_text(self.api_key_env):
-            missing_fields.append("api_key 或 api_key_env")
+            missing_fields.append("模型密钥来源")
         if missing_fields:
             joined = ", ".join(missing_fields)
             raise ValueError(f"自定义模型缺少字段: {joined}")
