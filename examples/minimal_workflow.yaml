@@ -1,0 +1,30 @@
+workflow:
+  name: minimal_fake_workflow
+  start_node: first
+  max_steps: 5
+  max_repair_attempts: 0
+
+dialect:
+  name: sqlite
+
+database:
+  default: demo
+  connections:
+    demo:
+      driver: sqlite
+      fallback_url: sqlite:///data/sqlite/demo.db
+
+schema:
+  catalog_source: database
+
+nodes:
+  first:
+    type: fake_append
+  second:
+    type: fake_append
+
+edges:
+  first:
+    on_success: second
+  second:
+    terminal: true

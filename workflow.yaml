@@ -1,0 +1,101 @@
+workflow:
+  name: interview_text_to_sql_demo
+  start_node: schema_linking
+  max_steps: 30
+  max_repair_attempts: 3
+
+dialect:
+  name: sqlite
+  allow_transpile: false
+  target_dialect: sqlite
+
+database:
+  default: demo_sqlite
+  connections:
+    demo_sqlite:
+      driver: sqlite
+      url_env: DEMO_DATABASE_URL
+      fallback_url: sqlite:///data/sqlite/demo.db
+      read_only: true
+
+models:
+  aliases:
+    light:
+      provider: mock
+      model: local-light-sql
+      temperature: 0.0
+    strong:
+      provider: mock
+      model: local-strong-sql
+      temperature: 0.0
+
+schema:
+  catalog_source: database
+  linking:
+    max_tables: 6
+    max_columns_per_table: 12
+    include_foreign_keys: true
+
+retrieval:
+  examples_path: data/examples/historical_sql.jsonl
+  top_k: 5
+  strategy: lexical_overlap
+
+trace:
+  enabled: true
+  include_prompt_summary: true
+  include_sql: true
+  include_result_preview: true
+  max_result_preview_rows: 5
+
+nodes:
+  schema_linking:
+    type: schema_linking
+  example_retrieval:
+    type: example_retrieval
+  sql_generation:
+    type: sql_generation
+    target_dialect: sqlite
+    prompt_template: generate_sql.md
+  sql_validation:
+    type: sql_validation
+    target_dialect: sqlite
+    allow_transpile: false
+    render_dialect: sqlite
+    reject_write_sql: true
+  sql_execution:
+    type: sql_execution
+    execution_dialect: sqlite
+    max_rows: 100
+  error_classification:
+    type: error_classification
+  reflection_fix:
+    type: reflection_fix
+    model_alias: strong
+    prompt_template: fix_sql.md
+  finalization:
+    type: finalization
+
+edges:
+  schema_linking:
+    on_success: example_retrieval
+    on_failure: error_classification
+  example_retrieval:
+    on_success: sql_generation
+    on_failure: sql_generation
+  sql_generation:
+    on_success: sql_validation
+    on_failure: error_classification
+  sql_validation:
+    on_validation_success: sql_execution
+    on_validation_failed: error_classification
+  sql_execution:
+    on_execution_success: finalization
+    on_execution_failed: error_classification
+  error_classification:
+    on_reflect_retry: reflection_fix
+    on_attempts_exhausted: finalization
+  reflection_fix:
+    on_fix_complete: sql_validation
+  finalization:
+    terminal: true

@@ -1,0 +1,71 @@
+examples:
+  - natural_language: 统计每个地区订单金额
+    sql: |
+      SELECT r.name AS region_name, SUM(o.amount) AS total_order_amount
+      FROM regions r
+      JOIN customers c ON c.region_id = r.id
+      JOIN orders o ON o.customer_id = c.id
+      GROUP BY r.name
+      ORDER BY total_order_amount DESC;
+    dialect: sqlite
+    tags: ["地区", "订单", "金额", "聚合"]
+    involved_tables: ["regions", "customers", "orders"]
+  - natural_language: 查询每个地区的客户数量
+    sql: |
+      SELECT r.name AS region_name, COUNT(c.id) AS customer_count
+      FROM regions r
+      JOIN customers c ON c.region_id = r.id
+      GROUP BY r.name;
+    dialect: sqlite
+    tags: ["地区", "客户", "统计"]
+    involved_tables: ["regions", "customers"]
+  - natural_language: 统计每个客户的订单数量
+    sql: |
+      SELECT c.name AS customer_name, COUNT(o.id) AS order_count
+      FROM customers c
+      JOIN orders o ON o.customer_id = c.id
+      GROUP BY c.name;
+    dialect: sqlite
+    tags: ["客户", "订单", "统计"]
+    involved_tables: ["customers", "orders"]
+  - natural_language: 查询热销商品销量
+    sql: |
+      SELECT p.name AS product_name, SUM(oi.quantity) AS total_quantity
+      FROM products p
+      JOIN order_items oi ON oi.product_id = p.id
+      GROUP BY p.name
+      ORDER BY total_quantity DESC;
+    dialect: sqlite
+    tags: ["商品", "销量", "数量"]
+    involved_tables: ["products", "order_items"]
+  - natural_language: 统计各商品销售额
+    sql: |
+      SELECT p.name AS product_name, SUM(oi.line_total) AS sales_amount
+      FROM products p
+      JOIN order_items oi ON oi.product_id = p.id
+      GROUP BY p.name
+      ORDER BY sales_amount DESC;
+    dialect: sqlite
+    tags: ["商品", "金额", "销售额"]
+    involved_tables: ["products", "order_items"]
+  - natural_language: 查看最近订单
+    sql: |
+      SELECT o.id, c.name AS customer_name, o.order_date, o.status, o.amount
+      FROM orders o
+      JOIN customers c ON c.id = o.customer_id
+      ORDER BY o.order_date DESC
+      LIMIT 10;
+    dialect: sqlite
+    tags: ["订单", "客户", "最近"]
+    involved_tables: ["orders", "customers"]
+  - natural_language: 统计每个地区订单金额
+    sql: |
+      SELECT r.name AS region_name, SUM(o.amount) AS total_order_amount
+      FROM regions r
+      JOIN customers c ON c.region_id = r.id
+      JOIN orders o ON o.customer_id = c.id
+      GROUP BY r.name
+      ORDER BY total_order_amount DESC;
+    dialect: postgres
+    tags: ["地区", "订单", "金额", "聚合"]
+    involved_tables: ["regions", "customers", "orders"]

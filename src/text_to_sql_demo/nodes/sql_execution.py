@@ -1,0 +1,66 @@
+from text_to_sql_demo.execution.sql_executor import SQLExecutor
+from text_to_sql_demo.sql.models import SQLError, SQLExecutionResult
+from text_to_sql_demo.workflow.node import BaseNode, NodeResult
+from text_to_sql_demo.workflow.registry import register_node
+from text_to_sql_demo.workflow.state import WorkflowState
+
+
+@register_node("sql_execution")
+class ExecuteSQLNode(BaseNode):
+    """执行已校验 SQL 并返回结构化结果。"""
+
+    def run(self, state: WorkflowState) -> NodeResult:
+        sql = str(state.data.get("validated_sql") or state.data.get("current_sql") or "")
+        database_url = self.dependencies.get("database_url") or self.config.get("database_url")
+        if not database_url:
+            raise ValueError("ExecuteSQLNode requires database_url dependency or config")
+
+        execution_dialect = str(self.config.get("execution_dialect", "sqlite"))
+        validated_sql_dialect = str(state.data.get("validated_sql_dialect") or execution_dialect)
+        if execution_dialect != "sqlite" or validated_sql_dialect != "sqlite":
+            error = SQLError(
+                category="dialect_error",
+                message="当前本地 demo 只执行 SQLite 方言 SQL",
+                raw_message=(
+                    f"execution_dialect={execution_dialect}, "
+                    f"validated_sql_dialect={validated_sql_dialect}"
+                ),
+            )
+            payload = SQLExecutionResult(success=False, error=error).model_dump(mode="python")
+            return NodeResult(
+                outcome="execution_failed",
+                state_patch={
+                    "data": {
+                        "execution_result": payload,
+                        "last_error": error.model_dump(mode="python"),
+                        "current_sql": sql,
+                    }
+                },
+                output={"execution_result": payload},
+            )
+
+        result = SQLExecutor().execute(
+            sql=sql,
+            database_url=str(database_url),
+            max_rows=int(self.config.get("max_rows", 100)),
+        )
+        payload = result.model_dump(mode="python")
+        if result.success:
+            return NodeResult(
+                outcome="execution_success",
+                state_patch={"data": {"execution_result": payload}},
+                output={"execution_result": payload},
+            )
+
+        error_payload = result.error.model_dump(mode="python") if result.error else None
+        return NodeResult(
+            outcome="execution_failed",
+            state_patch={
+                "data": {
+                    "execution_result": payload,
+                    "last_error": error_payload,
+                    "current_sql": sql,
+                }
+            },
+            output={"execution_result": payload},
+        )

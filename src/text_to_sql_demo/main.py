@@ -1,0 +1,126 @@
+from pathlib import Path
+from typing import Any
+
+from fastapi import FastAPI, HTTPException
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+
+from text_to_sql_demo.api.models import ExecuteSQLRequest, QueryRequest, TranspileRequest
+from text_to_sql_demo.api.service import ApiError, TextToSQLApiService
+from text_to_sql_demo.llm.client import LLMClient
+from text_to_sql_demo.sql.dialect import DialectRenderResult, DialectService
+
+
+def create_app(
+    *,
+    config_path: str | Path = "workflow.yaml",
+    database_url: str | None = None,
+    llm_client: LLMClient | None = None,
+) -> FastAPI:
+    """创建 demo 服务的 FastAPI 应用。"""
+    app = FastAPI(title="Text-to-SQL Agent Demo", version="0.1.0")
+    service = TextToSQLApiService(
+        config_path=config_path,
+        database_url=database_url,
+        llm_client=llm_client,
+    )
+
+    @app.exception_handler(ApiError)
+    def handle_api_error(request: object, exc: ApiError) -> JSONResponse:
+        """把应用服务异常转换为统一 API 错误响应。"""
+        return _error_response(
+            status_code=exc.status_code,
+            code=exc.code,
+            message=exc.message,
+            details=exc.details,
+        )
+
+    @app.exception_handler(HTTPException)
+    def handle_http_error(request: object, exc: HTTPException) -> JSONResponse:
+        """把 FastAPI HTTPException 转换为统一 API 错误响应。"""
+        return _error_response(
+            status_code=exc.status_code,
+            code="http_error",
+            message=str(exc.detail),
+        )
+
+    @app.exception_handler(RequestValidationError)
+    def handle_validation_error(request: object, exc: RequestValidationError) -> JSONResponse:
+        """把请求校验错误转换为统一 API 错误响应。"""
+        return _error_response(
+            status_code=422,
+            code="validation_error",
+            message="请求参数校验失败",
+            details={"errors": exc.errors()},
+        )
+
+    @app.get("/health")
+    def health() -> dict[str, str]:
+        """返回最小可用的存活检查响应。"""
+        return {"status": "ok", "service": "text-to-sql-demo"}
+
+    @app.post("/api/v1/query")
+    def query(request: QueryRequest) -> dict[str, Any]:
+        """执行可配置 Text-to-SQL 工作流。"""
+        return service.run_query(request)
+
+    @app.get("/api/v1/runs/{request_id}")
+    def get_run(request_id: str) -> dict[str, Any]:
+        """按 request_id 查询工作流运行记录。"""
+        return service.get_run(request_id)
+
+    @app.get("/api/v1/schema")
+    def get_schema() -> dict[str, Any]:
+        """返回当前 demo 数据库 Schema 元数据。"""
+        service.ensure_database()
+        return service.read_schema().model_dump(mode="python")
+
+    @app.post("/api/v1/sql/execute")
+    def execute_sql(request: ExecuteSQLRequest) -> dict[str, Any]:
+        """执行用户修改后的只读 SQL。"""
+        return service.execute_sql(request)
+
+    @app.post("/api/v1/transpile", response_model=DialectRenderResult)
+    def transpile_v1(request: TranspileRequest) -> DialectRenderResult:
+        """转换已有 SQL 到目标方言。"""
+        return _transpile(request)
+
+    @app.post("/transpile", response_model=DialectRenderResult)
+    def transpile_legacy(request: TranspileRequest) -> DialectRenderResult:
+        """保留旧路径，兼容已有测试和示例。"""
+        return _transpile(request)
+
+    return app
+
+
+def _transpile(request: TranspileRequest) -> DialectRenderResult:
+    try:
+        return DialectService().transpile(
+            sql=request.sql,
+            source_dialect=request.source_dialect,
+            target_dialect=request.target_dialect,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def _error_response(
+    *,
+    status_code: int,
+    code: str,
+    message: str,
+    details: dict[str, Any] | None = None,
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "error": {
+                "code": code,
+                "message": message,
+                "details": details,
+            }
+        },
+    )
+
+
+app = create_app()
