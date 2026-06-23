@@ -169,15 +169,16 @@ def query(request: QueryRequest) -> dict[str, Any]:
 当 validation 或 execution 失败时，`workflow.yaml` 把流程导向 `error_classification`，实际实现类是 `ReflectErrorNode`：
 
 - 如果 `attempt_count >= max_repair_attempts`，返回 `attempts_exhausted`。
-- 否则构造 `RepairInstruction`，包含原问题、当前 SQL、错误类型、错误原文、相关 schema 和修复历史。
+- 否则根据 `SQLError.category` 构造定向 `RepairStrategy`，再生成 `RepairInstruction`，包含原问题、当前 SQL、错误类型、错误原文、相关 schema、修复历史和策略。
 
-`FixSQLNode` 读取修复指令，用 `strong` 模型 alias 调用 LLM，返回新 SQL，并追加：
+`FixSQLNode` 读取修复指令，把定向策略注入修复 prompt，用 `strong` 模型 alias 调用 LLM，返回新 SQL，并追加：
 
 - `attempt`
 - `old_sql`
 - `new_sql`
 - `error_type`
 - `reason`
+- `strategy_name`
 
 然后流程回到 `sql_validation`。
 

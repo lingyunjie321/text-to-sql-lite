@@ -1,5 +1,6 @@
 from text_to_sql_demo.observability.events import log_repair_attempted, log_repair_exhausted
 from text_to_sql_demo.sql.models import RepairInstruction, SQLError
+from text_to_sql_demo.sql.repair import strategy_for_error
 from text_to_sql_demo.workflow.node import BaseNode, NodeResult
 from text_to_sql_demo.workflow.registry import register_node
 from text_to_sql_demo.workflow.state import WorkflowState
@@ -42,6 +43,7 @@ class ReflectErrorNode(BaseNode):
             max_attempts=max_attempts,
             error_category=last_error.category,
         )
+        strategy = strategy_for_error(last_error)
         instruction = RepairInstruction(
             original_question=state.user_question,
             current_sql=str(state.data.get("current_sql") or state.data.get("generated_sql")),
@@ -49,7 +51,8 @@ class ReflectErrorNode(BaseNode):
             original_error=last_error.raw_message or last_error.message,
             related_schema=state.data.get("schema_linking") or state.data.get("schema") or {},
             repair_history=list(state.data.get("repair_history", [])),
-            reason=f"根据错误类型 {last_error.category} 修复 SQL",
+            reason=f"根据 {strategy.name} 策略修复 SQL",
+            strategy=strategy,
         )
         return NodeResult(
             outcome="reflect_retry",

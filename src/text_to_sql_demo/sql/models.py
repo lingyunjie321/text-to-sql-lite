@@ -44,6 +44,15 @@ class SQLExecutionResult(BaseModel):
     error: SQLError | None = None
 
 
+class RepairStrategy(BaseModel):
+    """按 SQL 错误类型生成的定向修复策略。"""
+
+    name: str
+    focus: str
+    instructions: list[str] = Field(default_factory=list)
+    avoid: list[str] = Field(default_factory=list)
+
+
 class RepairInstruction(BaseModel):
     """反思节点输出的结构化修复指令。"""
 
@@ -54,3 +63,4 @@ class RepairInstruction(BaseModel):
     related_schema: dict
     repair_history: list[dict[str, object]] = Field(default_factory=list)
     reason: str
+    strategy: RepairStrategy | None = None

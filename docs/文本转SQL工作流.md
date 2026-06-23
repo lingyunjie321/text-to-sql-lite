@@ -25,8 +25,8 @@
 | `sql_generation` | `GenSQLAgenticNode` | 问题、linked schema、examples、业务方言范式、model profiles | `generated_sql`、`selected_model`、`prompt_summary` | `success` |
 | `sql_validation` | `ValidateSQLNode` | `generated_sql/current_sql`、schema、dialect | `validated_sql` 或 `last_error` | `validation_success`、`validation_failed` |
 | `sql_execution` | `ExecuteSQLNode` | `validated_sql`、database URL | `execution_result` 或 `last_error` | `execution_success`、`execution_failed` |
-| `error_classification` | `ReflectErrorNode` | `last_error`、`attempt_count` | `repair_instruction` 或 `termination_reason` | `reflect_retry`、`attempts_exhausted` |
-| `reflection_fix` | `FixSQLNode` | `repair_instruction`、LLM client、model profile | 新 SQL、`repair_history`、`attempt_count` | `fix_complete` |
+| `error_classification` | `ReflectErrorNode` | `last_error`、`attempt_count` | `repair_instruction`、`repair_instruction.strategy` 或 `termination_reason` | `reflect_retry`、`attempts_exhausted` |
+| `reflection_fix` | `FixSQLNode` | `repair_instruction`、LLM client、model profile | 新 SQL、`repair_history`、`attempt_count`，历史中记录 `strategy_name` | `fix_complete` |
 | `finalization` | `FinalizeNode` | `execution_result`、错误状态 | `final_status`、`final_sql`、`final_result/final_error` | `finalize_success`、`finalize_failed` |
 
 维护提示：如果新增节点或给现有节点增加新的 outcome，需要同步更新 `workflow.yaml`、本表、plaintext/Mermaid 图和 `tests/unit/workflow/test_engine.py`。
@@ -154,9 +154,9 @@ flowchart TD
 修复路径覆盖 SQL 校验失败和执行失败：
 
 1. `ValidateSQLNode.run` 或 `ExecuteSQLNode.run` 返回失败 outcome，并把结构化 `SQLError` 写入 `state.data.last_error`。
-2. `ReflectErrorNode.run` 读取 `last_error`，如果 `attempt_count < max_repair_attempts`，生成 `repair_instruction`。
-3. `FixSQLNode.run` 使用 `strong` 模型 alias 和模板化修复 prompt 调用 LLM，写入新 `generated_sql/current_sql`。
-4. `attempt_count` 加 1，并把 old/new SQL、错误类型和原因写入 `repair_history`。
+2. `ReflectErrorNode.run` 读取 `last_error`，如果 `attempt_count < max_repair_attempts`，按错误类型生成 `RepairStrategy` 并写入 `repair_instruction`。
+3. `FixSQLNode.run` 使用 `strong` 模型 alias 和模板化修复 prompt 调用 LLM，prompt 中包含定向策略，写入新 `generated_sql/current_sql`。
+4. `attempt_count` 加 1，并把 old/new SQL、错误类型、原因和 `strategy_name` 写入 `repair_history`。
 5. 工作流回到 `sql_validation`，成功后继续执行并 finalization。
 
 当前实现没有单独的错误分类目录；`ReflectErrorNode` 同时注册为 `error_reflection` 和 `error_classification`，负责把 SQL 错误整理成修复指令。

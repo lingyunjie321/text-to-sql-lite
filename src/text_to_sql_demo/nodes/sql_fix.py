@@ -46,6 +46,9 @@ class FixSQLNode(BaseNode):
             "error_type": instruction["error_category"],
             "reason": instruction["reason"],
         }
+        strategy_name = (instruction.get("strategy") or {}).get("name")
+        if strategy_name:
+            repair_entry["strategy_name"] = strategy_name
         repair_history = [*state.data.get("repair_history", []), repair_entry]
         return NodeResult(
             outcome="fix_complete",
@@ -74,22 +77,46 @@ def _build_fix_prompt(
         "related_schema": instruction["related_schema"],
         "repair_history": instruction["repair_history"],
         "reason": instruction["reason"],
+        "strategy_block": _format_strategy_block(instruction.get("strategy")),
     }
     if template_path:
         rendered_prompt = PromptTemplateRenderer.from_path(template_path).render(context)
         return rendered_prompt.system, rendered_prompt.user
 
     return (
-        "You repair SQL and return only SQL text.",
+        "你修复 SQL，只返回修复后的只读 SQL。",
         "\n".join(
             [
-                f"Original question: {instruction['original_question']}",
-                f"Current SQL: {instruction['current_sql']}",
-                f"Error category: {instruction['error_category']}",
-                f"Original error: {instruction['original_error']}",
-                f"Relevant schema: {instruction['related_schema']}",
-                f"Repair history: {instruction['repair_history']}",
-                "Return only the corrected SQL. Do not change the user question.",
+                f"原始问题: {instruction['original_question']}",
+                f"当前 SQL: {instruction['current_sql']}",
+                f"错误类型: {instruction['error_category']}",
+                f"原始错误: {instruction['original_error']}",
+                f"相关 Schema: {instruction['related_schema']}",
+                f"修复历史: {instruction['repair_history']}",
+                "定向修复策略:",
+                _format_strategy_block(instruction.get("strategy")),
+                "只返回修复后的 SQL，不要改变用户问题含义。",
             ]
         ),
     )
+
+
+def _format_strategy_block(strategy: object) -> str:
+    """把结构化修复策略压缩成 prompt 可读文本。"""
+    if not isinstance(strategy, dict):
+        return "未提供定向策略，按错误类型和相关 Schema 保守修复。"
+
+    lines = [
+        f"- 策略: {strategy.get('name')}",
+        f"- 重点: {strategy.get('focus')}",
+    ]
+    instructions = strategy.get("instructions")
+    if isinstance(instructions, list) and instructions:
+        lines.append("- 执行:")
+        lines.extend(f"  - {item}" for item in instructions)
+
+    avoid = strategy.get("avoid")
+    if isinstance(avoid, list) and avoid:
+        lines.append("- 避免:")
+        lines.extend(f"  - {item}" for item in avoid)
+    return "\n".join(lines)

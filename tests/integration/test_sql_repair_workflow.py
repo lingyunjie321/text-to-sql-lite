@@ -158,6 +158,7 @@ def test_unknown_column_is_reflected_fixed_and_then_executes(tmp_path: Path) -> 
     assert result.data["repair_history"][0]["new_sql"] == (
         "SELECT SUM(orders.amount) AS total FROM orders"
     )
+    assert result.data["repair_history"][0]["strategy_name"] == "repair_unknown_column"
     assert [event.node_name for event in result.trace] == [
         "validate",
         "reflect",

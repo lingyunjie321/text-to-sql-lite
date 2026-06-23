@@ -10,7 +10,7 @@
 - Prompt 裁剪：`PromptBuilder.build` 只注入 linked schema 和 Top-K 示例，不把完整 schema 和所有样例塞进 prompt。
 - Agentic SQL 生成：`GenSQLAgenticNode.run` 根据 `ComplexityClassifier` 结果选择 `light` 或 `strong` 模型 alias，并注入 linked schema、Top-K 示例和业务方言范式。
 - SQL 安全链路：`SQLValidator` 基于 SQLGlot 做方言解析、单语句、只读 SELECT 和 schema 引用校验；`SQLExecutor` 只执行已校验 SQL。
-- 修复闭环：校验或执行失败后进入 `ReflectErrorNode` 和 `FixSQLNode`，最多 3 次修复尝试，失败后明确终止。
+- 修复闭环：校验或执行失败后进入 `ReflectErrorNode` 和 `FixSQLNode`，按错误类型生成定向修复策略，最多 3 次修复尝试，失败后明确终止。
 - 可观测 Trace：每个节点执行后由 `WorkflowEngine` 记录节点名、outcome、耗时、输入输出摘要和错误摘要。
 - 运行时配置：前端可临时配置数据库连接和 `light/strong` 双模型路由，请求通过 `runtime_config_id` 使用对应配置。
 - 前端演示：React/Vite 页面支持自然语言查询、运行配置、SQL 查看/编辑、结果展示、修复提示和开发者 Trace 展开。
