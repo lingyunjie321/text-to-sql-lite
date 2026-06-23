@@ -14,3 +14,4 @@ frontend/dist/
 frontend/coverage/
 frontend/.vite/
 frontend/*.tsbuildinfo
+*.egg-info/

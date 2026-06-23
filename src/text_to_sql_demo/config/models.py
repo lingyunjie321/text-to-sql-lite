@@ -42,6 +42,11 @@ class ModelAliasConfig(BaseModel):
     provider: str
     model: str
     temperature: float = 0.0
+    max_tokens: int | None = Field(default=None, gt=0)
+    api_key_env: str | None = None
+    base_url: str | None = None
+    base_url_env: str | None = None
+    timeout_seconds: int = Field(default=30, gt=0)
 
 
 class ModelsConfig(BaseModel):

@@ -10,7 +10,8 @@ from text_to_sql_demo.config.loader import load_workflow_config
 from text_to_sql_demo.config.models import NodeConfig, WorkflowConfig
 from text_to_sql_demo.db.init_db import initialize_database
 from text_to_sql_demo.execution.sql_executor import SQLExecutor
-from text_to_sql_demo.llm.client import LLMClient, MockLLMClient
+from text_to_sql_demo.llm.client import LLMClient
+from text_to_sql_demo.llm.factory import build_llm_client
 from text_to_sql_demo.llm.models import ModelProfile
 from text_to_sql_demo.schema.catalog import DatabaseSchemaMetadata, read_schema_metadata
 from text_to_sql_demo.sql.models import SQLError
@@ -67,7 +68,7 @@ class TextToSQLApiService:
     ) -> None:
         self.config = load_workflow_config(config_path)
         self.database_url = database_url or _resolve_database_url(self.config)
-        self.llm_client = llm_client or MockLLMClient()
+        self.llm_client = llm_client or build_llm_client(self.config)
         self.run_store = run_store or InMemoryRunStore()
 
         # 导入节点包触发 register_node 装饰器，避免默认注册表为空。
@@ -274,6 +275,7 @@ def _model_profiles(config: WorkflowConfig) -> dict[str, ModelProfile]:
             provider=model_config.provider,
             model_name=model_config.model,
             temperature=model_config.temperature,
+            max_tokens=model_config.max_tokens,
         )
         for alias, model_config in config.models.aliases.items()
     }

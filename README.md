@@ -66,6 +66,36 @@ npm run dev
 
 Vite 已把 `/api` 代理到 `http://127.0.0.1:8000`，所以前端和后端需要同时运行。
 
+## 真实 LLM 配置（可选）
+
+默认配置仍使用 `MockLLMClient`，不需要 API Key。若要调用 OpenAI-compatible Chat Completions API，请先创建本地 `.env.local`，该文件已被 `.gitignore` 忽略：
+
+```bash
+OPENAI_API_KEY=你的真实_key
+OPENAI_BASE_URL=https://api.openai.com/v1/chat/completions
+```
+
+然后把 `workflow.yaml` 中 `models.aliases` 的 provider 改为 `openai_compatible`，模型名按你的账号可用模型配置：
+
+```yaml
+models:
+  aliases:
+    light:
+      provider: openai_compatible
+      model: gpt-4.1-mini
+      temperature: 0.0
+      api_key_env: OPENAI_API_KEY
+      base_url_env: OPENAI_BASE_URL
+    strong:
+      provider: openai_compatible
+      model: gpt-4.1
+      temperature: 0.0
+      api_key_env: OPENAI_API_KEY
+      base_url_env: OPENAI_BASE_URL
+```
+
+如果不配置 `OPENAI_BASE_URL`，项目会使用默认 OpenAI Chat Completions endpoint。测试和内置 demo 场景仍然通过 Mock LLM 执行，不会依赖真实付费 API。
+
 ## Demo 场景
 
 运行三条内置面试场景：

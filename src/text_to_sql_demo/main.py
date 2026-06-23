@@ -19,11 +19,25 @@ def create_app(
 ) -> FastAPI:
     """创建 demo 服务的 FastAPI 应用。"""
     app = FastAPI(title="Text-to-SQL Agent Demo", version="0.1.0")
-    service = TextToSQLApiService(
-        config_path=config_path,
-        database_url=database_url,
-        llm_client=llm_client,
-    )
+    service: TextToSQLApiService | None = None
+
+    def get_service() -> TextToSQLApiService:
+        """按需创建应用服务，避免 import 阶段读取真实 LLM 凭据。"""
+        nonlocal service
+        if service is None:
+            try:
+                service = TextToSQLApiService(
+                    config_path=config_path,
+                    database_url=database_url,
+                    llm_client=llm_client,
+                )
+            except ValueError as exc:
+                raise ApiError(
+                    status_code=500,
+                    code="service_config_error",
+                    message=str(exc),
+                ) from exc
+        return service
 
     @app.exception_handler(ApiError)
     def handle_api_error(request: object, exc: ApiError) -> JSONResponse:
@@ -62,23 +76,24 @@ def create_app(
     @app.post("/api/v1/query")
     def query(request: QueryRequest) -> dict[str, Any]:
         """执行可配置 Text-to-SQL 工作流。"""
-        return service.run_query(request)
+        return get_service().run_query(request)
 
     @app.get("/api/v1/runs/{request_id}")
     def get_run(request_id: str) -> dict[str, Any]:
         """按 request_id 查询工作流运行记录。"""
-        return service.get_run(request_id)
+        return get_service().get_run(request_id)
 
     @app.get("/api/v1/schema")
     def get_schema() -> dict[str, Any]:
         """返回当前 demo 数据库 Schema 元数据。"""
-        service.ensure_database()
-        return service.read_schema().model_dump(mode="python")
+        app_service = get_service()
+        app_service.ensure_database()
+        return app_service.read_schema().model_dump(mode="python")
 
     @app.post("/api/v1/sql/execute")
     def execute_sql(request: ExecuteSQLRequest) -> dict[str, Any]:
         """执行用户修改后的只读 SQL。"""
-        return service.execute_sql(request)
+        return get_service().execute_sql(request)
 
     @app.post("/api/v1/transpile", response_model=DialectRenderResult)
     def transpile_v1(request: TranspileRequest) -> DialectRenderResult:
