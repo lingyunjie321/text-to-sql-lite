@@ -1,5 +1,6 @@
 from text_to_sql_demo.exceptions import NodeExecutionError
 from text_to_sql_demo.llm.models import ModelProfile
+from text_to_sql_demo.sql.cleaner import clean_llm_sql_output
 from text_to_sql_demo.workflow.node import BaseNode, NodeResult
 from text_to_sql_demo.workflow.registry import register_node
 from text_to_sql_demo.workflow.state import WorkflowState
@@ -31,7 +32,7 @@ class FixSQLNode(BaseNode):
             temperature=profile.temperature,
             max_tokens=profile.max_tokens,
         )
-        new_sql = response.text.strip()
+        new_sql = clean_llm_sql_output(response.text)
         attempt_count = int(state.data.get("attempt_count", 0)) + 1
         repair_entry = {
             "attempt": attempt_count,

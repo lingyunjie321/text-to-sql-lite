@@ -2,6 +2,7 @@ from text_to_sql_demo.exceptions import NodeExecutionError
 from text_to_sql_demo.llm.models import ModelProfile
 from text_to_sql_demo.prompts.builder import PromptBuilder
 from text_to_sql_demo.routing.complexity import ComplexityClassifier, ModelRouter
+from text_to_sql_demo.sql.cleaner import clean_llm_sql_output
 from text_to_sql_demo.workflow.node import BaseNode, NodeResult
 from text_to_sql_demo.workflow.registry import register_node
 from text_to_sql_demo.workflow.state import WorkflowState
@@ -43,7 +44,7 @@ class GenerateSQLNode(BaseNode):
             temperature=selected_profile.temperature,
             max_tokens=selected_profile.max_tokens,
         )
-        generated_sql = response.text.strip()
+        generated_sql = clean_llm_sql_output(response.text)
         routing_reason = "; ".join(complexity.reasons)
         payload = {
             "generated_sql": generated_sql,

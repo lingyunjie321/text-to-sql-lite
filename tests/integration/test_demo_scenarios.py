@@ -84,6 +84,43 @@ def test_scenario_a_complex_query_succeeds_once(tmp_path: Path) -> None:
     assert "fix" not in trace_nodes
 
 
+def test_scenario_a_strips_markdown_fence_and_succeeds_once(tmp_path: Path) -> None:
+    client = make_client(
+        tmp_path,
+        MockLLMClient(
+            responses={
+                "strong": f"```sql\n{SCENARIO_A_SQL}\n```",
+                "light": f"```sql\n{SCENARIO_A_SQL}\n```",
+            }
+        ),
+    )
+
+    response = client.post(
+        "/api/v1/query",
+        json={
+            "question": SCENARIO_A_QUESTION,
+            "target_dialect": "sqlite",
+            "max_attempts": 3,
+            "debug": True,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    trace_nodes = [event["node_name"] for event in payload["trace"]]
+
+    assert payload["status"] == "success"
+    assert payload["attempts"] == 0
+    assert "```" not in payload["final_sql"]
+    assert payload["result"]["columns"] == [
+        "region",
+        "customer_name",
+        "total_amount",
+        "region_rank",
+    ]
+    assert "fix" not in trace_nodes
+
+
 def test_scenario_b_wrong_field_is_reflected_and_fixed(tmp_path: Path) -> None:
     client = make_client(
         tmp_path,
