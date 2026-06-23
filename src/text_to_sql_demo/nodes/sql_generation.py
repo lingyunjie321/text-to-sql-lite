@@ -1,3 +1,4 @@
+from text_to_sql_demo.exceptions import NodeExecutionError
 from text_to_sql_demo.llm.models import ModelProfile
 from text_to_sql_demo.prompts.builder import PromptBuilder
 from text_to_sql_demo.routing.complexity import ComplexityClassifier, ModelRouter
@@ -13,7 +14,7 @@ class GenerateSQLNode(BaseNode):
     def run(self, state: WorkflowState) -> NodeResult:
         llm_client = self.dependencies.get("llm_client")
         if llm_client is None:
-            raise ValueError("GenerateSQLNode requires llm_client dependency")
+            raise NodeExecutionError("GenerateSQLNode requires llm_client dependency")
 
         profiles = _load_profiles(
             self.dependencies.get("model_profiles") or self.config.get("models")
@@ -60,7 +61,9 @@ class GenerateSQLNode(BaseNode):
 
 def _load_profiles(raw_profiles: object) -> dict[str, ModelProfile]:
     if not isinstance(raw_profiles, dict):
-        raise ValueError("GenerateSQLNode requires model profiles for light and strong aliases")
+        raise NodeExecutionError(
+            "GenerateSQLNode requires model profiles for light and strong aliases"
+        )
     return {
         alias: ModelProfile.model_validate({"alias": alias, **profile})
         if isinstance(profile, dict)

@@ -1,3 +1,4 @@
+from text_to_sql_demo.observability.events import log_sql_validation_failed
 from text_to_sql_demo.schema.catalog import DatabaseSchemaMetadata
 from text_to_sql_demo.sql.validator import SQLValidator
 from text_to_sql_demo.workflow.node import BaseNode, NodeResult
@@ -48,6 +49,12 @@ class ValidateSQLNode(BaseNode):
             )
 
         error_payload = result.error.model_dump(mode="python") if result.error else None
+        log_sql_validation_failed(
+            request_id=state.request_id,
+            node_name=self.name,
+            error_category=result.error.category if result.error else None,
+            sql=sql,
+        )
         return NodeResult(
             outcome="validation_failed",
             state_patch={

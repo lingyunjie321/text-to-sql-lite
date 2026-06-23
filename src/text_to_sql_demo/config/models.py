@@ -2,6 +2,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from text_to_sql_demo.observability.config import LoggingConfig
+
 
 class WorkflowSection(BaseModel):
     """顶层工作流执行设置。"""
@@ -162,6 +164,7 @@ class WorkflowConfig(BaseModel):
     schema_config: SchemaConfig = Field(default_factory=SchemaConfig, alias="schema")
     retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)
     trace: TraceConfig = Field(default_factory=TraceConfig)
+    logging: LoggingConfig = Field(default_factory=LoggingConfig)
     nodes: dict[str, NodeConfig]
     edges: dict[str, EdgeConfig] = Field(default_factory=dict)
 

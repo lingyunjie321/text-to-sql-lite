@@ -7,7 +7,16 @@ from fastapi.responses import JSONResponse
 
 from text_to_sql_demo.api.models import ExecuteSQLRequest, QueryRequest, TranspileRequest
 from text_to_sql_demo.api.service import ApiError, TextToSQLApiService
+from text_to_sql_demo.config.loader import load_workflow_config
+from text_to_sql_demo.exceptions import TextToSQLDemoError
 from text_to_sql_demo.llm.client import LLMClient
+from text_to_sql_demo.observability.events import (
+    log_service_initialization_completed,
+    log_service_initialization_failed,
+    log_service_initialization_started,
+)
+from text_to_sql_demo.observability.logging import configure_logging
+from text_to_sql_demo.observability.middleware import add_request_logging_middleware
 from text_to_sql_demo.sql.dialect import DialectRenderResult, DialectService
 
 
@@ -16,9 +25,11 @@ def create_app(
     config_path: str | Path = "workflow.yaml",
     database_url: str | None = None,
     llm_client: LLMClient | None = None,
-) -> FastAPI:
+    ) -> FastAPI:
     """创建 demo 服务的 FastAPI 应用。"""
     app = FastAPI(title="Text-to-SQL Agent Demo", version="0.1.0")
+    configure_logging(load_workflow_config(config_path).logging)
+    add_request_logging_middleware(app)
     service: TextToSQLApiService | None = None
 
     def get_service() -> TextToSQLApiService:
@@ -26,12 +37,15 @@ def create_app(
         nonlocal service
         if service is None:
             try:
+                log_service_initialization_started()
                 service = TextToSQLApiService(
                     config_path=config_path,
                     database_url=database_url,
                     llm_client=llm_client,
                 )
-            except ValueError as exc:
+                log_service_initialization_completed()
+            except (TextToSQLDemoError, ValueError) as exc:
+                log_service_initialization_failed(error=exc)
                 raise ApiError(
                     status_code=500,
                     code="service_config_error",

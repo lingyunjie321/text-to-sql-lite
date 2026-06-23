@@ -1,7 +1,10 @@
 import json
+from time import perf_counter
 from urllib import request
 
+from text_to_sql_demo.exceptions import LLMProviderError
 from text_to_sql_demo.llm.client import LLMResponse
+from text_to_sql_demo.observability.events import log_llm_request_completed, log_llm_request_failed
 
 
 class OpenAICompatibleLLMClient:
@@ -31,6 +34,7 @@ class OpenAICompatibleLLMClient:
         temperature: float = 0.0,
         max_tokens: int | None = None,
     ) -> LLMResponse:
+        started = perf_counter()
         payload: dict[str, object] = {
             "model": model_name,
             "messages": [
@@ -51,14 +55,34 @@ class OpenAICompatibleLLMClient:
             },
             method="POST",
         )
-        with request.urlopen(http_request, timeout=self.timeout_seconds) as response:
-            raw = json.loads(response.read().decode("utf-8"))
+        try:
+            with request.urlopen(http_request, timeout=self.timeout_seconds) as response:
+                raw = json.loads(response.read().decode("utf-8"))
 
-        text = raw["choices"][0]["message"]["content"]
+            text = raw["choices"][0]["message"]["content"]
+        except Exception as exc:
+            error = LLMProviderError("LLM provider 调用失败")
+            log_llm_request_failed(
+                provider="openai_compatible",
+                model_alias=model_alias,
+                model_name=model_name,
+                duration_ms=int((perf_counter() - started) * 1000),
+                error=error,
+            )
+            raise error from exc
+
+        usage = raw.get("usage")
+        log_llm_request_completed(
+            provider="openai_compatible",
+            model_alias=model_alias,
+            model_name=model_name,
+            duration_ms=int((perf_counter() - started) * 1000),
+            usage=usage if isinstance(usage, dict) else None,
+        )
         return LLMResponse(
             text=text,
             model_alias=model_alias,
             provider_name="openai_compatible",
             raw_id=raw.get("id"),
-            usage=raw.get("usage"),
+            usage=usage,
         )

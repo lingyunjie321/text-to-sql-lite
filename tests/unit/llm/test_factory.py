@@ -5,6 +5,7 @@ import pytest
 
 from text_to_sql_demo.config.env import load_env_files
 from text_to_sql_demo.config.models import WorkflowConfig
+from text_to_sql_demo.exceptions import CredentialMissingError
 from text_to_sql_demo.llm.client import MockLLMClient
 from text_to_sql_demo.llm.factory import build_llm_client
 from text_to_sql_demo.llm.providers import OpenAICompatibleLLMClient
@@ -59,7 +60,7 @@ def test_build_openai_compatible_client_requires_api_key(monkeypatch: pytest.Mon
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     config = make_config(provider="openai_compatible")
 
-    with pytest.raises(ValueError) as exc_info:
+    with pytest.raises(CredentialMissingError) as exc_info:
         build_llm_client(config)
 
     message = str(exc_info.value)

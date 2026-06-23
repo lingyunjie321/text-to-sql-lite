@@ -1,4 +1,6 @@
+from text_to_sql_demo.exceptions import NodeExecutionError
 from text_to_sql_demo.execution.sql_executor import SQLExecutor
+from text_to_sql_demo.observability.events import log_sql_execution_failed
 from text_to_sql_demo.sql.models import SQLError, SQLExecutionResult
 from text_to_sql_demo.workflow.node import BaseNode, NodeResult
 from text_to_sql_demo.workflow.registry import register_node
@@ -15,7 +17,7 @@ class ExecuteSQLNode(BaseNode):
         sql = str(state.data.get("validated_sql") or state.data.get("current_sql") or "")
         database_url = self.dependencies.get("database_url") or self.config.get("database_url")
         if not database_url:
-            raise ValueError("ExecuteSQLNode requires database_url dependency or config")
+            raise NodeExecutionError("ExecuteSQLNode requires database_url dependency or config")
 
         execution_dialect = str(self.config.get("execution_dialect", "sqlite"))
         validated_sql_dialect = str(state.data.get("validated_sql_dialect") or execution_dialect)
@@ -32,6 +34,12 @@ class ExecuteSQLNode(BaseNode):
                 ),
             )
             payload = SQLExecutionResult(success=False, error=error).model_dump(mode="python")
+            log_sql_execution_failed(
+                request_id=state.request_id,
+                node_name=self.name,
+                error_category=error.category,
+                sql=sql,
+            )
             return NodeResult(
                 outcome="execution_failed",
                 state_patch={
@@ -58,6 +66,12 @@ class ExecuteSQLNode(BaseNode):
             )
 
         error_payload = result.error.model_dump(mode="python") if result.error else None
+        log_sql_execution_failed(
+            request_id=state.request_id,
+            node_name=self.name,
+            error_category=result.error.category if result.error else None,
+            sql=sql,
+        )
         return NodeResult(
             outcome="execution_failed",
             state_patch={

@@ -1,3 +1,4 @@
+from text_to_sql_demo.exceptions import NodeExecutionError
 from text_to_sql_demo.llm.models import ModelProfile
 from text_to_sql_demo.workflow.node import BaseNode, NodeResult
 from text_to_sql_demo.workflow.registry import register_node
@@ -14,12 +15,12 @@ class FixSQLNode(BaseNode):
         old_sql = str(instruction["current_sql"])
         llm_client = self.dependencies.get("llm_client")
         if llm_client is None:
-            raise ValueError("FixSQLNode requires llm_client dependency")
+            raise NodeExecutionError("FixSQLNode requires llm_client dependency")
 
         profiles = self.dependencies.get("model_profiles") or self.config.get("models")
         model_alias = str(self.config.get("model_alias", "strong"))
         if not isinstance(profiles, dict) or model_alias not in profiles:
-            raise ValueError(f"FixSQLNode requires model profile alias: {model_alias}")
+            raise NodeExecutionError(f"FixSQLNode requires model profile alias: {model_alias}")
         profile = ModelProfile.model_validate(profiles[model_alias])
 
         response = llm_client.complete(

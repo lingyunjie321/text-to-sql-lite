@@ -62,6 +62,34 @@ trace:
   include_result_preview: true
   max_result_preview_rows: 5
 
+logging:
+  enabled: true
+  level: INFO
+  console:
+    enabled: true
+    format: text
+  file:
+    enabled: true
+    path: logs/app.log
+    format: json
+    rotation: daily
+    backup_count: 14
+    encoding: utf-8
+  privacy:
+    sql_preview: debug_only
+    prompt_preview: disabled
+    include_trace_summary: debug_only
+    include_traceback: debug_only
+    max_preview_chars: 160
+    redact_keys:
+      - password
+      - token
+      - api_key
+      - secret
+      - authorization
+      - api-key
+      - x-api-key
+
 nodes:
   schema_linking:
     type: schema_linking

@@ -12,10 +12,16 @@ from text_to_sql_demo.config.env import load_env_files
 from text_to_sql_demo.config.loader import load_workflow_config
 from text_to_sql_demo.config.models import DatabaseConnectionConfig, NodeConfig, WorkflowConfig
 from text_to_sql_demo.db.init_db import initialize_database
+from text_to_sql_demo.exceptions import DatabaseConfigurationError
 from text_to_sql_demo.execution.sql_executor import SQLExecutor
 from text_to_sql_demo.llm.client import LLMClient
 from text_to_sql_demo.llm.factory import build_llm_client
 from text_to_sql_demo.llm.models import ModelProfile
+from text_to_sql_demo.observability.context import get_log_context
+from text_to_sql_demo.observability.events import (
+    log_database_url_resolve_failed,
+    log_database_url_resolved,
+)
 from text_to_sql_demo.schema.catalog import DatabaseSchemaMetadata, read_schema_metadata
 from text_to_sql_demo.sql.models import SQLError
 from text_to_sql_demo.sql.validator import SQLValidator
@@ -82,7 +88,9 @@ class TextToSQLApiService:
         """执行 Text-to-SQL 工作流并返回演示响应。"""
         self.ensure_database()
         schema = self.read_schema()
+        request_id = get_log_context().get("request_id") or str(uuid4())
         state = WorkflowState(
+            request_id=str(request_id),
             user_question=request.question,
             data={
                 "schema": schema.model_dump(mode="python"),
@@ -292,20 +300,41 @@ SERVER_DRIVER_NAMES = {
 
 
 def _resolve_database_url(config: WorkflowConfig) -> str:
-    connection = config.database.connections[config.database.default]
-    if connection.url_env:
-        env_value = os.getenv(connection.url_env)
-        if env_value:
-            return env_value
+    connection_name = config.database.default
+    connection = config.database.connections[connection_name]
+    try:
+        if connection.url_env:
+            env_value = os.getenv(connection.url_env)
+            if env_value:
+                log_database_url_resolved(
+                    connection_name=connection_name,
+                    database_driver=connection.driver,
+                )
+                return env_value
 
-    structured_url = _build_structured_database_url(connection)
-    if structured_url is not None:
-        return structured_url
+        structured_url = _build_structured_database_url(connection)
+        if structured_url is not None:
+            log_database_url_resolved(
+                connection_name=connection_name,
+                database_driver=connection.driver,
+            )
+            return structured_url
 
-    if connection.fallback_url:
-        return connection.fallback_url
+        if connection.fallback_url:
+            log_database_url_resolved(
+                connection_name=connection_name,
+                database_driver=connection.driver,
+            )
+            return connection.fallback_url
 
-    raise ValueError(f"数据库连接 {config.database.default} 缺少可用的连接配置")
+        raise DatabaseConfigurationError(f"数据库连接 {connection_name} 缺少可用的连接配置")
+    except DatabaseConfigurationError as exc:
+        log_database_url_resolve_failed(
+            connection_name=connection_name,
+            database_driver=connection.driver,
+            error=exc,
+        )
+        raise
 
 
 def _build_structured_database_url(connection: DatabaseConnectionConfig) -> str | None:
@@ -331,7 +360,7 @@ def _build_structured_database_url(connection: DatabaseConnectionConfig) -> str 
     host = _required_config_value(connection.host, "host")
     port = connection.port
     if port is None:
-        raise ValueError("服务型数据库连接缺少 port")
+        raise DatabaseConfigurationError("服务型数据库连接缺少 port")
 
     database_name = _required_config_value(connection.database_name, "database_name")
     username = _resolve_value_or_env(
@@ -355,7 +384,7 @@ def _build_structured_database_url(connection: DatabaseConnectionConfig) -> str 
 def _required_config_value(value: str | None, field_name: str) -> str:
     if value:
         return value
-    raise ValueError(f"服务型数据库连接缺少 {field_name}")
+    raise DatabaseConfigurationError(f"服务型数据库连接缺少 {field_name}")
 
 
 def _resolve_value_or_env(
@@ -368,23 +397,25 @@ def _resolve_value_or_env(
         env_value = os.getenv(env_name)
         if env_value:
             return env_value
-        raise ValueError(f"数据库连接 {label} 环境变量未设置: {env_name}")
+        raise DatabaseConfigurationError(f"数据库连接 {label} 环境变量未设置: {env_name}")
 
     if value:
         return value
 
-    raise ValueError(f"服务型数据库连接缺少 {label}")
+    raise DatabaseConfigurationError(f"服务型数据库连接缺少 {label}")
 
 
 def _resolve_required_env(env_name: str | None, label: str) -> str:
     if not env_name:
-        raise ValueError(f"服务型数据库连接必须配置 {label}，避免在配置文件中明文写入密码")
+        raise DatabaseConfigurationError(
+            f"服务型数据库连接必须配置 {label}，避免在配置文件中明文写入密码"
+        )
 
     env_value = os.getenv(env_name)
     if env_value:
         return env_value
 
-    raise ValueError(f"数据库连接 {label} 环境变量未设置: {env_name}")
+    raise DatabaseConfigurationError(f"数据库连接 {label} 环境变量未设置: {env_name}")
 
 
 def _sqlite_path_from_url(database_url: str) -> Path | None:

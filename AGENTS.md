@@ -74,6 +74,15 @@ Text-to-SQL Agent 项目。
 - 测试不得依赖真实的付费 LLM API。
 - 在声明任务完成前，运行 ruff 和 pytest。
 
+# 日志与异常约束
+
+- 后端主链路新增或修改代码时，优先使用项目自定义异常，不要新增散乱的 `ValueError` 作为运行时错误边界。
+- 不要在底层函数里到处 `logger.error(...); raise ...`。底层应抛出明确异常，API、service、workflow、provider 等边界统一记录结构化日志。
+- 失败日志必须带可定位上下文，例如 `request_id`、`node_name`、`event`、`error_type`，以及异常源文件和行号。
+- 日志不得输出 API key、Authorization、数据库密码、完整数据库 URL、完整 prompt、完整 SQL 或完整结果集。
+- SQL 默认只允许记录长度和 hash；debug 明确开启时才允许记录有限 preview。
+- Text-to-SQL 可恢复失败（例如 SQL 校验失败后进入修复）优先使用 `WARNING`，系统配置、凭据、外部 provider、数据库连接等不可恢复问题使用 `ERROR`。
+
 # 任务完成报告
 
 每个任务完成后，报告：

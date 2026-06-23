@@ -3,6 +3,19 @@ from time import perf_counter
 from typing import Any
 
 from text_to_sql_demo.config.models import WorkflowConfig
+from text_to_sql_demo.observability.context import (
+    set_node_context,
+    set_request_context,
+    set_workflow_context,
+)
+from text_to_sql_demo.observability.events import (
+    log_node_completed,
+    log_node_failed,
+    log_node_started,
+    log_workflow_completed,
+    log_workflow_failed,
+    log_workflow_started,
+)
 from text_to_sql_demo.workflow.exceptions import WorkflowConfigurationError
 from text_to_sql_demo.workflow.factory import NodeFactory
 from text_to_sql_demo.workflow.node import BaseNode, NodeResult
@@ -19,6 +32,13 @@ class WorkflowEngine:
     def run(self, state: WorkflowState | None = None) -> WorkflowState:
         """运行配置好的工作流并返回最终状态。"""
         workflow_state = state or WorkflowState()
+        set_request_context(request_id=workflow_state.request_id)
+        set_workflow_context(workflow_name=self.config.workflow.name)
+        workflow_started = perf_counter()
+        log_workflow_started(
+            request_id=workflow_state.request_id,
+            workflow_name=self.config.workflow.name,
+        )
         current_node = self.config.workflow.start_node
 
         while not workflow_state.terminated:
@@ -55,6 +75,27 @@ class WorkflowEngine:
 
             current_node = next_node
 
+        duration_ms = int((perf_counter() - workflow_started) * 1000)
+        if workflow_state.errors or workflow_state.termination_reason in {
+            "max_steps_exceeded",
+            "node_error",
+        }:
+            log_workflow_failed(
+                request_id=workflow_state.request_id,
+                workflow_name=self.config.workflow.name,
+                termination_reason=workflow_state.termination_reason,
+                duration_ms=duration_ms,
+            )
+        else:
+            log_workflow_completed(
+                request_id=workflow_state.request_id,
+                workflow_name=self.config.workflow.name,
+                termination_reason=workflow_state.termination_reason,
+                duration_ms=duration_ms,
+            )
+
+        set_node_context(node_name=None, node_type=None)
+        set_workflow_context(workflow_name=None)
         return workflow_state
 
     def _execute_node(
@@ -69,7 +110,17 @@ class WorkflowEngine:
         status = "error"
         error_message: str | None = None
         structured_error: dict[str, Any] | None = None
+        caught_error: BaseException | None = None
         input_summary = _summarize_node_input(state)
+        step = state.step_count + 1
+        set_node_context(node_name=node.name, node_type=node.node_type)
+        log_node_started(
+            request_id=state.request_id,
+            workflow_name=self.config.workflow.name,
+            node_name=node.name,
+            node_type=node.node_type,
+            step=step,
+        )
 
         try:
             node.before(state)
@@ -91,8 +142,32 @@ class WorkflowEngine:
                 )
             )
             node.error(state, exc)
+            caught_error = exc
 
         ended_at = datetime.now(UTC)
+        duration_ms = int((perf_counter() - started_timer) * 1000)
+        if caught_error is None:
+            log_node_completed(
+                request_id=state.request_id,
+                workflow_name=self.config.workflow.name,
+                node_name=node.name,
+                node_type=node.node_type,
+                outcome=result.outcome,
+                duration_ms=duration_ms,
+                step=step,
+            )
+        else:
+            log_node_failed(
+                request_id=state.request_id,
+                workflow_name=self.config.workflow.name,
+                node_name=node.name,
+                node_type=node.node_type,
+                outcome=result.outcome,
+                duration_ms=duration_ms,
+                step=step,
+                error=caught_error,
+            )
+
         return result, TraceEvent(
             request_id=state.request_id,
             node_name=node.name,
@@ -102,7 +177,7 @@ class WorkflowEngine:
             step=state.step_count + 1,
             started_at=started_at,
             ended_at=ended_at,
-            duration_ms=int((perf_counter() - started_timer) * 1000),
+            duration_ms=duration_ms,
             input_summary=input_summary,
             output_summary=_summarize_node_output(result),
             error=structured_error,

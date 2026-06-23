@@ -1,3 +1,4 @@
+from text_to_sql_demo.exceptions import NodeExecutionError
 from text_to_sql_demo.schema.catalog import DatabaseSchemaMetadata
 from text_to_sql_demo.schema.linking import SchemaLinker
 from text_to_sql_demo.workflow.node import BaseNode, NodeResult
@@ -12,7 +13,9 @@ class SchemaLinkingNode(BaseNode):
     def run(self, state: WorkflowState) -> NodeResult:
         schema_payload = state.data.get("schema") or self.dependencies.get("schema")
         if schema_payload is None:
-            raise ValueError("SchemaLinkingNode requires schema metadata in state or dependencies")
+            raise NodeExecutionError(
+                "SchemaLinkingNode requires schema metadata in state or dependencies"
+            )
 
         schema = DatabaseSchemaMetadata.model_validate(schema_payload)
         linker = SchemaLinker(

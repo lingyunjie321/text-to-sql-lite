@@ -1,3 +1,4 @@
+from text_to_sql_demo.observability.events import log_repair_attempted, log_repair_exhausted
 from text_to_sql_demo.sql.models import RepairInstruction, SQLError
 from text_to_sql_demo.workflow.node import BaseNode, NodeResult
 from text_to_sql_demo.workflow.registry import register_node
@@ -17,6 +18,13 @@ class ReflectErrorNode(BaseNode):
         max_attempts = int(configured_max_attempts if configured_max_attempts is not None else 3)
         last_error = SQLError.model_validate(state.data["last_error"])
         if attempt_count >= max_attempts:
+            log_repair_exhausted(
+                request_id=state.request_id,
+                node_name=self.name,
+                attempt_count=attempt_count,
+                max_attempts=max_attempts,
+                error_category=last_error.category,
+            )
             return NodeResult(
                 outcome="attempts_exhausted",
                 state_patch={
@@ -27,6 +35,13 @@ class ReflectErrorNode(BaseNode):
                 },
             )
 
+        log_repair_attempted(
+            request_id=state.request_id,
+            node_name=self.name,
+            attempt_count=attempt_count + 1,
+            max_attempts=max_attempts,
+            error_category=last_error.category,
+        )
         instruction = RepairInstruction(
             original_question=state.user_question,
             current_sql=str(state.data.get("current_sql") or state.data.get("generated_sql")),

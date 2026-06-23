@@ -2,6 +2,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from text_to_sql_demo.exceptions import LLMConfigurationError
 from text_to_sql_demo.llm.models import ModelProfile
 
 ComplexityLevel = Literal["simple", "medium", "complex"]
@@ -67,7 +68,7 @@ class ModelRouter:
     def route(self, complexity: ComplexityResult) -> ModelProfile:
         alias = "light" if complexity.level == "simple" else "strong"
         if alias not in self.profiles:
-            raise ValueError(f"缺少模型配置 alias: {alias}")
+            raise LLMConfigurationError(f"缺少模型配置 alias: {alias}")
         return self.profiles[alias]
 
 
