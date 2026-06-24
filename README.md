@@ -8,14 +8,14 @@
 - 注册式节点体系：`BaseNode`、`NodeRegistry`、`NodeFactory` 和 `WorkflowEngine` 解耦，新增节点不需要改 engine。
 - Datus-style 核心链路：默认 workflow 已对齐 `Begin -> Selection -> Schema -> Context Retrieval -> Example Retrieval -> GenSQL -> Validation -> Execute -> Finalization`。
 - 状态驱动通信：节点通过 `WorkflowState.data` 共享 `task`、`intent`、`schema_linking`、`rag_context`、`retrieved_examples`、`generated_sql`、`validation_result`、`execution_result` 等中间结果。
-- 本地知识库检索：`ContextRetrievalNode` 从 `configs/knowledge.yaml` 检索 Reference SQL、文档片段、Metric 和 Semantic Model；当前实现是 YAML/词法 Top-K fallback，后续可替换为可选向量后端。
+- 本地知识库检索：`ContextRetrievalNode` 从 `configs/knowledge.yaml` 和 approved saved_query 检索可信 Reference SQL、文档片段、Metric 和 Semantic Model；当前实现是 YAML/SQLite/词法 Top-K fallback，后续可替换为可选向量后端。
 - Prompt 裁剪：`PromptBuilder.build` 只注入 linked schema、Top-K 示例、知识库上下文和业务方言范式，不把完整 schema、所有样例或完整知识库塞进 prompt。
 - Agentic SQL 生成：`GenSQLAgenticNode.run` 根据 `ComplexityClassifier` 结果选择 `light` 或 `strong` 模型 alias，并注入 linked schema、RAG 上下文、Top-K 示例和业务方言范式。
 - SQL 安全链路：`SQLValidator` 基于 SQLGlot 做方言解析、单语句、只读 SELECT 和 schema 引用校验；`SQLExecutor` 只执行已校验 SQL。
 - 策略反思闭环：校验或执行失败后进入 `ReflectionDecisionNode`，按错误类型路由到 `FIX_SQL`、`RELINK_SCHEMA`、`RETRIEVE_CONTEXT`、`REASONING_REWRITE` 或 `HITL`，最多 3 轮并有明确终止条件。
-- 轻量 SQLContext 记忆：每轮失败 SQL 尝试只沉淀 hash/长度、错误类型、反思策略和原因摘要，供生成、修复、重写 prompt 使用，不保存完整结果集。
+- 轻量 SQLContext 记忆：失败和成功 SQL 尝试都会沉淀 hash/长度、错误类型、结果摘要、反思策略和原因摘要，供生成、修复、重写 prompt 使用，不保存完整结果集。
 - 可观测 Trace：每个节点执行后由 `WorkflowEngine` 记录节点名、outcome、耗时、输入输出摘要和错误摘要。
-- 内部 metadata store：项目自身使用 SQLite 沉淀 `query_run`、`trace_event`、`saved_query` 和 `feedback`，不写入业务目标库。
+- 内部 metadata store：项目自身使用 SQLite 沉淀 `query_run`、`trace_event`、`saved_query` 和 `feedback`，只有 `approved` saved_query 会作为可信 Reference SQL 进入后续检索，不写入业务目标库。
 - 运行时配置：前端可临时配置数据库连接和 `light/strong` 双模型路由，请求通过 `runtime_config_id` 使用对应配置。
 - 前端演示：React/Vite 页面支持自然语言查询、运行配置、SQL 查看/编辑、结果展示、保存 SQL、反馈、历史记录和开发者 Trace 展开。
 
@@ -333,6 +333,7 @@ npm run build
 
 - [项目结构与模块职责](docs/项目结构与模块职责.md)
 - [整体架构](docs/整体架构.md)
+- [记忆架构与模块设计](docs/记忆架构与模块设计.md)
 - [文本转 SQL 工作流](docs/文本转SQL工作流.md)
 - [SQL 生成过程代码追踪](docs/SQL生成过程代码追踪.md)
 - [面试演示场景](docs/面试演示场景.md)

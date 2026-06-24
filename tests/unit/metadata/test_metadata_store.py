@@ -97,3 +97,46 @@ def test_metadata_store_persists_query_run_trace_saved_query_and_feedback(
     assert store.list_saved_queries(limit=10).items == [saved_query]
     assert feedback.request_id == "req-1"
     assert store.list_feedback(request_id="req-1", limit=10).items == [feedback]
+
+
+def test_metadata_store_filters_saved_queries_by_status(tmp_path) -> None:
+    store = MetadataStore(database_url=f"sqlite:///{tmp_path / 'metadata.db'}")
+    approved = SavedQueryRecord(
+        id="approved-1",
+        name="可信订单金额",
+        question="统计订单金额",
+        sql="SELECT SUM(amount) FROM orders",
+        tags=["订单"],
+        status="approved",
+        created_at=NOW,
+        updated_at=NOW,
+    )
+    draft = SavedQueryRecord(
+        id="draft-1",
+        name="草稿订单金额",
+        question="统计订单金额",
+        sql="SELECT SUM(total_amount) FROM orders",
+        tags=["订单"],
+        status="draft",
+        created_at=NOW,
+        updated_at=NOW,
+    )
+    deprecated = SavedQueryRecord(
+        id="deprecated-1",
+        name="废弃订单金额",
+        question="统计订单金额",
+        sql="SELECT SUM(old_amount) FROM orders",
+        tags=["订单"],
+        status="deprecated",
+        created_at=NOW,
+        updated_at=NOW,
+    )
+
+    store.save_saved_query(draft)
+    store.save_saved_query(approved)
+    store.save_saved_query(deprecated)
+
+    result = store.list_saved_queries(status="approved", limit=10)
+
+    assert result.total == 1
+    assert result.items == [approved]

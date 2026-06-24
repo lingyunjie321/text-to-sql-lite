@@ -7,7 +7,9 @@ from text_to_sql_demo.reflection.models import (
 )
 from text_to_sql_demo.reflection.policy import (
     append_sql_context,
+    append_success_sql_context,
     build_sql_attempt_context,
+    build_success_sql_attempt_context,
     decide_reflection_strategy,
     format_sql_contexts,
     reflection_outcome,
@@ -19,7 +21,9 @@ __all__ = [
     "ReflectionStrategy",
     "SQLAttemptContext",
     "append_sql_context",
+    "append_success_sql_context",
     "build_sql_attempt_context",
+    "build_success_sql_attempt_context",
     "decide_reflection_strategy",
     "format_sql_contexts",
     "reflection_outcome",

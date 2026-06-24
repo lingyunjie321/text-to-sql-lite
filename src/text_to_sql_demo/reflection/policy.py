@@ -93,6 +93,25 @@ def build_sql_attempt_context(
     )
 
 
+def build_success_sql_attempt_context(
+    *,
+    state_data: dict[str, Any],
+) -> SQLAttemptContext:
+    """为成功执行的最终 SQL 生成一条 workflow memory。"""
+    sql = (
+        state_data.get("validated_sql")
+        or state_data.get("current_sql")
+        or state_data.get("generated_sql")
+    )
+    return SQLAttemptContext(
+        attempt=_success_attempt_number(state_data.get("attempt_count")),
+        sql=str(sql) if sql else None,
+        result_summary=_result_summary(state_data.get("execution_result")),
+        reflection_strategy="SUCCESS",
+        reflection_reason="SQL 已通过校验并成功执行",
+    )
+
+
 def append_sql_context(
     sql_contexts: object,
     context: SQLAttemptContext,
@@ -107,6 +126,22 @@ def append_sql_context(
             existing_items[index] = {**item, **context_payload}
             return existing_items
     return [*existing_items, context_payload]
+
+
+def append_success_sql_context(
+    sql_contexts: object,
+    context: SQLAttemptContext,
+) -> list[dict[str, Any]]:
+    """追加成功 SQL 记忆；同一最终 SQL 已记录 SUCCESS 时只更新摘要。"""
+    existing_items = [
+        item for item in sql_contexts if isinstance(item, dict)
+    ] if isinstance(sql_contexts, list) else []
+    context_payload = context.model_dump(mode="python")
+    for index, item in enumerate(existing_items):
+        if item.get("sql") == context.sql and item.get("reflection_strategy") == "SUCCESS":
+            existing_items[index] = {**item, **context_payload}
+            return existing_items
+    return append_sql_context(existing_items, context)
 
 
 def format_sql_contexts(sql_contexts: object, limit: int = 3) -> str:
@@ -194,6 +229,15 @@ def _next_hint_for_strategy(strategy: ReflectionStrategy) -> str | None:
     if strategy is ReflectionStrategy.HITL:
         return "进入 HITLNode，标记人工介入"
     return None
+
+
+def _success_attempt_number(attempt_count: object) -> int:
+    if isinstance(attempt_count, int | float | str):
+        try:
+            return max(1, int(attempt_count) + 1)
+        except ValueError:
+            return 1
+    return 1
 
 
 def _error_from_result(result: object) -> dict[str, Any] | None:

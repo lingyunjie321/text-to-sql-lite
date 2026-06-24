@@ -1,6 +1,10 @@
 from pathlib import Path
 
-from text_to_sql_demo.retrieval.knowledge import KnowledgeStore
+from text_to_sql_demo.memory import (
+    merge_reference_sql_hits,
+    search_approved_saved_query_reference_sql,
+)
+from text_to_sql_demo.retrieval.knowledge import KnowledgeSearchResult, KnowledgeStore
 from text_to_sql_demo.workflow.node import BaseNode, NodeResult
 from text_to_sql_demo.workflow.registry import register_node
 from text_to_sql_demo.workflow.state import WorkflowState
@@ -13,21 +17,34 @@ class ContextRetrievalNode(BaseNode):
     def run(self, state: WorkflowState) -> NodeResult:
         """检索 reference SQL、文档、指标和语义模型上下文。"""
         store = self.dependencies.get("knowledge_store") or self._store_from_config()
-        if store is None:
-            payload = _empty_rag_context()
-            return NodeResult(
-                outcome="success",
-                state_patch={"data": {"rag_context": payload}},
-                output={"rag_context": payload},
-            )
-
         schema_linking = state.data.get("schema_linking") or {}
         involved_tables = _linked_table_names(schema_linking.get("tables", []))
-        result = store.search(
+        top_k = int(self.config.get("top_k", 5))
+        result = (
+            store.search(
+                query=state.user_question,
+                involved_tables=involved_tables,
+                top_k=top_k,
+            )
+            if store is not None
+            else KnowledgeSearchResult()
+        )
+        trusted_reference_sql = search_approved_saved_query_reference_sql(
+            metadata_store=self.dependencies.get("metadata_store"),
             query=state.user_question,
             involved_tables=involved_tables,
-            top_k=int(self.config.get("top_k", 5)),
+            top_k=top_k,
         )
+        if trusted_reference_sql:
+            result = result.model_copy(
+                update={
+                    "reference_sql": merge_reference_sql_hits(
+                        yaml_hits=result.reference_sql,
+                        trusted_hits=trusted_reference_sql,
+                        top_k=top_k,
+                    )
+                }
+            )
         payload = result.model_dump(mode="python")
         return NodeResult(
             outcome="success",
@@ -43,15 +60,6 @@ class ContextRetrievalNode(BaseNode):
         if not path.exists():
             return None
         return KnowledgeStore.from_yaml(path)
-
-
-def _empty_rag_context() -> dict[str, list[dict]]:
-    return {
-        "reference_sql": [],
-        "documents": [],
-        "metrics": [],
-        "semantic_models": [],
-    }
 
 
 def _linked_table_names(tables: object) -> list[str]:

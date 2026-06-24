@@ -31,6 +31,7 @@ from text_to_sql_demo.metadata.models import (
     QueryRunRecord,
     SavedQueryList,
     SavedQueryRecord,
+    SavedQueryStatus,
     StoredQueryRun,
     TraceEventRecord,
 )
@@ -136,18 +137,26 @@ class MetadataStore:
         except SQLAlchemyError as exc:
             raise MetadataStoreError("保存收藏 SQL 失败") from exc
 
-    def list_saved_queries(self, *, limit: int = 20) -> SavedQueryList:
+    def list_saved_queries(
+        self,
+        *,
+        status: SavedQueryStatus | None = None,
+        limit: int = 20,
+    ) -> SavedQueryList:
         """按更新时间倒序列出收藏 SQL。"""
         try:
+            statement = (
+                select(self.saved_queries)
+                .order_by(self.saved_queries.c.updated_at.desc())
+                .limit(limit)
+            )
+            count_statement = select(func.count()).select_from(self.saved_queries)
+            if status is not None:
+                statement = statement.where(self.saved_queries.c.status == status)
+                count_statement = count_statement.where(self.saved_queries.c.status == status)
             with self._engine.connect() as connection:
-                rows = connection.execute(
-                    select(self.saved_queries)
-                    .order_by(self.saved_queries.c.updated_at.desc())
-                    .limit(limit)
-                ).mappings().all()
-                total = connection.execute(
-                    select(func.count()).select_from(self.saved_queries)
-                ).scalar_one()
+                rows = connection.execute(statement).mappings().all()
+                total = connection.execute(count_statement).scalar_one()
             return SavedQueryList(
                 items=[_row_to_saved_query(row) for row in rows],
                 total=int(total),

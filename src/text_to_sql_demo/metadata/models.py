@@ -5,6 +5,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+SavedQueryStatus = Literal["draft", "approved", "deprecated"]
+
 
 def utc_now() -> datetime:
     """返回带 UTC 时区的当前时间，便于测试替换固定时间。"""
@@ -70,7 +72,7 @@ class SavedQueryRecord(BaseModel):
     sql: str
     created_from_run_id: str | None = None
     tags: list[str] = Field(default_factory=list)
-    status: Literal["draft", "approved", "deprecated"] = "draft"
+    status: SavedQueryStatus = "draft"
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 

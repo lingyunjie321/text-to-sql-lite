@@ -47,6 +47,13 @@ def test_query_endpoint_runs_workflow_and_returns_demo_payload(tmp_path: Path) -
     assert payload["rag_context"]["semantic_models"]
     assert payload["errors"] == []
     assert payload["result"]["columns"] == ["id", "amount"]
+    assert payload["sql_contexts"][0]["reflection_strategy"] == "SUCCESS"
+    assert payload["sql_contexts"][0]["reflection_reason"] == "SQL 已通过校验并成功执行"
+    assert payload["sql_contexts"][0]["sql_length"] == len(
+        "SELECT id, amount FROM orders ORDER BY id"
+    )
+    assert payload["sql_contexts"][0]["sql_hash"].startswith("sha256:")
+    assert "sql" not in payload["sql_contexts"][0]
     assert [event["node_name"] for event in payload["trace"][:4]] == [
         "begin",
         "selection",

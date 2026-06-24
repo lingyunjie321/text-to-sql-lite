@@ -1,3 +1,7 @@
+from text_to_sql_demo.reflection import (
+    append_success_sql_context,
+    build_success_sql_attempt_context,
+)
 from text_to_sql_demo.workflow.node import BaseNode, NodeResult
 from text_to_sql_demo.workflow.registry import register_node
 from text_to_sql_demo.workflow.state import WorkflowState
@@ -25,11 +29,20 @@ class FinalizeNode(BaseNode):
 
         execution_result = state.data.get("execution_result") or {}
         if execution_result.get("success") is True:
+            final_sql = state.data.get("validated_sql") or state.data.get("generated_sql")
+            success_context = build_success_sql_attempt_context(
+                state_data={**state.data, "validated_sql": final_sql}
+            )
+            sql_contexts = append_success_sql_context(
+                state.data.get("sql_contexts"),
+                success_context,
+            )
             payload = {
                 "final_status": "success",
-                "final_sql": state.data.get("validated_sql") or state.data.get("generated_sql"),
+                "final_sql": final_sql,
                 "final_result": execution_result,
                 "attempt_count": int(state.data.get("attempt_count", 0)),
+                "sql_contexts": sql_contexts,
             }
             return NodeResult(
                 outcome="finalize_success",

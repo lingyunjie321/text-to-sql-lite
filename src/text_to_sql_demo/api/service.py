@@ -500,6 +500,7 @@ class TextToSQLApiService:
             values={
                 "database_url": resolved.database_url,
                 "llm_client": resolved.llm_client,
+                "metadata_store": self.metadata_store,
                 "model_profiles": resolved.model_profiles,
             }
         )
