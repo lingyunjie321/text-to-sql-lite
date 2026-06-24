@@ -6,13 +6,14 @@
 
 默认配置文件是仓库根目录的 `workflow.yaml`：
 
-- `workflow.start_node`: `schema_linking`
+- `workflow.start_node`: `begin`
 - `workflow.max_steps`: `30`
 - `workflow.max_repair_attempts`: `3`
 - `database.default`: `demo_sqlite`
 - `models.aliases`: `light`、`strong`，当前默认 provider 为 `openai_compatible`
 - `schema.catalog_source`: `database`
 - `retrieval.examples_path`: 默认 `configs/examples.yaml`，请求级配置构建时会注入到 `example_retrieval` 节点
+- `retrieval.knowledge_path`: 默认 `configs/knowledge.yaml`，请求级配置构建时会注入到 `context_retrieval` 节点
 
 维护提示：如果修改 `workflow.yaml` 的节点名、outcome 边或最大尝试次数，必须同步更新本文档、[面试演示场景](面试演示场景.md) 和相关集成测试。
 
@@ -20,9 +21,12 @@
 
 | 配置节点 | 实现类 | 主要输入 | 主要输出 | 成功/失败 outcome |
 | --- | --- | --- | --- | --- |
+| `begin` | `BeginNode` | `user_question`、`request_id` | `task` | `success` |
+| `selection` | `SelectionNode` | `user_question` | `intent` | `text_to_sql` |
 | `schema_linking` | `SchemaLinkingNode` | `user_question`、`state.data.schema` | `schema_linking` | `success` |
+| `context_retrieval` | `ContextRetrievalNode` | 问题、linked tables、`configs/knowledge.yaml` | `rag_context` | `success` |
 | `example_retrieval` | `ExampleRetrievalNode` | 问题、linked tables、`configs/examples.yaml` | `retrieved_examples`、`available_example_count` | `success` |
-| `sql_generation` | `GenSQLAgenticNode` | 问题、linked schema、examples、业务方言范式、LLM client、model profiles | `generated_sql`、`selected_model`、`prompt_summary` | `success` |
+| `sql_generation` | `GenSQLAgenticNode` | 问题、linked schema、RAG 上下文、examples、业务方言范式、LLM client、model profiles | `generated_sql`、`selected_model`、`prompt_summary` | `success` |
 | `sql_validation` | `ValidateSQLNode` | `generated_sql/current_sql`、schema、dialect | `validated_sql` 或 `last_error` | `validation_success`、`validation_failed` |
 | `sql_execution` | `ExecuteSQLNode` | `validated_sql`、database URL | `execution_result` 或 `last_error` | `execution_success`、`execution_failed` |
 | `error_classification` | `ReflectErrorNode` | `last_error`、`attempt_count` | `repair_instruction`、`repair_instruction.strategy` 或 `termination_reason` | `reflect_retry`、`attempts_exhausted` |
@@ -46,8 +50,23 @@
                              └───────────┬──────────┘
                                          │
                              ┌───────────▼──────────┐
+                             │ begin                │
+                             │ BeginNode            │
+                             └───────────┬──────────┘
+                                         │ success
+                             ┌───────────▼──────────┐
+                             │ selection            │
+                             │ SelectionNode        │
+                             └───────────┬──────────┘
+                                         │ text_to_sql
+                             ┌───────────▼──────────┐
                              │ schema_linking       │
                              │ SchemaLinkingNode    │
+                             └───────────┬──────────┘
+                                         │ success
+                             ┌───────────▼──────────┐
+                             │ context_retrieval    │
+                             │ ContextRetrievalNode │
                              └───────────┬──────────┘
                                          │ success
                              ┌───────────▼──────────┐
@@ -112,8 +131,12 @@ Mermaid 渲染版如下：
 
 ```mermaid
 flowchart TD
-    Start["POST /api/v1/query\nTextToSQLApiService.run_query"] --> Schema["schema_linking\nSchemaLinkingNode"]
-    Schema -- success --> Examples["example_retrieval\nExampleRetrievalNode"]
+    Start["POST /api/v1/query\nTextToSQLApiService.run_query"] --> Begin["begin\nBeginNode"]
+    Begin -- success --> Selection["selection\nSelectionNode"]
+    Selection -- text_to_sql --> Schema["schema_linking\nSchemaLinkingNode"]
+    Schema -- success --> Context["context_retrieval\nContextRetrievalNode"]
+    Context -- success --> Examples["example_retrieval\nExampleRetrievalNode"]
+    Context -- failure --> Examples
     Examples -- success --> Generate["sql_generation\nGenSQLAgenticNode"]
     Generate -- success --> Validate["sql_validation\nValidateSQLNode"]
 
@@ -137,13 +160,16 @@ flowchart TD
 一次成功路径为：
 
 1. `TextToSQLApiService.run_query` 初始化数据库、读取 schema，创建 `WorkflowState`。
-2. `WorkflowEngine.run` 从 `schema_linking` 开始执行。
-3. `SchemaLinkingNode.run` 使用 `SchemaLinker` 选出相关表列。
-4. `ExampleRetrievalNode.run` 使用 `ExampleStore` 返回 Top-K 本地 SQL 示例。
-5. `GenSQLAgenticNode.run` 完成复杂度分类、模型 alias 路由、业务方言范式检索、prompt 构建和 LLM 调用；默认服务按 `workflow.yaml` 构造 OpenAI-compatible client，测试和 demo 脚本可注入 Mock。
-6. `ValidateSQLNode.run` 用 SQLGlot 校验语法、方言、只读 SELECT 和 schema 引用。
-7. `ExecuteSQLNode.run` 用 SQLAlchemy 执行已校验 SQL，执行方言必须受支持并与校验方言一致。
-8. `FinalizeNode.run` 收敛 `final_status=success`、`final_sql` 和 `final_result`。
+2. `WorkflowEngine.run` 从 `begin` 开始执行。
+3. `BeginNode.run` 初始化任务上下文，把问题和 request_id 写入 `task`。
+4. `SelectionNode.run` 做意图分类，当前默认输出 `text_to_sql`，后续可以扩展其他意图分支。
+5. `SchemaLinkingNode.run` 使用 `SchemaLinker` 选出相关表列。
+6. `ContextRetrievalNode.run` 使用 `KnowledgeStore` 返回 Reference SQL、文档片段、Metric、Semantic Model 的 Top-K `rag_context`。
+7. `ExampleRetrievalNode.run` 使用 `ExampleStore` 返回 Top-K 本地 SQL 示例。
+8. `GenSQLAgenticNode.run` 完成复杂度分类、模型 alias 路由、RAG 上下文/业务方言范式检索、prompt 构建和 LLM 调用；默认服务按 `workflow.yaml` 构造 OpenAI-compatible client，测试和 demo 脚本可注入 Mock。
+9. `ValidateSQLNode.run` 用 SQLGlot 校验语法、方言、只读 SELECT 和 schema 引用。
+10. `ExecuteSQLNode.run` 用 SQLAlchemy 执行已校验 SQL，执行方言必须受支持并与校验方言一致。
+11. `FinalizeNode.run` 收敛 `final_status=success`、`final_sql` 和 `final_result`。
 
 成功路径集成测试见 `tests/integration/test_api_workflow.py` 和 `tests/integration/test_demo_scenarios.py`。
 

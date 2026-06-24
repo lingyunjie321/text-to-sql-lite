@@ -6,9 +6,11 @@
 
 - 可配置工作流：`workflow.yaml` 定义节点、边、最大步数、最大修复次数、模型 alias 和数据库连接。
 - 注册式节点体系：`BaseNode`、`NodeRegistry`、`NodeFactory` 和 `WorkflowEngine` 解耦，新增节点不需要改 engine。
-- 状态驱动通信：节点通过 `WorkflowState.data` 共享 `schema_linking`、`retrieved_examples`、`generated_sql`、`validation_result`、`execution_result` 等中间结果。
-- Prompt 裁剪：`PromptBuilder.build` 只注入 linked schema 和 Top-K 示例，不把完整 schema 和所有样例塞进 prompt。
-- Agentic SQL 生成：`GenSQLAgenticNode.run` 根据 `ComplexityClassifier` 结果选择 `light` 或 `strong` 模型 alias，并注入 linked schema、Top-K 示例和业务方言范式。
+- Datus-style 核心链路：默认 workflow 已对齐 `Begin -> Selection -> Schema -> Context Retrieval -> Example Retrieval -> GenSQL -> Validation -> Execute -> Finalization`。
+- 状态驱动通信：节点通过 `WorkflowState.data` 共享 `task`、`intent`、`schema_linking`、`rag_context`、`retrieved_examples`、`generated_sql`、`validation_result`、`execution_result` 等中间结果。
+- 本地知识库检索：`ContextRetrievalNode` 从 `configs/knowledge.yaml` 检索 Reference SQL、文档片段、Metric 和 Semantic Model；当前实现是 YAML/词法 Top-K fallback，后续可替换为可选向量后端。
+- Prompt 裁剪：`PromptBuilder.build` 只注入 linked schema、Top-K 示例、知识库上下文和业务方言范式，不把完整 schema、所有样例或完整知识库塞进 prompt。
+- Agentic SQL 生成：`GenSQLAgenticNode.run` 根据 `ComplexityClassifier` 结果选择 `light` 或 `strong` 模型 alias，并注入 linked schema、RAG 上下文、Top-K 示例和业务方言范式。
 - SQL 安全链路：`SQLValidator` 基于 SQLGlot 做方言解析、单语句、只读 SELECT 和 schema 引用校验；`SQLExecutor` 只执行已校验 SQL。
 - 修复闭环：校验或执行失败后进入 `ReflectErrorNode` 和 `FixSQLNode`，按错误类型生成定向修复策略，最多 3 次修复尝试，失败后明确终止。
 - 可观测 Trace：每个节点执行后由 `WorkflowEngine` 记录节点名、outcome、耗时、输入输出摘要和错误摘要。
@@ -23,7 +25,7 @@
 | 工作流 | 自研轻量 `WorkflowEngine`，不使用 LangGraph/LangChain |
 | SQL | SQLAlchemy、SQLGlot、SQLite，支持 PostgreSQL/MySQL 方言校验、转换和只读执行路径 |
 | LLM | Provider 无关 `LLMClient` 协议，默认 workflow 使用 OpenAI-compatible adapter；测试和 demo 脚本使用 `MockLLMClient` |
-| 配置 | YAML + Pydantic config model |
+| 配置 | YAML + Pydantic config model，默认包含 `configs/examples.yaml` 和 `configs/knowledge.yaml` |
 | 测试与质量 | pytest、ruff |
 | 前端 | React 18、Vite、TypeScript、Vitest |
 
@@ -222,6 +224,8 @@ curl -X POST http://127.0.0.1:8000/api/v1/query \
     "debug": true
   }'
 ```
+
+`/api/v1/query` 响应会返回 `linked_schema`、`retrieved_examples`、`rag_context` 和 `trace`，其中 `rag_context` 是经过 Top-K 裁剪后的 Reference SQL、文档、Metric、Semantic Model 摘要。
 
 查询某次运行记录：
 

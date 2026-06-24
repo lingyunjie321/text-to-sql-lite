@@ -61,6 +61,21 @@ const successResponse: QueryRunResponse = {
       reasons: ["字段匹配"]
     }
   ],
+  rag_context: {
+    reference_sql: [
+      {
+        name: "order_amount",
+        natural_language: "列出订单金额",
+        sql: "SELECT id, amount FROM orders",
+        involved_tables: ["orders"],
+        score: 1,
+        reasons: ["query"]
+      }
+    ],
+    documents: [],
+    metrics: [],
+    semantic_models: []
+  },
   repair_history: [],
   errors: [],
   trace: [

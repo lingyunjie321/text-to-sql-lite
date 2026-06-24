@@ -15,6 +15,9 @@ user: |
   业务方言范式:
   {{ patterns_block }}
 
+  知识库上下文:
+  {{ knowledge_block }}
+
   输出约束:
   - 只返回一条 SQL。
   - 只返回 SQL 文本，不要解释。

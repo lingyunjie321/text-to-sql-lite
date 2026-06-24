@@ -334,6 +334,9 @@ class TextToSQLApiService:
                 raw_config["examples_path"] = config.retrieval.examples_path
                 raw_config["top_k"] = config.retrieval.top_k
                 raw_config["strategy"] = config.retrieval.strategy
+            if node_config.type == "context_retrieval":
+                raw_config["knowledge_path"] = config.retrieval.knowledge_path
+                raw_config["top_k"] = config.retrieval.top_k
             if node_config.type in {"sql_generation", "sql_validation"}:
                 raw_config["target_dialect"] = target_dialect
             if node_config.type == "sql_validation":
@@ -515,6 +518,7 @@ def serialize_run(state: WorkflowState) -> dict[str, Any]:
         "routing_reason": state.data.get("routing_reason"),
         "linked_schema": state.data.get("schema_linking") or state.data.get("linked_schema") or {},
         "retrieved_examples": _summarize_examples(state.data.get("retrieved_examples") or []),
+        "rag_context": _summarize_rag_context(state.data.get("rag_context") or {}),
         "repair_history": state.data.get("repair_history", []),
         "errors": _serialize_errors(state),
         "trace": [_serialize_trace_event(event) for event in state.trace],
@@ -549,6 +553,7 @@ def _serialize_direct_sql(
         "routing_reason": None,
         "linked_schema": {"tables": []},
         "retrieved_examples": [],
+        "rag_context": _summarize_rag_context({}),
         "repair_history": [],
         "errors": errors,
         "trace": [],
@@ -585,6 +590,45 @@ def _summarize_examples(examples: list[dict[str, Any]]) -> list[dict[str, Any]]:
             }
         )
     return summarized
+
+
+def _summarize_rag_context(rag_context: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    """返回 API 层可展示的知识库裁剪结果，避免暴露完整工作流状态。"""
+
+    def summarize_hits(
+        key: str,
+        *,
+        fields: tuple[str, ...],
+    ) -> list[dict[str, Any]]:
+        summarized_hits: list[dict[str, Any]] = []
+        for hit in rag_context.get(key, []):
+            item = hit.get("item", hit) if isinstance(hit, dict) else {}
+            if not isinstance(item, dict):
+                item = {}
+            summarized_hits.append(
+                {
+                    **{field: item.get(field) for field in fields},
+                    "score": hit.get("score") if isinstance(hit, dict) else None,
+                    "reasons": hit.get("reasons", []) if isinstance(hit, dict) else [],
+                }
+            )
+        return summarized_hits
+
+    return {
+        "reference_sql": summarize_hits(
+            "reference_sql",
+            fields=("name", "natural_language", "sql", "involved_tables"),
+        ),
+        "documents": summarize_hits("documents", fields=("title", "content")),
+        "metrics": summarize_hits(
+            "metrics",
+            fields=("name", "description", "expression", "involved_tables"),
+        ),
+        "semantic_models": summarize_hits(
+            "semantic_models",
+            fields=("name", "description", "tables"),
+        ),
+    }
 
 
 def _serialize_errors(state: WorkflowState) -> list[dict[str, Any]]:

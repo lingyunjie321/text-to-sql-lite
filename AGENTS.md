@@ -7,11 +7,11 @@ Text-to-SQL Agent 项目。
 1. 可配置的多阶段工作流编排。
 2. 基于状态的节点间通信。
 3. 节点注册表、工厂和生命周期管理。
-4. Schema Linking，以及 Top-K SQL 示例检索。
+4. Schema / Reference SQL / 文档知识 / Metric / Semantic Model 的 Top-K 检索。
 5. SQL 生成、校验、执行、反思和修复。
 6. 最多三次尝试的修复循环，并且必须有明确终止条件。
 7. 基于查询复杂度的模型路由。
-8. 只使用相关 Schema 和示例进行 Prompt 裁剪。
+8. 只使用相关 Schema、示例、文档片段、指标和语义模型。
 9. SQL 方言校验，以及可选的 SQL 方言转换。
 10. 可观测的执行 Trace。
 
@@ -27,12 +27,14 @@ Text-to-SQL Agent 项目。
 - ruff
 - SQLite 作为默认可执行数据库
 - PostgreSQL 支持可以作为可选能力
+- 可选 LanceDB / FastEmbed / PyArrow
 - LLM 访问必须隐藏在不绑定具体供应商的接口之后
 
 # 架构规则
 
 - 核心工作流引擎不要使用 LangGraph 或 LangChain。
 - 工作流流转必须可配置，不要硬编码在 API 处理函数中。
+- 默认核心链路可以按 Begin -> Selection -> Schema -> Context Retrieval -> GenSQL -> Execute 组织，但 LLM models 层仍必须保留 provider 无关接口和模型 alias。
 - 节点必须实现统一的 BaseNode 接口。
 - 节点必须通过 NodeRegistry 和 NodeFactory 创建。
 - 节点实现不得导入 WorkflowEngine。
@@ -57,7 +59,7 @@ Text-to-SQL Agent 项目。
 # 范围规则
 
 - 不要引入分布式基础设施。
-- 除非后续任务明确要求，否则不要引入向量数据库。
+- 存储/知识库对齐 datus 时允许引入可选向量检索后端；默认仍可使用 SQLite/YAML fallback。
 - 不要实现无关的认证或多租户功能。
 - 不要编造或宣称性能指标。
 - 避免无关重构。

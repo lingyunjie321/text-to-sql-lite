@@ -1,6 +1,6 @@
 workflow:
   name: interview_text_to_sql_demo
-  start_node: schema_linking
+  start_node: begin
   max_steps: 30
   max_repair_attempts: 3
 
@@ -52,6 +52,7 @@ schema:
 
 retrieval:
   examples_path: configs/examples.yaml
+  knowledge_path: configs/knowledge.yaml
   top_k: 5
   strategy: lexical_overlap
 
@@ -91,8 +92,14 @@ logging:
       - x-api-key
 
 nodes:
+  begin:
+    type: begin
+  selection:
+    type: selection
   schema_linking:
     type: schema_linking
+  context_retrieval:
+    type: context_retrieval
   example_retrieval:
     type: example_retrieval
   sql_generation:
@@ -121,9 +128,16 @@ nodes:
     type: finalization
 
 edges:
+  begin:
+    on_success: selection
+  selection:
+    on_text_to_sql: schema_linking
   schema_linking:
-    on_success: example_retrieval
+    on_success: context_retrieval
     on_failure: error_classification
+  context_retrieval:
+    on_success: example_retrieval
+    on_failure: example_retrieval
   example_retrieval:
     on_success: sql_generation
     on_failure: sql_generation

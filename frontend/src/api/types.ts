@@ -67,6 +67,42 @@ export interface RetrievedExamplePayload {
   reasons?: string[];
 }
 
+export interface ReferenceSqlKnowledgePayload {
+  name?: string | null;
+  natural_language?: string | null;
+  sql?: string | null;
+  involved_tables?: string[];
+}
+
+export interface DocumentKnowledgePayload {
+  title?: string | null;
+  content?: string | null;
+}
+
+export interface MetricKnowledgePayload {
+  name?: string | null;
+  description?: string | null;
+  expression?: string | null;
+  involved_tables?: string[];
+}
+
+export interface SemanticModelKnowledgePayload {
+  name?: string | null;
+  description?: string | null;
+  tables?: string[];
+}
+
+export interface RagContextPayload {
+  reference_sql: Array<
+    ReferenceSqlKnowledgePayload & { score?: number | null; reasons?: string[] }
+  >;
+  documents: Array<DocumentKnowledgePayload & { score?: number | null; reasons?: string[] }>;
+  metrics: Array<MetricKnowledgePayload & { score?: number | null; reasons?: string[] }>;
+  semantic_models: Array<
+    SemanticModelKnowledgePayload & { score?: number | null; reasons?: string[] }
+  >;
+}
+
 export interface RepairHistoryItemPayload {
   attempt?: number;
   old_sql?: string;
@@ -91,6 +127,7 @@ export interface QueryRunResponse {
   routing_reason?: string | null;
   linked_schema?: LinkedSchemaPayload;
   retrieved_examples: RetrievedExamplePayload[];
+  rag_context: RagContextPayload;
   repair_history: RepairHistoryItemPayload[];
   errors: WorkflowErrorPayload[];
   trace: TraceEventPayload[];

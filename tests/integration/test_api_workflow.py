@@ -41,8 +41,18 @@ def test_query_endpoint_runs_workflow_and_returns_demo_payload(tmp_path: Path) -
     assert payload["routing_reason"]
     assert payload["linked_schema"]["tables"]
     assert isinstance(payload["retrieved_examples"], list)
+    assert payload["rag_context"]["reference_sql"]
+    assert payload["rag_context"]["documents"]
+    assert payload["rag_context"]["metrics"]
+    assert payload["rag_context"]["semantic_models"]
     assert payload["errors"] == []
     assert payload["result"]["columns"] == ["id", "amount"]
+    assert [event["node_name"] for event in payload["trace"][:4]] == [
+        "begin",
+        "selection",
+        "schema_linking",
+        "context_retrieval",
+    ]
 
     first_trace = payload["trace"][0]
     assert {
@@ -170,3 +180,7 @@ def test_request_config_injects_top_level_retrieval_settings(tmp_path: Path) -> 
     assert retrieval_node["examples_path"] == "configs/examples.yaml"
     assert retrieval_node["top_k"] == 5
     assert retrieval_node["strategy"] == "lexical_overlap"
+
+    context_node = request_config.nodes["context_retrieval"].model_dump(mode="python")
+    assert context_node["knowledge_path"] == "configs/knowledge.yaml"
+    assert context_node["top_k"] == 5

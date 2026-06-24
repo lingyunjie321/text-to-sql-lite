@@ -81,9 +81,10 @@ class SchemaConfig(BaseModel):
 
 
 class RetrievalConfig(BaseModel):
-    """历史 SQL 检索设置。"""
+    """历史 SQL 与本地知识库检索设置。"""
 
     examples_path: str = "configs/examples.yaml"
+    knowledge_path: str = "configs/knowledge.yaml"
     top_k: int = Field(default=5, gt=0)
     strategy: str = "lexical_overlap"
 

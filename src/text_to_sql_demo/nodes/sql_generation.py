@@ -45,6 +45,7 @@ class GenSQLAgenticNode(BaseNode):
             examples=examples,
             original_example_count=state.data.get("available_example_count"),
             business_patterns=business_patterns,
+            rag_context=state.data.get("rag_context"),
             template_path=self.config.get("prompt_template"),
         )
         response = llm_client.complete(

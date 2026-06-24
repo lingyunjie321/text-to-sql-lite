@@ -47,7 +47,7 @@ def query(request: QueryRequest) -> dict[str, Any]:
 
 文件：`src/text_to_sql_demo/workflow/engine.py`
 
-`WorkflowEngine.run` 从 `config.workflow.start_node` 读取起点，即 `schema_linking`。每轮执行：
+`WorkflowEngine.run` 从 `config.workflow.start_node` 读取起点，即 `begin`。每轮执行：
 
 1. 根据节点名读取 `config.nodes[current_node]`。
 2. 调用 `NodeFactory.create` 创建节点。
@@ -58,7 +58,17 @@ def query(request: QueryRequest) -> dict[str, Any]:
 
 维护提示：如果修改 `NodeResult` 或 edge 解析规则，要同步更新 boxed plaintext/Mermaid 图和 `tests/unit/workflow/test_engine.py`。
 
-## 4. SchemaLinkingNode.run 选择相关 Schema
+## 4. BeginNode 和 SelectionNode 初始化任务与意图
+
+文件：`src/text_to_sql_demo/nodes/begin.py`、`src/text_to_sql_demo/nodes/selection.py`
+
+`BeginNode.run` 把原始问题、`request_id` 和入口节点写入 `state.data.task`，用于把任务初始化显式纳入 Trace。
+
+`SelectionNode.run` 做轻量意图分类，当前默认输出 `text_to_sql`，写入 `state.data.intent`。`workflow.yaml` 通过 `on_text_to_sql` 把流程导向 `schema_linking`；后续如果接入非 SQL 意图，可以新增 outcome 和 edge，而不用改 `WorkflowEngine`。
+
+维护提示：如果将 Selection 改成真正多意图分类，需要补充意图枚举、分支测试和 API 响应说明。
+
+## 5. SchemaLinkingNode.run 选择相关 Schema
 
 文件：`src/text_to_sql_demo/nodes/schema_linking.py`
 
@@ -74,7 +84,24 @@ def query(request: QueryRequest) -> dict[str, Any]:
 
 维护提示：如果调整 schema linking 规则、字段上限或输出结构，必须同步更新 PromptBuilder 文档、前端使用的数据表展示和 schema linking 单元测试。
 
-## 5. ExampleRetrievalNode.run 检索 Top-K SQL 示例
+## 6. ContextRetrievalNode.run 检索知识库上下文
+
+文件：`src/text_to_sql_demo/nodes/context_retrieval.py`、`src/text_to_sql_demo/retrieval/knowledge.py`
+
+`ContextRetrievalNode.run` 读取 `schema_linking.tables` 和原始问题，调用 `KnowledgeStore.search`。默认知识库路径是 `configs/knowledge.yaml`，由 `workflow.yaml` 的 `retrieval.knowledge_path` 在请求级配置中注入。
+
+当前 `KnowledgeStore` 支持四类本地 YAML fallback：
+
+- `reference_sql`
+- `documents`
+- `metrics`
+- `semantic_models`
+
+检索策略按问题词项重叠和 linked tables 重叠打分，返回 Top-K，并写入 `state.data.rag_context`。当前阶段没有强依赖向量数据库；后续接入 LanceDB/FastEmbed/PyArrow 时，应保持测试可注入本地 fallback 或 Mock store。
+
+维护提示：如果调整 `rag_context` 结构，需要同步更新 `PromptBuilder`、`serialize_run`、前端 `RagContextPayload` 和上下文检索单元测试。
+
+## 7. ExampleRetrievalNode.run 检索 Top-K SQL 示例
 
 文件：`src/text_to_sql_demo/nodes/example_retrieval.py`
 
@@ -90,7 +117,7 @@ def query(request: QueryRequest) -> dict[str, Any]:
 
 维护提示：如果将来接入向量检索或修改 examples 路径，README 和完成度分析必须明确说明当前能力边界变化。
 
-## 6. GenSQLAgenticNode.run 完成路由、Prompt 和 LLM 调用
+## 8. GenSQLAgenticNode.run 完成路由、Prompt 和 LLM 调用
 
 文件：`src/text_to_sql_demo/nodes/sql_generation.py`
 
@@ -98,7 +125,7 @@ def query(request: QueryRequest) -> dict[str, Any]:
 
 1. 从依赖容器读取 `llm_client`。
 2. 从依赖或配置读取 `model_profiles`。
-3. 读取 `schema_linking`、`retrieved_examples` 和 `target_dialect`。
+3. 读取 `schema_linking`、`rag_context`、`retrieved_examples` 和 `target_dialect`。
 4. 按配置的 `patterns_path` 检索业务方言范式，结果写入 `business_patterns`。
 5. 调用 `ComplexityClassifier().classify(question, linked_schema)`。
 6. 调用 `ModelRouter(profiles).route(complexity)`，simple 选择 `light`，medium/complex 选择 `strong`。
@@ -110,14 +137,15 @@ def query(request: QueryRequest) -> dict[str, Any]:
 
 维护提示：如果将复杂度路由拆成独立节点，或新增模型 alias，必须同步更新 `workflow.yaml`、本文档、README 核心能力和 `tests/unit/routing/test_complexity_routing.py`。
 
-## 7. PromptBuilder.build 做上下文裁剪
+## 9. PromptBuilder.build 做上下文裁剪
 
 文件：`src/text_to_sql_demo/prompts/builder.py`
 
-`PromptBuilder.build` 只把 linked schema、Top-K examples 和业务方言范式放进 prompt：
+`PromptBuilder.build` 只把 linked schema、Top-K examples、RAG 上下文和业务方言范式放进 prompt：
 
 - `Linked schema`：只包含 `schema_linking.tables` 中的表和字段。
 - `Top-K examples`：只包含检索结果中的自然语言问题和 SQL。
+- `Knowledge context`：只包含 `rag_context` 中裁剪后的 Reference SQL、文档片段、Metric 和 Semantic Model。
 - `Business dialect patterns`：只包含按问题、方言和 linked tables 检索到的业务 SQL 范式。
 - `SQL output constraints`：要求只返回一条 SQL，不加解释和代码块，只使用 linked schema。
 
@@ -127,6 +155,10 @@ def query(request: QueryRequest) -> dict[str, Any]:
 - `linked_table_count`
 - `linked_column_count`
 - `example_count`
+- `reference_sql_count`
+- `document_context_count`
+- `metric_context_count`
+- `semantic_model_count`
 - `business_pattern_count`
 - `original_schema_table_count`
 - `injected_schema_table_count`
@@ -135,7 +167,7 @@ def query(request: QueryRequest) -> dict[str, Any]:
 
 维护提示：如果 prompt 内容、summary 字段或裁剪策略变化，要同步更新 prompt 单元测试、Trace 展示说明和面试讲解材料。
 
-## 8. ValidateSQLNode.run 校验 SQL
+## 10. ValidateSQLNode.run 校验 SQL
 
 文件：`src/text_to_sql_demo/nodes/sql_validation.py`
 
@@ -150,7 +182,7 @@ def query(request: QueryRequest) -> dict[str, Any]:
 
 维护提示：如果新增错误类型或改变只读安全规则，需要同步更新完成度分析和修复路径说明。
 
-## 9. ExecuteSQLNode.run 执行已校验 SQL
+## 11. ExecuteSQLNode.run 执行已校验 SQL
 
 文件：`src/text_to_sql_demo/nodes/sql_execution.py`
 
@@ -164,7 +196,7 @@ def query(request: QueryRequest) -> dict[str, Any]:
 
 维护提示：如果新增数据库 driver，不要只改 executor；还要更新配置说明、driver 到 SQLGlot dialect 的映射、只读保障策略、测试矩阵和 README 限制。
 
-## 10. Reflect/Fix 修复闭环
+## 12. Reflect/Fix 修复闭环
 
 文件：`src/text_to_sql_demo/nodes/error_reflection.py`、`src/text_to_sql_demo/nodes/sql_fix.py`
 
@@ -186,7 +218,7 @@ def query(request: QueryRequest) -> dict[str, Any]:
 
 维护提示：如果新增不可修复错误策略或改变修复 prompt，必须同步更新 `tests/integration/test_sql_repair_workflow.py`、前端修复提示和 [工作流文档](文本转SQL工作流.md)。
 
-## 11. FinalizeNode.run 与 API 响应
+## 13. FinalizeNode.run 与 API 响应
 
 文件：`src/text_to_sql_demo/nodes/finalization.py`、`src/text_to_sql_demo/api/service.py`
 
@@ -206,6 +238,7 @@ def query(request: QueryRequest) -> dict[str, Any]:
 - `routing_reason`
 - `linked_schema`
 - `retrieved_examples`
+- `rag_context`
 - `repair_history`
 - `errors`
 - `trace`

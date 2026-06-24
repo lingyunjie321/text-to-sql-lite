@@ -15,7 +15,7 @@ class PromptBuildResult(BaseModel):
 
 
 class PromptBuilder:
-    """只使用 linked schema 和 Top-K 示例构建 SQL 生成 prompt。"""
+    """只使用裁剪后的 schema、示例、知识库上下文和范式构建 prompt。"""
 
     def build(
         self,
@@ -25,6 +25,7 @@ class PromptBuilder:
         linked_schema: dict,
         examples: list[dict],
         business_patterns: list[dict] | None = None,
+        rag_context: dict | None = None,
         original_schema: dict | None = None,
         original_example_count: int | None = None,
         template_path: str | Path | None = None,
@@ -34,6 +35,8 @@ class PromptBuilder:
         examples_block = _examples_block(examples)
         resolved_business_patterns = business_patterns or []
         patterns_block = _patterns_block(resolved_business_patterns)
+        resolved_rag_context = rag_context or {}
+        knowledge_block = _knowledge_block(resolved_rag_context)
         injected_table_count = len(tables)
         injected_example_count = len(examples)
         original_schema_table_count = _count_schema_tables(original_schema or linked_schema)
@@ -48,6 +51,10 @@ class PromptBuilder:
             "linked_column_count": column_count,
             "example_count": injected_example_count,
             "business_pattern_count": len(resolved_business_patterns),
+            "reference_sql_count": len(resolved_rag_context.get("reference_sql", [])),
+            "document_context_count": len(resolved_rag_context.get("documents", [])),
+            "metric_context_count": len(resolved_rag_context.get("metrics", [])),
+            "semantic_model_count": len(resolved_rag_context.get("semantic_models", [])),
             "original_schema_table_count": original_schema_table_count,
             "injected_schema_table_count": injected_table_count,
             "original_example_count": resolved_original_example_count,
@@ -59,6 +66,7 @@ class PromptBuilder:
             "schema_block": schema_block,
             "examples_block": examples_block,
             "patterns_block": patterns_block,
+            "knowledge_block": knowledge_block,
         }
         if template_path:
             rendered_prompt = PromptTemplateRenderer.from_path(template_path).render(context)
@@ -78,6 +86,8 @@ class PromptBuilder:
                 examples_block,
                 "Business dialect patterns:",
                 patterns_block,
+                "Knowledge context:",
+                knowledge_block,
                 "SQL output constraints:",
                 "- Return exactly one SQL query.",
                 "- Return only SQL text without explanations.",
@@ -137,3 +147,42 @@ def _patterns_block(patterns: list[dict]) -> str:
             ]
         )
     return "\n".join(pattern_lines)
+
+
+def _knowledge_block(rag_context: dict) -> str:
+    knowledge_lines = []
+    for index, hit in enumerate(rag_context.get("reference_sql", []), start=1):
+        item = hit.get("item", hit)
+        knowledge_lines.extend(
+            [
+                f"Reference SQL {index} name: {item.get('name')}",
+                f"Reference SQL {index} question: {item.get('natural_language')}",
+                f"Reference SQL {index} SQL: {item.get('sql')}",
+            ]
+        )
+    for index, hit in enumerate(rag_context.get("documents", []), start=1):
+        item = hit.get("item", hit)
+        knowledge_lines.extend(
+            [
+                f"Document {index} title: {item.get('title')}",
+                f"Document {index} content: {item.get('content')}",
+            ]
+        )
+    for index, hit in enumerate(rag_context.get("metrics", []), start=1):
+        item = hit.get("item", hit)
+        knowledge_lines.extend(
+            [
+                f"Metric {index} name: {item.get('name')}",
+                f"Metric {index} description: {item.get('description')}",
+                f"Metric {index} expression: {item.get('expression')}",
+            ]
+        )
+    for index, hit in enumerate(rag_context.get("semantic_models", []), start=1):
+        item = hit.get("item", hit)
+        knowledge_lines.extend(
+            [
+                f"Semantic model {index} name: {item.get('name')}",
+                f"Semantic model {index} description: {item.get('description')}",
+            ]
+        )
+    return "\n".join(knowledge_lines)

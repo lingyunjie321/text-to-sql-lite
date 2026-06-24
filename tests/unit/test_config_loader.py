@@ -9,10 +9,13 @@ def test_load_default_workflow_config() -> None:
     config = load_workflow_config(Path("workflow.yaml"))
 
     assert config.workflow.name == "interview_text_to_sql_demo"
-    assert config.workflow.start_node == "schema_linking"
+    assert config.workflow.start_node == "begin"
     assert config.dialect.name == "sqlite"
     assert config.database.default == "demo_sqlite"
     assert config.schema_config.catalog_source == "database"
+    assert config.retrieval.knowledge_path == "configs/knowledge.yaml"
+    assert config.nodes["begin"].type == "begin"
+    assert config.nodes["context_retrieval"].type == "context_retrieval"
     assert config.nodes["schema_linking"].type == "schema_linking"
 
 
