@@ -19,6 +19,7 @@ from sqlalchemy import (
     inspect,
     select,
     text,
+    update,
 )
 from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.exc import SQLAlchemyError
@@ -163,6 +164,37 @@ class MetadataStore:
             )
         except SQLAlchemyError as exc:
             raise MetadataStoreError("列出收藏 SQL 失败") from exc
+
+    def update_saved_query_status(
+        self,
+        saved_query_id: str,
+        *,
+        status: SavedQueryStatus,
+        updated_at: datetime,
+    ) -> SavedQueryRecord | None:
+        """更新收藏 SQL 的轻量审核状态，不处理权限和多租户。"""
+        try:
+            with self._engine.begin() as connection:
+                existing = connection.execute(
+                    select(self.saved_queries).where(
+                        self.saved_queries.c.id == saved_query_id
+                    )
+                ).mappings().first()
+                if existing is None:
+                    return None
+                connection.execute(
+                    update(self.saved_queries)
+                    .where(self.saved_queries.c.id == saved_query_id)
+                    .values(status=status, updated_at=updated_at.isoformat())
+                )
+                row = connection.execute(
+                    select(self.saved_queries).where(
+                        self.saved_queries.c.id == saved_query_id
+                    )
+                ).mappings().one()
+            return _row_to_saved_query(row)
+        except SQLAlchemyError as exc:
+            raise MetadataStoreError("更新收藏 SQL 状态失败") from exc
 
     def save_feedback(self, feedback: FeedbackRecord) -> FeedbackRecord:
         """保存用户对某次运行的反馈。"""

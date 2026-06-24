@@ -14,6 +14,7 @@ from text_to_sql_demo.api.models import (
     FeedbackCreateRequest,
     QueryRequest,
     SavedQueryCreateRequest,
+    SavedQueryStatusUpdateRequest,
 )
 from text_to_sql_demo.config.env import load_env_files
 from text_to_sql_demo.config.loader import load_workflow_config
@@ -289,6 +290,13 @@ class TextToSQLApiService:
 
     def create_saved_query(self, request: SavedQueryCreateRequest) -> dict[str, Any]:
         """从一次运行或显式 SQL 创建收藏 SQL。"""
+        if request.status != "draft":
+            raise ApiError(
+                status_code=400,
+                code="saved_query_status_requires_review",
+                message="普通保存 SQL 只能创建 draft，approved/deprecated 请通过审核入口更新",
+                details={"requested_status": request.status},
+            )
         source_run = (
             self.metadata_store.get_query_run(request.request_id)
             if request.request_id is not None
@@ -322,7 +330,7 @@ class TextToSQLApiService:
             sql=sql,
             created_from_run_id=request.request_id,
             tags=request.tags,
-            status=request.status,
+            status="draft",
             created_at=now,
             updated_at=now,
         )
@@ -331,6 +339,26 @@ class TextToSQLApiService:
     def list_saved_queries(self, *, limit: int = 20) -> dict[str, Any]:
         """列出收藏 SQL。"""
         return self.metadata_store.list_saved_queries(limit=limit).model_dump(mode="python")
+
+    def update_saved_query_status(
+        self,
+        saved_query_id: str,
+        request: SavedQueryStatusUpdateRequest,
+    ) -> dict[str, Any]:
+        """轻量审核入口：更新 saved_query 状态，真实权限控制留给后续产品化。"""
+        saved_query = self.metadata_store.update_saved_query_status(
+            saved_query_id,
+            status=request.status,
+            updated_at=utc_now(),
+        )
+        if saved_query is None:
+            raise ApiError(
+                status_code=404,
+                code="saved_query_not_found",
+                message="未找到可更新状态的收藏 SQL",
+                details={"saved_query_id": saved_query_id},
+            )
+        return saved_query.model_dump(mode="python")
 
     def record_feedback(
         self,

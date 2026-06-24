@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from text_to_sql_demo.llm.client import MockLLMClient
 from text_to_sql_demo.main import create_app
+from text_to_sql_demo.memory import search_approved_saved_query_reference_sql
 from text_to_sql_demo.metadata.store import MetadataStore
 
 
@@ -85,6 +86,7 @@ def test_saved_query_and_feedback_api_use_persisted_run(tmp_path: Path) -> None:
     assert saved_payload["created_from_run_id"] == request_id
     assert saved_payload["sql"] == "SELECT id, amount FROM orders ORDER BY id"
     assert saved_payload["tags"] == ["运营", "订单"]
+    assert saved_payload["status"] == "draft"
 
     assert feedback_response.status_code == 200
     feedback_payload = feedback_response.json()
@@ -94,6 +96,64 @@ def test_saved_query_and_feedback_api_use_persisted_run(tmp_path: Path) -> None:
     list_response = client.get("/api/v1/saved-queries")
     assert list_response.status_code == 200
     assert list_response.json()["items"][0]["name"] == "订单金额明细"
+
+
+def test_saved_query_create_rejects_direct_approved_status(tmp_path: Path) -> None:
+    client = build_client(tmp_path)
+
+    response = client.post(
+        "/api/v1/saved-queries",
+        json={
+            "name": "直接可信 SQL",
+            "question": "统计订单金额",
+            "sql": "SELECT SUM(amount) FROM orders",
+            "status": "approved",
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error"]["code"] == "saved_query_status_requires_review"
+
+    list_response = client.get("/api/v1/saved-queries")
+    assert list_response.status_code == 200
+    assert list_response.json()["total"] == 0
+
+
+def test_saved_query_status_review_endpoint_approves_draft_for_retrieval(
+    tmp_path: Path,
+) -> None:
+    metadata_store = MetadataStore(database_url=f"sqlite:///{tmp_path / 'metadata.db'}")
+    app = create_app(
+        database_url=f"sqlite:///{tmp_path / 'demo.db'}",
+        llm_client=MockLLMClient(),
+        metadata_store=metadata_store,
+    )
+    client = TestClient(app)
+    save_response = client.post(
+        "/api/v1/saved-queries",
+        json={
+            "name": "可信订单金额",
+            "question": "统计订单金额",
+            "sql": "SELECT SUM(amount) FROM orders",
+            "tags": ["订单", "金额"],
+        },
+    )
+    saved_query_id = save_response.json()["id"]
+
+    approve_response = client.patch(
+        f"/api/v1/saved-queries/{saved_query_id}/status",
+        json={"status": "approved"},
+    )
+
+    assert approve_response.status_code == 200
+    assert approve_response.json()["status"] == "approved"
+    hits = search_approved_saved_query_reference_sql(
+        metadata_store=metadata_store,
+        query="统计订单金额",
+        involved_tables=["orders"],
+        top_k=1,
+    )
+    assert [hit.item.name for hit in hits] == ["可信订单金额"]
 
 
 def test_get_persisted_run_returns_full_response_after_service_restart(

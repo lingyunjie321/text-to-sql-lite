@@ -10,6 +10,7 @@ from text_to_sql_demo.api.models import (
     FeedbackCreateRequest,
     QueryRequest,
     SavedQueryCreateRequest,
+    SavedQueryStatusUpdateRequest,
     TranspileRequest,
 )
 from text_to_sql_demo.api.service import ApiError, TextToSQLApiService
@@ -137,6 +138,17 @@ def create_app(
     def list_saved_queries(limit: int = 20) -> dict[str, Any]:
         """列出收藏 SQL。"""
         return get_service().list_saved_queries(limit=limit)
+
+    @app.patch("/api/v1/saved-queries/{saved_query_id}/status")
+    def update_saved_query_status(
+        saved_query_id: str,
+        request: SavedQueryStatusUpdateRequest,
+    ) -> dict[str, Any]:
+        """轻量审核入口：更新收藏 SQL 状态，真实权限控制留给后续产品化。"""
+        return get_service().update_saved_query_status(
+            saved_query_id=saved_query_id,
+            request=request,
+        )
 
     @app.post("/api/v1/runs/{request_id}/feedback")
     def record_feedback(request_id: str, request: FeedbackCreateRequest) -> dict[str, Any]:

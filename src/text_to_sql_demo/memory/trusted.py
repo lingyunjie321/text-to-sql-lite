@@ -8,7 +8,7 @@ from text_to_sql_demo.retrieval.knowledge import (
     ReferenceSqlItem,
 )
 
-TRUSTED_SAVED_QUERY_CANDIDATE_LIMIT = 50
+TRUSTED_SAVED_QUERY_FALLBACK_SCAN_LIMIT = 1000
 
 
 def search_approved_saved_query_reference_sql(
@@ -17,12 +17,14 @@ def search_approved_saved_query_reference_sql(
     query: str,
     involved_tables: list[str],
     top_k: int,
+    fallback_scan_limit: int = TRUSTED_SAVED_QUERY_FALLBACK_SCAN_LIMIT,
 ) -> list[KnowledgeSearchHit[ReferenceSqlItem]]:
     """从 approved saved_query 中检索可注入 prompt 的可信 Reference SQL。"""
     if metadata_store is None or top_k <= 0:
         return []
 
-    candidate_limit = min(TRUSTED_SAVED_QUERY_CANDIDATE_LIMIT, max(top_k * 5, top_k))
+    # SQLite/YAML fallback 暂不引入 FTS 或向量库，先扫描较大 approved 候选再词法 Top-K。
+    candidate_limit = max(top_k, fallback_scan_limit)
     saved_queries = metadata_store.list_saved_queries(
         status="approved",
         limit=candidate_limit,

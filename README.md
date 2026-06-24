@@ -13,9 +13,9 @@
 - Agentic SQL 生成：`GenSQLAgenticNode.run` 根据 `ComplexityClassifier` 结果选择 `light` 或 `strong` 模型 alias，并注入 linked schema、RAG 上下文、Top-K 示例和业务方言范式。
 - SQL 安全链路：`SQLValidator` 基于 SQLGlot 做方言解析、单语句、只读 SELECT 和 schema 引用校验；`SQLExecutor` 只执行已校验 SQL。
 - 策略反思闭环：校验或执行失败后进入 `ReflectionDecisionNode`，按错误类型路由到 `FIX_SQL`、`RELINK_SCHEMA`、`RETRIEVE_CONTEXT`、`REASONING_REWRITE` 或 `HITL`，最多 3 轮并有明确终止条件。
-- 轻量 SQLContext 记忆：失败和成功 SQL 尝试都会沉淀 hash/长度、错误类型、结果摘要、反思策略和原因摘要，供生成、修复、重写 prompt 使用，不保存完整结果集。
+- 轻量 SQLContext 记忆：失败和成功 SQL 尝试都会沉淀 hash/长度、错误类型、结果摘要、反思策略和原因摘要；`SUCCESS` 只表示单次 workflow 成功收敛，用于回放和解释，不会自动变成跨运行可信知识。
 - 可观测 Trace：每个节点执行后由 `WorkflowEngine` 记录节点名、outcome、耗时、输入输出摘要和错误摘要。
-- 内部 metadata store：项目自身使用 SQLite 沉淀 `query_run`、`trace_event`、`saved_query` 和 `feedback`，只有 `approved` saved_query 会作为可信 Reference SQL 进入后续检索，不写入业务目标库。
+- 内部 metadata store：项目自身使用 SQLite 沉淀 `query_run`、`trace_event`、`saved_query` 和 `feedback`；普通 saved_query 先保存为 `draft`，经轻量审核入口更新为 `approved` 后才会作为可信 Reference SQL 进入后续检索，不写入业务目标库。
 - 运行时配置：前端可临时配置数据库连接和 `light/strong` 双模型路由，请求通过 `runtime_config_id` 使用对应配置。
 - 前端演示：React/Vite 页面支持自然语言查询、运行配置、SQL 查看/编辑、结果展示、保存 SQL、反馈、历史记录和开发者 Trace 展开。
 

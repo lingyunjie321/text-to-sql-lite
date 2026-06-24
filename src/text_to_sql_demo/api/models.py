@@ -2,6 +2,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from text_to_sql_demo.metadata.models import SavedQueryStatus
 from text_to_sql_demo.sql.dialect import DialectName
 
 
@@ -41,6 +42,12 @@ class SavedQueryCreateRequest(BaseModel):
     sql: str | None = None
     tags: list[str] = Field(default_factory=list)
     status: Literal["draft", "approved", "deprecated"] = "draft"
+
+
+class SavedQueryStatusUpdateRequest(BaseModel):
+    """轻量审核入口的状态更新请求，真实权限控制留给后续产品化。"""
+
+    status: SavedQueryStatus
 
 
 class FeedbackCreateRequest(BaseModel):

@@ -140,3 +140,34 @@ def test_metadata_store_filters_saved_queries_by_status(tmp_path) -> None:
 
     assert result.total == 1
     assert result.items == [approved]
+
+
+def test_metadata_store_updates_saved_query_status(tmp_path) -> None:
+    store = MetadataStore(database_url=f"sqlite:///{tmp_path / 'metadata.db'}")
+    saved_query = store.save_saved_query(
+        SavedQueryRecord(
+            id="saved-1",
+            name="订单总金额",
+            question="统计订单金额",
+            sql="SELECT SUM(amount) FROM orders",
+            tags=["订单"],
+            status="draft",
+            created_at=NOW,
+            updated_at=NOW,
+        )
+    )
+
+    updated = store.update_saved_query_status(
+        saved_query.id,
+        status="approved",
+        updated_at=NOW,
+    )
+
+    assert updated is not None
+    assert updated.status == "approved"
+    assert store.list_saved_queries(status="approved", limit=10).items == [updated]
+    assert store.update_saved_query_status(
+        "missing",
+        status="approved",
+        updated_at=NOW,
+    ) is None
