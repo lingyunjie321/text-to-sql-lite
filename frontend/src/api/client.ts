@@ -17,16 +17,21 @@ export interface RunQueryRequest {
   question: string;
   targetDialect: DialectName;
   runtimeConfigId?: string | null;
+  databasePresetId?: string | null;
 }
 
 export interface RunEditedSqlRequest {
   sql: string;
   targetDialect: DialectName;
   runtimeConfigId?: string | null;
+  databasePresetId?: string | null;
 }
 
 export interface TextToSqlClient {
-  getSchema: (runtimeConfigId?: string | null) => Promise<SchemaResponse>;
+  getSchema: (
+    runtimeConfigId?: string | null,
+    databasePresetId?: string | null
+  ) => Promise<SchemaResponse>;
   getRuntimeOptions: () => Promise<RuntimeOptionsResponse>;
   createRuntimeConfig: (request: RuntimeConfigCreateRequest) => Promise<RuntimeConfigResponse>;
   listRuns: () => Promise<QueryRunListResponse>;
@@ -52,8 +57,15 @@ export class ApiClientError extends Error {
 
 export function createTextToSqlClient(baseUrl = ""): TextToSqlClient {
   return {
-    getSchema: (runtimeConfigId) => {
-      const query = runtimeConfigId ? `?runtime_config_id=${encodeURIComponent(runtimeConfigId)}` : "";
+    getSchema: (runtimeConfigId, databasePresetId) => {
+      const params = new URLSearchParams();
+      if (runtimeConfigId) {
+        params.set("runtime_config_id", runtimeConfigId);
+      }
+      if (databasePresetId) {
+        params.set("database_preset_id", databasePresetId);
+      }
+      const query = params.size > 0 ? `?${params.toString()}` : "";
       return requestJson<SchemaResponse>(`${baseUrl}/api/v1/schema${query}`);
     },
     getRuntimeOptions: () => requestJson<RuntimeOptionsResponse>(`${baseUrl}/api/v1/runtime/options`),
@@ -74,7 +86,8 @@ export function createTextToSqlClient(baseUrl = ""): TextToSqlClient {
           question: request.question,
           target_dialect: request.targetDialect,
           max_attempts: 3,
-          runtime_config_id: request.runtimeConfigId ?? null
+          runtime_config_id: request.runtimeConfigId ?? null,
+          database_preset_id: request.databasePresetId ?? null
         })
       }),
     runEditedSql: (request) =>
@@ -85,7 +98,8 @@ export function createTextToSqlClient(baseUrl = ""): TextToSqlClient {
           sql: request.sql,
           target_dialect: request.targetDialect,
           max_rows: 100,
-          runtime_config_id: request.runtimeConfigId ?? null
+          runtime_config_id: request.runtimeConfigId ?? null,
+          database_preset_id: request.databasePresetId ?? null
         })
       }),
     createSavedQuery: (request) =>

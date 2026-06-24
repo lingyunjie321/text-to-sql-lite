@@ -11,6 +11,12 @@ dialect:
 
 database:
   default: demo_sqlite
+  sqlite_discovery:
+    enabled: true
+    directory: data/sqlite
+    exclude_files:
+      - metadata.db
+    read_only: true
   connections:
     demo_sqlite:
       driver: sqlite

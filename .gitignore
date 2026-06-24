@@ -16,3 +16,4 @@ frontend/coverage/
 frontend/.vite/
 frontend/*.tsbuildinfo
 *.egg-info/
+.workbuddy

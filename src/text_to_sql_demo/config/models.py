@@ -38,11 +38,22 @@ class DatabaseConnectionConfig(BaseModel):
     read_only: bool = True
 
 
+class SqliteDiscoveryConfig(BaseModel):
+    """本地 SQLite 文件自动发现设置。"""
+
+    enabled: bool = True
+    directory: str = "data/sqlite"
+    exclude_files: list[str] = Field(default_factory=lambda: ["metadata.db"])
+    read_only: bool = True
+
+
 class DatabaseConfig(BaseModel):
     """数据库连接集合。"""
 
     default: str
     connections: dict[str, DatabaseConnectionConfig]
+    sqlite_discovery: SqliteDiscoveryConfig = Field(default_factory=SqliteDiscoveryConfig)
+
 
 
 class ModelAliasConfig(BaseModel):

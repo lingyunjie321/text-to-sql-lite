@@ -12,6 +12,9 @@ def test_load_default_workflow_config() -> None:
     assert config.workflow.start_node == "begin"
     assert config.dialect.name == "sqlite"
     assert config.database.default == "demo_sqlite"
+    assert config.database.sqlite_discovery.enabled is True
+    assert config.database.sqlite_discovery.directory == "data/sqlite"
+    assert "metadata.db" in config.database.sqlite_discovery.exclude_files
     assert config.schema_config.catalog_source == "database"
     assert config.retrieval.knowledge_path == "configs/knowledge.yaml"
     assert config.nodes["begin"].type == "begin"

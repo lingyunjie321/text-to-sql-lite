@@ -72,6 +72,11 @@ from text_to_sql_demo.runtime.resolver import (
     RuntimeConfigResolver,
     driver_to_dialect,
 )
+from text_to_sql_demo.runtime.sqlite_discovery import (
+    DiscoveredSQLiteDatabase,
+    configured_sqlite_paths,
+    discover_sqlite_databases,
+)
 from text_to_sql_demo.runtime.store import RuntimeConfigStore
 from text_to_sql_demo.runtime.tester import RuntimeConfigTester
 from text_to_sql_demo.schema.catalog import DatabaseSchemaMetadata, read_schema_metadata
@@ -150,18 +155,33 @@ class TextToSQLApiService:
     def get_runtime_options(self) -> dict[str, Any]:
         """返回前端可选择的运行时预设，所有字段均不包含真实密钥。"""
         return {
-            "database_presets": [
-                {
-                    "id": preset_id,
-                    "driver": connection.driver,
-                    "display_name": preset_id,
-                    "target_dialect": driver_to_dialect(connection.driver),
-                    "read_only": connection.read_only,
-                }
-                for preset_id, connection in self.config.database.connections.items()
-            ],
+            "database_presets": self._database_preset_options(),
             "model_presets": self._model_preset_options(),
         }
+
+    def _database_preset_options(self) -> list[dict[str, Any]]:
+        """合并 workflow 固定预设和本地 SQLite 自动发现预设。"""
+        configured_presets = [
+            {
+                "id": preset_id,
+                "driver": connection.driver,
+                "display_name": preset_id,
+                "target_dialect": driver_to_dialect(connection.driver),
+                "read_only": connection.read_only,
+            }
+            for preset_id, connection in self.config.database.connections.items()
+        ]
+        discovered_presets = [
+            {
+                "id": discovered.preset_id,
+                "driver": "sqlite",
+                "display_name": discovered.display_name,
+                "target_dialect": "sqlite",
+                "read_only": discovered.read_only,
+            }
+            for discovered in self._discover_sqlite_databases()
+        ]
+        return [*configured_presets, *discovered_presets]
 
     def _model_preset_options(self) -> dict[str, list[dict[str, Any]]]:
         """按轻量/强力槽位返回模型预设数组，保持前端响应结构稳定。"""
@@ -241,7 +261,10 @@ class TextToSQLApiService:
 
     def run_query(self, request: QueryRequest) -> dict[str, Any]:
         """执行 Text-to-SQL 工作流并返回演示响应。"""
-        resolved = self._resolve_runtime_config(request.runtime_config_id)
+        resolved = self._resolve_request_runtime(
+            runtime_config_id=request.runtime_config_id,
+            database_preset_id=request.database_preset_id,
+        )
         self.ensure_database(database_url=resolved.database_url)
         schema = self.read_schema(database_url=resolved.database_url)
         request_id = get_log_context().get("request_id") or str(uuid4())
@@ -252,6 +275,7 @@ class TextToSQLApiService:
                 "schema": schema.model_dump(mode="python"),
                 "target_dialect": resolved.target_dialect,
                 "runtime_config_id": resolved.runtime_config_id,
+                "database_preset_id": request.database_preset_id,
                 "max_repair_attempts": request.max_attempts,
                 "debug": request.debug,
             },
@@ -386,7 +410,10 @@ class TextToSQLApiService:
 
     def execute_sql(self, request: ExecuteSQLRequest) -> dict[str, Any]:
         """校验并执行用户编辑后的只读 SQL，不进入 Agent 工作流。"""
-        resolved = self._resolve_runtime_config(request.runtime_config_id)
+        resolved = self._resolve_request_runtime(
+            runtime_config_id=request.runtime_config_id,
+            database_preset_id=request.database_preset_id,
+        )
         self.ensure_database(database_url=resolved.database_url)
         schema = self.read_schema(database_url=resolved.database_url)
         request_id = str(uuid4())
@@ -507,9 +534,17 @@ class TextToSQLApiService:
         )
         self.metadata_store.save_query_run(record, trace_events=[])
 
-    def get_schema(self, *, runtime_config_id: str | None = None) -> DatabaseSchemaMetadata:
-        """按可选 runtime_config_id 返回对应数据库 Schema。"""
-        resolved = self._resolve_runtime_config(runtime_config_id)
+    def get_schema(
+        self,
+        *,
+        runtime_config_id: str | None = None,
+        database_preset_id: str | None = None,
+    ) -> DatabaseSchemaMetadata:
+        """按可选 runtime_config_id 或 database_preset_id 返回对应数据库 Schema。"""
+        resolved = self._resolve_request_runtime(
+            runtime_config_id=runtime_config_id,
+            database_preset_id=database_preset_id,
+        )
         self.ensure_database(database_url=resolved.database_url)
         return self.read_schema(database_url=resolved.database_url)
 
@@ -605,6 +640,27 @@ class TextToSQLApiService:
                 details={"runtime_config_id": runtime_config_id},
             ) from exc
 
+    def _resolve_request_runtime(
+        self,
+        *,
+        runtime_config_id: str | None,
+        database_preset_id: str | None,
+    ) -> ResolvedRuntimeConfig:
+        """解析一次请求实际使用的数据库、方言和模型依赖。"""
+        if runtime_config_id is not None:
+            return self._resolve_runtime_config(runtime_config_id)
+
+        if database_preset_id:
+            database = self._preset_database_config(database_preset_id)
+            return ResolvedRuntimeConfig(
+                database_url=database.database_url.get_secret_value(),
+                target_dialect=database.target_dialect,
+                llm_client=self.llm_client,
+                model_profiles=_model_profiles(self.config),
+            )
+
+        return self._resolve_runtime_config(None)
+
     def _runtime_database_config(
         self,
         selection: RuntimeDatabaseSelection,
@@ -620,21 +676,46 @@ class TextToSQLApiService:
             )
         return self._custom_database_config(selection.config)
 
-    def _preset_database_config(self, preset_id: str) -> RuntimeDatabaseConfig:
-        if preset_id not in self.config.database.connections:
-            raise ApiError(
-                status_code=404,
-                code="runtime_preset_not_found",
-                message="数据库预设不存在",
-                details={"preset_id": preset_id},
-            )
-        connection = self.config.database.connections[preset_id]
-        return RuntimeDatabaseConfig(
-            driver=connection.driver,
-            database_url=SecretStr(_resolve_database_url(self.config, connection_name=preset_id)),
-            target_dialect=driver_to_dialect(connection.driver),
-            display_name=preset_id,
+    def _discover_sqlite_databases(self) -> list[DiscoveredSQLiteDatabase]:
+        return discover_sqlite_databases(
+            self.config.database.sqlite_discovery,
+            configured_sqlite_paths=configured_sqlite_paths(self.config.database.connections),
+            reserved_preset_ids=set(self.config.database.connections),
         )
+
+    def _preset_database_config(self, preset_id: str) -> RuntimeDatabaseConfig:
+        connection = self.config.database.connections.get(preset_id)
+        if connection is not None:
+            return RuntimeDatabaseConfig(
+                driver=connection.driver,
+                database_url=SecretStr(
+                    _resolve_database_url(self.config, connection_name=preset_id)
+                ),
+                target_dialect=driver_to_dialect(connection.driver),
+                display_name=preset_id,
+            )
+
+        discovered = self._discovered_sqlite_by_id().get(preset_id)
+        if discovered is not None:
+            return RuntimeDatabaseConfig(
+                driver="sqlite",
+                database_url=SecretStr(discovered.database_url),
+                target_dialect="sqlite",
+                display_name=discovered.display_name,
+            )
+
+        raise ApiError(
+            status_code=404,
+            code="runtime_preset_not_found",
+            message="数据库预设不存在",
+            details={"preset_id": preset_id},
+        )
+
+    def _discovered_sqlite_by_id(self) -> dict[str, DiscoveredSQLiteDatabase]:
+        return {
+            discovered.preset_id: discovered
+            for discovered in self._discover_sqlite_databases()
+        }
 
     def _custom_database_config(
         self,

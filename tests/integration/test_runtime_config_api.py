@@ -14,10 +14,15 @@ from text_to_sql_demo.runtime.store import RuntimeConfigStore
 def build_client_with_store(
     *,
     llm_client: LLMClient | None = None,
+    config_path: str | Path = "workflow.yaml",
 ) -> tuple[TestClient, RuntimeConfigStore]:
     """创建带共享 runtime store 的测试客户端。"""
     store = RuntimeConfigStore()
-    app = create_app(llm_client=llm_client or MockLLMClient(), runtime_store=store)
+    app = create_app(
+        config_path=config_path,
+        llm_client=llm_client or MockLLMClient(),
+        runtime_store=store,
+    )
     return TestClient(app), store
 
 
@@ -43,6 +48,47 @@ def create_runtime_sqlite_database(database_path: Path) -> None:
             )
     finally:
         engine.dispose()
+
+
+def create_discovery_config(config_path: Path, sqlite_dir: Path) -> None:
+    """创建开启 SQLite 自动发现的最小 workflow 配置。"""
+    demo_path = sqlite_dir / "demo.db"
+    config_path.write_text(
+        f"""
+workflow:
+  name: discovery_test
+  start_node: begin
+  max_steps: 30
+  max_repair_attempts: 3
+dialect:
+  name: sqlite
+  target_dialect: sqlite
+database:
+  default: demo_sqlite
+  sqlite_discovery:
+    enabled: true
+    directory: {sqlite_dir}
+    exclude_files:
+      - metadata.db
+  connections:
+    demo_sqlite:
+      driver: sqlite
+      fallback_url: sqlite:///{demo_path}
+      read_only: true
+models:
+  aliases:
+    light:
+      provider: mock
+      model: mock-light
+    strong:
+      provider: mock
+      model: mock-strong
+nodes:
+  begin:
+    type: begin
+""",
+        encoding="utf-8",
+    )
 
 
 def create_runtime_config(client: TestClient, database_path: Path) -> str:
@@ -91,6 +137,78 @@ def test_runtime_options_returns_desensitized_database_and_model_presets() -> No
     assert [item["id"] for item in model_presets["light"]] == ["light"]
     assert [item["id"] for item in model_presets["strong"]] == ["strong"]
     assert_no_secrets(payload)
+
+
+def test_runtime_options_auto_discovers_sqlite_database_presets(tmp_path: Path) -> None:
+    sqlite_dir = tmp_path / "sqlite"
+    sqlite_dir.mkdir()
+    create_runtime_sqlite_database(sqlite_dir / "demo.db")
+    create_runtime_sqlite_database(sqlite_dir / "northwind.db")
+    create_runtime_sqlite_database(sqlite_dir / "metadata.db")
+    config_path = tmp_path / "workflow.yaml"
+    create_discovery_config(config_path, sqlite_dir)
+    client, _store = build_client_with_store(config_path=config_path)
+
+    response = client.get("/api/v1/runtime/options")
+
+    assert response.status_code == 200
+    database_presets = response.json()["database_presets"]
+    preset_ids = [item["id"] for item in database_presets]
+    assert "demo_sqlite" in preset_ids
+    assert "sqlite_file_northwind" in preset_ids
+    assert "sqlite_file_metadata" not in preset_ids
+    northwind = next(item for item in database_presets if item["id"] == "sqlite_file_northwind")
+    assert northwind == {
+        "id": "sqlite_file_northwind",
+        "driver": "sqlite",
+        "display_name": "northwind.db",
+        "target_dialect": "sqlite",
+        "read_only": True,
+    }
+
+
+def test_schema_uses_auto_discovered_sqlite_database_preset(tmp_path: Path) -> None:
+    sqlite_dir = tmp_path / "sqlite"
+    sqlite_dir.mkdir()
+    create_runtime_sqlite_database(sqlite_dir / "demo.db")
+    create_runtime_sqlite_database(sqlite_dir / "northwind.db")
+    config_path = tmp_path / "workflow.yaml"
+    create_discovery_config(config_path, sqlite_dir)
+    client, _store = build_client_with_store(config_path=config_path)
+
+    response = client.get(
+        "/api/v1/schema",
+        params={"database_preset_id": "sqlite_file_northwind"},
+    )
+
+    assert response.status_code == 200
+    assert set(response.json()["tables"]) == {"runtime_items"}
+
+
+def test_execute_sql_uses_auto_discovered_sqlite_database_preset(tmp_path: Path) -> None:
+    sqlite_dir = tmp_path / "sqlite"
+    sqlite_dir.mkdir()
+    create_runtime_sqlite_database(sqlite_dir / "demo.db")
+    northwind_path = sqlite_dir / "northwind.db"
+    create_runtime_sqlite_database(northwind_path)
+    config_path = tmp_path / "workflow.yaml"
+    create_discovery_config(config_path, sqlite_dir)
+    client, _store = build_client_with_store(config_path=config_path)
+
+    response = client.post(
+        "/api/v1/sql/execute",
+        json={
+            "sql": "SELECT name FROM runtime_items ORDER BY id",
+            "database_preset_id": "sqlite_file_northwind",
+            "target_dialect": "sqlite",
+            "max_rows": 5,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "success"
+    assert payload["result"]["rows"] == [{"name": "runtime-row"}]
 
 
 def test_create_runtime_config_with_preset_database_and_custom_mock_models() -> None:

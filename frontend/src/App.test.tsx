@@ -239,6 +239,13 @@ const runtimeOptionsResponse: RuntimeOptionsResponse = {
       display_name: "demo_sqlite",
       target_dialect: "sqlite",
       read_only: true
+    },
+    {
+      id: "sqlite_file_northwind",
+      driver: "sqlite",
+      display_name: "northwind.db",
+      target_dialect: "sqlite",
+      read_only: true
     }
   ],
   model_presets: {
@@ -294,6 +301,42 @@ describe("App", () => {
     expect(screen.queryByText("Agent Trace")).not.toBeInTheDocument();
   });
 
+  it("顶部数据源来自后端预设，切换后 Schema 和查询使用对应 databasePresetId", async () => {
+    const user = userEvent.setup();
+    const client = buildClient([successResponse]);
+    const northwindSchema: SchemaResponse = {
+      tables: {
+        runtime_items: {
+          columns: {
+            id: { type: "INTEGER", nullable: false },
+            name: { type: "TEXT", nullable: false }
+          }
+        }
+      }
+    };
+    vi.mocked(client.getSchema).mockResolvedValueOnce(schemaResponse).mockResolvedValueOnce(northwindSchema);
+
+    render(<App client={client} />);
+
+    const dataSourceSelect = await screen.findByLabelText("当前数据源");
+    expect(screen.getByRole("option", { name: "demo_sqlite" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "northwind.db" })).toBeInTheDocument();
+
+    await user.selectOptions(dataSourceSelect, "sqlite_file_northwind");
+
+    expect(client.getSchema).toHaveBeenLastCalledWith(null, "sqlite_file_northwind");
+    expect(await screen.findByText("runtime_items")).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText("用自然语言描述你需要的数据"), "列出运行时项目");
+    await user.click(screen.getByRole("button", { name: "生成并验证" }));
+
+    expect(client.runQuery).toHaveBeenCalledWith({
+      question: "列出运行时项目",
+      targetDialect: "sqlite",
+      databasePresetId: "sqlite_file_northwind"
+    });
+  });
+
   it("提交成功后展示 SQL 状态、结果摘要和结果表", async () => {
     const user = userEvent.setup();
     const client = buildClient([repairedResponse]);
@@ -304,7 +347,8 @@ describe("App", () => {
 
     expect(client.runQuery).toHaveBeenCalledWith({
       question: "按地区统计销售额",
-      targetDialect: "sqlite"
+      targetDialect: "sqlite",
+      databasePresetId: "demo_sqlite"
     });
     expect(await screen.findByText("SQL 已修复并通过验证")).toBeInTheDocument();
     expect(screen.getByText("自动修复 1 次")).toBeInTheDocument();
@@ -335,7 +379,8 @@ describe("App", () => {
 
     expect(client.runQuery).toHaveBeenCalledWith({
       question: "统计每个地区订单金额最高的 3 个客户，返回地区、客户名称、总金额和地区内排名。",
-      targetDialect: "sqlite"
+      targetDialect: "sqlite",
+      databasePresetId: "demo_sqlite"
     });
     expect(await screen.findByText("SQL 已生成并通过验证")).toBeInTheDocument();
   });
@@ -508,7 +553,8 @@ describe("App", () => {
 
     expect(client.runEditedSql).toHaveBeenCalledWith({
       sql: "SELECT id FROM orders ORDER BY id",
-      targetDialect: "sqlite"
+      targetDialect: "sqlite",
+      databasePresetId: "demo_sqlite"
     });
     expect(await screen.findByText("9 ms")).toBeInTheDocument();
     expect(screen.getByText("7")).toHaveClass("cellNumeric");
@@ -533,7 +579,7 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "打开工作台菜单" }));
     await user.click(screen.getByRole("button", { name: "运行配置" }));
     const panel = screen.getByRole("dialog", { name: "运行配置" });
-    await screen.findByText("demo_sqlite");
+    await within(panel).findByText("demo_sqlite");
     await user.click(within(panel).getByRole("button", { name: "保存运行配置" }));
 
     expect(client.createRuntimeConfig).toHaveBeenCalledWith({

@@ -271,6 +271,12 @@ curl -X POST http://127.0.0.1:8000/api/v1/runs/<request_id>/feedback \
 curl http://127.0.0.1:8000/api/v1/schema
 ```
 
+`data/sqlite/` 下的可见 `.db` 文件会自动作为只读 SQLite 数据源出现在前端顶部下拉框和 `/api/v1/runtime/options` 中；`metadata.db` 默认排除，因为它是项目内部运行记录库。按自动发现数据源读取 Schema 时可传 `database_preset_id`：
+
+```bash
+curl 'http://127.0.0.1:8000/api/v1/schema?database_preset_id=sqlite_file_northwind'
+```
+
 创建临时运行配置：
 
 ```bash

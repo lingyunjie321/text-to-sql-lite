@@ -60,10 +60,6 @@ interface QuerySession {
 
 type SidePanel = "runtime" | "demo" | "debug" | "history" | null;
 
-const DATA_SOURCES: DataSourceOption[] = [
-  { id: "sqlite-demo", label: "SQLite Demo", dialect: "sqlite" }
-];
-
 const DEFAULT_CLIENT = createTextToSqlClient();
 
 const EXAMPLE_QUESTIONS = ["列出订单金额", "按地区统计销售额", "查找最近的高价值订单"];
@@ -91,7 +87,8 @@ const DEMO_SCENARIOS = [
 
 export function App({ client = DEFAULT_CLIENT }: AppProps): JSX.Element {
   const [question, setQuestion] = useState("");
-  const [selectedDataSourceId, setSelectedDataSourceId] = useState(DATA_SOURCES[0].id);
+  const [dataSources, setDataSources] = useState<DataSourceOption[]>([]);
+  const [selectedDataSourceId, setSelectedDataSourceId] = useState("");
   const [schema, setSchema] = useState<SchemaResponse | null>(null);
   const [currentSession, setCurrentSession] = useState<QuerySession | null>(null);
   const [draftSql, setDraftSql] = useState("");
@@ -108,8 +105,8 @@ export function App({ client = DEFAULT_CLIENT }: AppProps): JSX.Element {
   const questionRef = useRef<HTMLTextAreaElement>(null);
 
   const selectedDataSource = useMemo(
-    () => DATA_SOURCES.find((source) => source.id === selectedDataSourceId) ?? DATA_SOURCES[0],
-    [selectedDataSourceId]
+    () => dataSources.find((source) => source.id === selectedDataSourceId) ?? dataSources[0] ?? null,
+    [dataSources, selectedDataSourceId]
   );
   const schemaTables = useMemo(() => summarizeSchemaTables(schema), [schema]);
 
@@ -120,14 +117,26 @@ export function App({ client = DEFAULT_CLIENT }: AppProps): JSX.Element {
   useEffect(() => {
     let active = true;
     client
-      .getSchema()
-      .then((nextSchema) => {
-        if (active) {
-          setSchema(nextSchema);
+      .getRuntimeOptions()
+      .then((options) => {
+        if (!active) {
+          return;
         }
+        const nextDataSources = options.database_presets.map((preset) => ({
+          id: preset.id,
+          label: preset.display_name,
+          dialect: preset.target_dialect
+        }));
+        setDataSources(nextDataSources);
+        setSelectedDataSourceId((currentId) =>
+          nextDataSources.some((source) => source.id === currentId)
+            ? currentId
+            : (nextDataSources[0]?.id ?? "")
+        );
       })
       .catch((error: unknown) => {
         if (active) {
+          setRuntimeError(errorToUserMessage(error));
           setTechnicalError(errorToTechnicalDetail(error));
         }
       });
@@ -135,6 +144,30 @@ export function App({ client = DEFAULT_CLIENT }: AppProps): JSX.Element {
       active = false;
     };
   }, [client]);
+
+  useEffect(() => {
+    if (runtimeConfig || !selectedDataSourceId) {
+      return;
+    }
+
+    let active = true;
+    client
+      .getSchema(null, selectedDataSourceId)
+      .then((nextSchema) => {
+        if (active) {
+          setSchema(nextSchema);
+        }
+      })
+      .catch((error: unknown) => {
+        if (active) {
+          setRuntimeError(errorToUserMessage(error));
+          setTechnicalError(errorToTechnicalDetail(error));
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [client, runtimeConfig, selectedDataSourceId]);
 
   useEffect(() => {
     let active = true;
@@ -156,7 +189,7 @@ export function App({ client = DEFAULT_CLIENT }: AppProps): JSX.Element {
   }, [client]);
 
   const currentView = currentSession?.view ?? null;
-  const canSubmit = question.trim().length > 0 && !isLoading;
+  const canSubmit = question.trim().length > 0 && !isLoading && (runtimeConfig !== null || selectedDataSource !== null);
   const hasSql = draftSql.trim().length > 0;
 
   async function runQuestion(nextQuestion = question): Promise<void> {
@@ -169,13 +202,15 @@ export function App({ client = DEFAULT_CLIENT }: AppProps): JSX.Element {
     await runRequest(async () => {
       const response = await client.runQuery({
         question: trimmedQuestion,
-        targetDialect: selectedDataSource.dialect,
-        ...(runtimeConfig ? { runtimeConfigId: runtimeConfig.runtime_config_id } : {})
+        targetDialect: selectedDataSource?.dialect ?? "sqlite",
+        ...(runtimeConfig
+          ? { runtimeConfigId: runtimeConfig.runtime_config_id }
+          : { databasePresetId: selectedDataSource?.id ?? null })
       });
       applyResponse({
         response,
         question: trimmedQuestion,
-        dialect: selectedDataSource.dialect
+        dialect: selectedDataSource?.dialect ?? "sqlite"
       });
     });
   }
@@ -189,13 +224,15 @@ export function App({ client = DEFAULT_CLIENT }: AppProps): JSX.Element {
     await runRequest(async () => {
       const response = await client.runEditedSql({
         sql,
-        targetDialect: selectedDataSource.dialect,
-        ...(runtimeConfig ? { runtimeConfigId: runtimeConfig.runtime_config_id } : {})
+        targetDialect: selectedDataSource?.dialect ?? "sqlite",
+        ...(runtimeConfig
+          ? { runtimeConfigId: runtimeConfig.runtime_config_id }
+          : { databasePresetId: selectedDataSource?.id ?? null })
       });
       applyResponse({
         response,
         question: currentSession?.question ?? "手动执行 SQL",
-        dialect: selectedDataSource.dialect
+        dialect: selectedDataSource?.dialect ?? "sqlite"
       });
     });
   }
@@ -361,9 +398,10 @@ export function App({ client = DEFAULT_CLIENT }: AppProps): JSX.Element {
             id="dataSource"
             className="dataSourceSelect"
             value={selectedDataSourceId}
+            disabled={runtimeConfig !== null || dataSources.length === 0}
             onChange={(event) => setSelectedDataSourceId(event.target.value)}
           >
-            {DATA_SOURCES.map((source) => (
+            {dataSources.map((source) => (
               <option key={source.id} value={source.id}>
                 {source.label}
               </option>
@@ -526,13 +564,6 @@ export function App({ client = DEFAULT_CLIENT }: AppProps): JSX.Element {
           }}
           onClear={() => {
             setRuntimeConfig(null);
-            void client
-              .getSchema()
-              .then(setSchema)
-              .catch((error: unknown) => {
-                setRuntimeError(errorToUserMessage(error));
-                setTechnicalError(errorToTechnicalDetail(error));
-              });
           }}
           onClose={closePanel}
         />

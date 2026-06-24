@@ -156,11 +156,15 @@ def create_app(
         return get_service().record_feedback(request_id=request_id, request=request)
 
     @app.get("/api/v1/schema")
-    def get_schema(runtime_config_id: str | None = None) -> dict[str, Any]:
+    def get_schema(
+        runtime_config_id: str | None = None,
+        database_preset_id: str | None = None,
+    ) -> dict[str, Any]:
         """返回当前 demo 数据库 Schema 元数据。"""
-        return get_service().get_schema(runtime_config_id=runtime_config_id).model_dump(
-            mode="python"
-        )
+        return get_service().get_schema(
+            runtime_config_id=runtime_config_id,
+            database_preset_id=database_preset_id,
+        ).model_dump(mode="python")
 
     @app.get("/api/v1/runtime/options")
     def get_runtime_options() -> dict[str, Any]:
