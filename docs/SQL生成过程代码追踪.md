@@ -196,16 +196,17 @@ def query(request: QueryRequest) -> dict[str, Any]:
 
 维护提示：如果新增数据库 driver，不要只改 executor；还要更新配置说明、driver 到 SQLGlot dialect 的映射、只读保障策略、测试矩阵和 README 限制。
 
-## 12. Reflect/Fix 修复闭环
+## 12. 策略反思闭环
 
-文件：`src/text_to_sql_demo/nodes/error_reflection.py`、`src/text_to_sql_demo/nodes/sql_fix.py`
+文件：`src/text_to_sql_demo/nodes/error_reflection.py`、`src/text_to_sql_demo/nodes/sql_fix.py`、`src/text_to_sql_demo/nodes/reasoning_rewrite.py`、`src/text_to_sql_demo/nodes/hitl.py`、`src/text_to_sql_demo/reflection/`
 
-当 validation 或 execution 失败时，`workflow.yaml` 把流程导向 `error_classification`，实际实现类是 `ReflectErrorNode`：
+当 validation 或 execution 失败时，`workflow.yaml` 把流程导向 `error_classification`，实际实现类是 `ReflectionDecisionNode`，并兼容旧的 `ReflectErrorNode` 导入名：
 
-- 如果 `attempt_count >= max_repair_attempts`，返回 `attempts_exhausted`。
-- 否则根据 `SQLError.category` 构造定向 `RepairStrategy`，再生成 `RepairInstruction`，包含原问题、当前 SQL、错误类型、错误原文、相关 schema、修复历史和策略。
+- 如果 `attempt_count >= max_repair_attempts`，返回 `attempts_exhausted` 并写入 HITL 原因。
+- 否则根据 `SQLError.category` 写入 `reflection_decision`，例如 `FIX_SQL`、`RELINK_SCHEMA`、`REASONING_REWRITE`。
+- 每轮失败会追加 `SQLAttemptContext`，prompt 和 API 只使用 hash/长度、错误类型、策略和原因摘要。
 
-`FixSQLNode` 读取修复指令，把定向策略注入修复 prompt，用 `strong` 模型 alias 调用 LLM，返回新 SQL，并追加：
+`FixSQLNode` 读取兼容的修复指令，把定向策略和最近 SQLContext 摘要注入修复 prompt，用 `strong` 模型 alias 调用 LLM，返回新 SQL，并追加：
 
 - `attempt`
 - `old_sql`
@@ -214,7 +215,7 @@ def query(request: QueryRequest) -> dict[str, Any]:
 - `reason`
 - `strategy_name`
 
-然后流程回到 `sql_validation`。
+`ReasoningRewriteNode` 用用户问题、linked schema、RAG 上下文、最近 SQLContext、`last_error` 和反思原因重新生成 SQL，然后流程回到 `sql_validation`。`HITLNode` 只标记 `needs_human_review`，不实现审批 UI。
 
 维护提示：如果新增不可修复错误策略或改变修复 prompt，必须同步更新 `tests/integration/test_sql_repair_workflow.py`、前端修复提示和 [工作流文档](文本转SQL工作流.md)。
 
@@ -226,6 +227,7 @@ def query(request: QueryRequest) -> dict[str, Any]:
 
 - 成功：`final_status=success`、`final_sql`、`final_result`、`attempt_count`。
 - 失败：`final_status=failed`、`final_sql`、`final_error`、`attempt_count`、`termination_reason`。
+- 人工介入：`final_status=needs_human_review`、`final_sql`、`final_error`、`attempt_count`、`hitl_reason`、`termination_reason`。
 
 `serialize_run` 最终输出：
 
@@ -240,6 +242,10 @@ def query(request: QueryRequest) -> dict[str, Any]:
 - `retrieved_examples`
 - `rag_context`
 - `repair_history`
+- `reflection_decision`
+- `sql_contexts`
+- `hitl_required`
+- `hitl_reason`
 - `errors`
 - `trace`
 

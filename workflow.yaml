@@ -119,11 +119,16 @@ nodes:
     execution_dialect: sqlite
     max_rows: 100
   error_classification:
-    type: error_classification
+    type: reflection_decision
   reflection_fix:
     type: reflection_fix
     model_alias: strong
     prompt_template: configs/prompts/fix_sql.yaml
+  reasoning_rewrite:
+    type: reasoning_rewrite
+    model_alias: strong
+  hitl:
+    type: hitl
   finalization:
     type: finalization
 
@@ -151,9 +156,17 @@ edges:
     on_execution_success: finalization
     on_execution_failed: error_classification
   error_classification:
-    on_reflect_retry: reflection_fix
-    on_attempts_exhausted: finalization
+    on_fix_sql: reflection_fix
+    on_relink_schema: schema_linking
+    on_retrieve_context: context_retrieval
+    on_reasoning_rewrite: reasoning_rewrite
+    on_hitl_required: hitl
+    on_attempts_exhausted: hitl
   reflection_fix:
     on_fix_complete: sql_validation
+  reasoning_rewrite:
+    on_rewrite_complete: sql_validation
+  hitl:
+    on_hitl_required: finalization
   finalization:
     terminal: true

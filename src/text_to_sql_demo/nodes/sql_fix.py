@@ -1,6 +1,7 @@
 from text_to_sql_demo.exceptions import NodeExecutionError
 from text_to_sql_demo.llm.models import ModelProfile
 from text_to_sql_demo.prompts.templates import PromptTemplateRenderer
+from text_to_sql_demo.reflection import format_sql_contexts
 from text_to_sql_demo.sql.cleaner import clean_llm_sql_output
 from text_to_sql_demo.workflow.node import BaseNode, NodeResult
 from text_to_sql_demo.workflow.registry import register_node
@@ -27,6 +28,8 @@ class FixSQLNode(BaseNode):
         system_prompt, user_prompt = _build_fix_prompt(
             instruction,
             template_path=self.config.get("prompt_template"),
+            reflection_decision=state.data.get("reflection_decision"),
+            sql_contexts=state.data.get("sql_contexts") or [],
         )
 
         response = llm_client.complete(
@@ -68,7 +71,10 @@ def _build_fix_prompt(
     instruction: dict,
     *,
     template_path: str | None = None,
+    reflection_decision: object = None,
+    sql_contexts: list[dict] | None = None,
 ) -> tuple[str, str]:
+    reflection_reason = _reflection_reason(reflection_decision) or instruction["reason"]
     context = {
         "original_question": instruction["original_question"],
         "current_sql": instruction["current_sql"],
@@ -77,6 +83,8 @@ def _build_fix_prompt(
         "related_schema": instruction["related_schema"],
         "repair_history": instruction["repair_history"],
         "reason": instruction["reason"],
+        "reflection_reason": reflection_reason,
+        "sql_context_block": format_sql_contexts(sql_contexts or [], limit=3),
         "strategy_block": _format_strategy_block(instruction.get("strategy")),
     }
     if template_path:
@@ -93,6 +101,9 @@ def _build_fix_prompt(
                 f"原始错误: {instruction['original_error']}",
                 f"相关 Schema: {instruction['related_schema']}",
                 f"修复历史: {instruction['repair_history']}",
+                "最近反思记忆:",
+                format_sql_contexts(sql_contexts or [], limit=3),
+                f"策略反思原因: {reflection_reason}",
                 "定向修复策略:",
                 _format_strategy_block(instruction.get("strategy")),
                 "只返回修复后的 SQL，不要改变用户问题含义。",
@@ -120,3 +131,10 @@ def _format_strategy_block(strategy: object) -> str:
         lines.append("- 避免:")
         lines.extend(f"  - {item}" for item in avoid)
     return "\n".join(lines)
+
+
+def _reflection_reason(reflection_decision: object) -> str | None:
+    if not isinstance(reflection_decision, dict):
+        return None
+    reason = reflection_decision.get("reason")
+    return reason if isinstance(reason, str) and reason else None

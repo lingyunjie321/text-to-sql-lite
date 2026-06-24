@@ -66,7 +66,8 @@ def test_sql_validation_and_repair_exhaustion_are_logged_without_sql_preview(
     )
 
     assert response.status_code == 200
-    assert response.json()["status"] == "failed"
+    assert response.json()["status"] == "needs_human_review"
+    assert response.json()["hitl_required"] is True
     events = _read_json_lines(log_file)
     event_names = [event["event"] for event in events]
     assert "sql.validation.failed" in event_names

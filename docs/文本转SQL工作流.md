@@ -29,9 +29,11 @@
 | `sql_generation` | `GenSQLAgenticNode` | 问题、linked schema、RAG 上下文、examples、业务方言范式、LLM client、model profiles | `generated_sql`、`selected_model`、`prompt_summary` | `success` |
 | `sql_validation` | `ValidateSQLNode` | `generated_sql/current_sql`、schema、dialect | `validated_sql` 或 `last_error` | `validation_success`、`validation_failed` |
 | `sql_execution` | `ExecuteSQLNode` | `validated_sql`、database URL | `execution_result` 或 `last_error` | `execution_success`、`execution_failed` |
-| `error_classification` | `ReflectErrorNode` | `last_error`、`attempt_count` | `repair_instruction`、`repair_instruction.strategy` 或 `termination_reason` | `reflect_retry`、`attempts_exhausted` |
-| `reflection_fix` | `FixSQLNode` | `repair_instruction`、LLM client、model profile | 新 SQL、`repair_history`、`attempt_count`，历史中记录 `strategy_name` | `fix_complete` |
-| `finalization` | `FinalizeNode` | `execution_result`、错误状态 | `final_status`、`final_sql`、`final_result/final_error` | `finalize_success`、`finalize_failed` |
+| `error_classification` | `ReflectionDecisionNode`（兼容 `ReflectErrorNode`） | `last_error`、`current_sql/generated_sql`、`attempt_count`、`max_repair_attempts` | `reflection_decision`、`sql_contexts`、`last_reflection_strategy`、兼容的 `repair_instruction` | `fix_sql`、`relink_schema`、`retrieve_context`、`reasoning_rewrite`、`hitl_required`、`attempts_exhausted` |
+| `reflection_fix` | `FixSQLNode` | `repair_instruction`、`reflection_decision`、`sql_contexts`、LLM client、model profile | 新 SQL、`repair_history`、`attempt_count`，历史中记录 `strategy_name` | `fix_complete` |
+| `reasoning_rewrite` | `ReasoningRewriteNode` | 问题、linked schema、RAG 上下文、最近 SQLContext、`last_error`、反思原因 | 新 `generated_sql/current_sql`、`attempt_count` | `rewrite_complete` |
+| `hitl` | `HITLNode` | `reflection_decision`、`last_error` | `final_status=needs_human_review`、`hitl_reason`、`final_error` | `hitl_required` |
+| `finalization` | `FinalizeNode` | `execution_result`、错误状态、HITL 状态 | `final_status`、`final_sql`、`final_result/final_error` | `finalize_success`、`finalize_failed`、`finalize_hitl` |
 
 维护提示：如果新增节点或给现有节点增加新的 outcome，需要同步更新 `workflow.yaml`、本表、plaintext/Mermaid 图和 `tests/unit/workflow/test_engine.py`。
 
@@ -88,16 +90,16 @@
                                     │         ▼
                                     │  ┌──────────────────────┐
                                     │  │ error_classification │
-                                    │  │ ReflectErrorNode     │
+                                    │  │ ReflectionDecision   │
                                     │  └──────┬─────────┬─────┘
                                     │         │         │
-                                    │reflect_retry      │attempts_exhausted
+                                    │fix_sql  │attempts_exhausted / hitl_required
                                     │         │         ▼
                                     │         │  ┌──────────────────────┐
-                                    │         │  │ finalization         │
-                                    │         │  │ FinalizeNode failed  │
+                                    │         │  │ hitl                 │
+                                    │         │  │ HITLNode            │
                                     │         │  └───────────┬──────────┘
-                                    │         │              │ terminal
+                                    │         │              │ hitl_required
                                     │         ▼              ▼
                                     │  ┌──────────────────────┐
                                     │  │ reflection_fix       │
@@ -105,6 +107,10 @@
                                     │  └───────────┬──────────┘
                                     │              │ fix_complete
                                     │              └──── back to sql_validation
+                                    │
+                                    │  relink_schema -> schema_linking
+                                    │  retrieve_context -> context_retrieval
+                                    │  reasoning_rewrite -> reasoning_rewrite -> sql_validation
                                     │
                                     ▼
                              ┌──────────────────────┐
@@ -143,14 +149,20 @@ flowchart TD
     Validate -- validation_success --> Execute["sql_execution\nExecuteSQLNode"]
     Execute -- execution_success --> FinalOK["finalization\nFinalizeNode: success"]
 
-    Validate -- validation_failed --> Reflect["error_classification\nReflectErrorNode"]
+    Validate -- validation_failed --> Reflect["error_classification\nReflectionDecisionNode"]
     Execute -- execution_failed --> Reflect
-    Reflect -- reflect_retry --> Fix["reflection_fix\nFixSQLNode"]
+    Reflect -- fix_sql --> Fix["reflection_fix\nFixSQLNode"]
     Fix -- fix_complete --> Validate
 
-    Reflect -- attempts_exhausted --> FinalFailed["finalization\nFinalizeNode: failed"]
+    Reflect -- relink_schema --> Schema
+    Reflect -- retrieve_context --> Context
+    Reflect -- reasoning_rewrite --> Rewrite["reasoning_rewrite\nReasoningRewriteNode"]
+    Rewrite -- rewrite_complete --> Validate
+    Reflect -- hitl_required --> HITL["hitl\nHITLNode"]
+    Reflect -- attempts_exhausted --> HITL
+    HITL -- hitl_required --> FinalReview["finalization\nFinalizeNode: needs_human_review"]
     FinalOK --> End["terminal"]
-    FinalFailed --> End
+    FinalReview --> End
 ```
 
 维护提示：这两个图必须只表达真实配置和真实节点。若改动 `edges` 中的 `on_validation_success`、`on_execution_failed` 等键名，plaintext 版、Mermaid 版和下方路径说明要一起改。
@@ -175,25 +187,25 @@ flowchart TD
 
 维护提示：如果修改 `TextToSQLApiService.run_query` 的初始化数据、`GenSQLAgenticNode.run` 的内部步骤或 `serialize_run` 的响应字段，需要同步更新本节和 [SQL 生成过程代码追踪](SQL生成过程代码追踪.md)。
 
-## 修复路径
+## 策略反思闭环
 
-修复路径覆盖 SQL 校验失败和执行失败：
+策略反思闭环覆盖 SQL 校验失败和执行失败：
 
 1. `ValidateSQLNode.run` 或 `ExecuteSQLNode.run` 返回失败 outcome，并把结构化 `SQLError` 写入 `state.data.last_error`。
-2. `ReflectErrorNode.run` 读取 `last_error`，如果 `attempt_count < max_repair_attempts`，按错误类型生成 `RepairStrategy` 并写入 `repair_instruction`。
-3. `FixSQLNode.run` 使用 `strong` 模型 alias 和模板化修复 prompt 调用 LLM，prompt 中包含定向策略，写入新 `generated_sql/current_sql`。
-4. `attempt_count` 加 1，并把 old/new SQL、错误类型、原因和 `strategy_name` 写入 `repair_history`。
-5. 工作流回到 `sql_validation`，成功后继续执行并 finalization。
+2. `ReflectionDecisionNode.run` 读取 `last_error`、`current_sql/generated_sql` 和尝试次数，写入 `reflection_decision`，并把本轮 SQL 尝试追加到 `sql_contexts`。
+3. 策略路由由 `workflow.yaml` 决定：`FIX_SQL -> reflection_fix`，`RELINK_SCHEMA -> schema_linking`，`RETRIEVE_CONTEXT -> context_retrieval`，`REASONING_REWRITE -> reasoning_rewrite`，`HITL/STOP -> hitl`。
+4. `FixSQLNode` 和 `ReasoningRewriteNode` 都会把最近 3 轮 SQLContext 摘要放进 prompt；摘要只包含 SQL hash/长度、错误类型、策略和原因。
+5. `FixSQLNode` 或 `ReasoningRewriteNode` 产出新 SQL 后回到 `sql_validation`，成功后继续执行并 finalization。
 
-当前实现没有单独的错误分类目录；`ReflectErrorNode` 同时注册为 `error_reflection` 和 `error_classification`，负责把 SQL 错误整理成修复指令。
+当前实现保留向后兼容注册名：`error_reflection`、`error_classification` 和 `reflection_decision` 都指向策略反思节点。它不会在运行中动态插入节点，只通过 `NodeResult.outcome` 和配置边路由。
 
-维护提示：如果将来拆出独立错误分类节点，必须更新本节、`workflow.yaml` 的 node type、plaintext/Mermaid 图、`tests/integration/test_sql_repair_workflow.py` 和 README 的核心能力说明。
+维护提示：如果将来增加新策略，必须更新 `ReflectionStrategy`、`workflow.yaml` 的 `edges`、本节、集成测试和 README 的核心能力说明。
 
 ## 终止路径
 
 终止路径有两类：
 
-- 修复次数耗尽：`ReflectErrorNode.run` 发现 `attempt_count >= max_repair_attempts`，返回 `attempts_exhausted`，进入 `finalization`，最终 `final_status=failed`、`termination_reason=attempts_exhausted`。
+- 修复次数耗尽：`ReflectionDecisionNode.run` 发现 `attempt_count >= max_repair_attempts`，返回 `attempts_exhausted`，进入 `HITLNode` 后再到 `finalization`，最终 `final_status=needs_human_review`、`termination_reason=attempts_exhausted`。
 - 最大步骤保护：`WorkflowEngine.run` 发现 `step_count >= workflow.max_steps`，直接 `terminate("max_steps_exceeded")`。这是配置死循环保护。
 
 当前 SQL 写入、DDL、多语句等会在 `SQLValidator` 中被拒绝为 `dialect_error`，并按配置进入修复流程；是否把安全错误改成不可修复，需要后续扩展 error category 和 edge 策略。
@@ -212,5 +224,7 @@ flowchart TD
 - `error`
 
 Trace 由 engine 自动记录，不需要每个节点手写计时逻辑。`input_summary` 和 `output_summary` 会压缩长字符串和列表，只保留演示所需摘要。
+
+API 响应会额外返回 `reflection_decision`、脱敏后的 `sql_contexts`、`hitl_required` 和 `hitl_reason`。其中 SQLContext 只暴露 SQL 长度与 hash，不暴露完整 SQL 或完整结果集。
 
 维护提示：如果改变 `TraceEvent` 字段或序列化结构，要同步更新前端 `TraceEventPayload`、`GenerationDetails` 展示逻辑和本文档。

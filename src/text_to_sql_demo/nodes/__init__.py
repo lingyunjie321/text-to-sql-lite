@@ -2,9 +2,11 @@
 
 from text_to_sql_demo.nodes.begin import BeginNode
 from text_to_sql_demo.nodes.context_retrieval import ContextRetrievalNode
-from text_to_sql_demo.nodes.error_reflection import ReflectErrorNode
+from text_to_sql_demo.nodes.error_reflection import ReflectErrorNode, ReflectionDecisionNode
 from text_to_sql_demo.nodes.example_retrieval import ExampleRetrievalNode
 from text_to_sql_demo.nodes.finalization import FinalizeNode
+from text_to_sql_demo.nodes.hitl import HITLNode
+from text_to_sql_demo.nodes.reasoning_rewrite import ReasoningRewriteNode
 from text_to_sql_demo.nodes.schema_linking import SchemaLinkingNode
 from text_to_sql_demo.nodes.selection import SelectionNode
 from text_to_sql_demo.nodes.sql_execution import ExecuteSQLNode
@@ -21,7 +23,10 @@ __all__ = [
     "FixSQLNode",
     "GenerateSQLNode",
     "GenSQLAgenticNode",
+    "HITLNode",
     "ReflectErrorNode",
+    "ReflectionDecisionNode",
+    "ReasoningRewriteNode",
     "SchemaLinkingNode",
     "SelectionNode",
     "ValidateSQLNode",

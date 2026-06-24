@@ -44,6 +44,7 @@ from text_to_sql_demo.observability.events import (
     log_database_url_resolve_failed,
     log_database_url_resolved,
 )
+from text_to_sql_demo.reflection import summarize_sql_contexts
 from text_to_sql_demo.runtime.exceptions import (
     RuntimeConfigExpiredError,
     RuntimeConfigNotFoundError,
@@ -529,7 +530,11 @@ class TextToSQLApiService:
                 raw_config["render_dialect"] = target_dialect
             if node_config.type == "sql_execution":
                 raw_config["execution_dialect"] = target_dialect
-            if node_config.type in {"error_reflection", "error_classification"}:
+            if node_config.type in {
+                "error_reflection",
+                "error_classification",
+                "reflection_decision",
+            }:
                 raw_config["max_repair_attempts"] = max_attempts
             if raw_config != original_config:
                 config.nodes[node_name] = NodeConfig.model_validate(raw_config)
@@ -706,6 +711,10 @@ def serialize_run(state: WorkflowState) -> dict[str, Any]:
         "retrieved_examples": _summarize_examples(state.data.get("retrieved_examples") or []),
         "rag_context": _summarize_rag_context(state.data.get("rag_context") or {}),
         "repair_history": state.data.get("repair_history", []),
+        "reflection_decision": state.data.get("reflection_decision"),
+        "sql_contexts": summarize_sql_contexts(state.data.get("sql_contexts") or []),
+        "hitl_required": final_status == "needs_human_review",
+        "hitl_reason": state.data.get("hitl_reason"),
         "errors": _serialize_errors(state),
         "trace": [_serialize_trace_event(event) for event in state.trace],
     }
@@ -741,6 +750,10 @@ def _serialize_stored_run(stored_run: StoredQueryRun) -> dict[str, Any]:
         "retrieved_examples": [],
         "rag_context": _summarize_rag_context({}),
         "repair_history": [],
+        "reflection_decision": None,
+        "sql_contexts": [],
+        "hitl_required": False,
+        "hitl_reason": None,
         "errors": errors,
         "trace": trace,
     }
@@ -809,6 +822,10 @@ def _serialize_direct_sql(
         "retrieved_examples": [],
         "rag_context": _summarize_rag_context({}),
         "repair_history": [],
+        "reflection_decision": None,
+        "sql_contexts": [],
+        "hitl_required": False,
+        "hitl_reason": None,
         "errors": errors,
         "trace": [],
     }

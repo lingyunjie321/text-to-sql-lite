@@ -117,6 +117,27 @@ export interface RepairHistoryItemPayload {
   };
 }
 
+export interface ReflectionDecisionPayload {
+  strategy: string;
+  reason: string;
+  confidence: number;
+  error_category?: string | null;
+  attempt_count: number;
+  max_attempts: number;
+  next_hint?: string | null;
+}
+
+export interface SqlContextSummaryPayload {
+  attempt: number;
+  sql_length: number;
+  sql_hash?: string | null;
+  validation_error?: Pick<SqlErrorPayload, "category" | "message"> | null;
+  execution_error?: Pick<SqlErrorPayload, "category" | "message"> | null;
+  result_summary?: Record<string, unknown> | null;
+  reflection_strategy?: string | null;
+  reflection_reason?: string | null;
+}
+
 export interface QueryRunResponse {
   request_id: string;
   status: string;
@@ -129,6 +150,10 @@ export interface QueryRunResponse {
   retrieved_examples: RetrievedExamplePayload[];
   rag_context: RagContextPayload;
   repair_history: RepairHistoryItemPayload[];
+  reflection_decision?: ReflectionDecisionPayload | null;
+  sql_contexts?: SqlContextSummaryPayload[];
+  hitl_required?: boolean;
+  hitl_reason?: string | null;
   errors: WorkflowErrorPayload[];
   trace: TraceEventPayload[];
 }

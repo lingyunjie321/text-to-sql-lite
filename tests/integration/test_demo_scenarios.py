@@ -150,8 +150,10 @@ def test_scenario_b_wrong_field_is_reflected_and_fixed(tmp_path: Path) -> None:
     assert "JOIN orders" in payload["final_sql"]
     assert "SUM(o.amount)" in payload["final_sql"]
     assert "validation_failed" in trace_outcomes
-    assert "reflect_retry" in trace_outcomes
+    assert "fix_sql" in trace_outcomes
     assert "fix_complete" in trace_outcomes
+    assert payload["reflection_decision"]["strategy"] == "FIX_SQL"
+    assert payload["sql_contexts"][0]["reflection_strategy"] == "FIX_SQL"
     assert payload["result"]["columns"] == ["region", "total_amount"]
 
 
@@ -174,9 +176,13 @@ def test_scenario_c_stops_after_three_failed_repairs(tmp_path: Path) -> None:
     assert response.status_code == 200
     payload = response.json()
 
-    assert payload["status"] == "failed"
+    assert payload["status"] == "needs_human_review"
     assert payload["attempts"] == 3
-    assert len(payload["repair_history"]) == 3
+    assert payload["hitl_required"] is True
+    assert payload["reflection_decision"]["strategy"] == "HITL"
+    assert len(payload["repair_history"]) == 0
+    assert len(payload["sql_contexts"]) == 3
     assert payload["errors"][-1]["error"]["category"] in {"unknown_table", "unknown_column"}
-    assert payload["trace"][-2]["outcome"] == "attempts_exhausted"
+    assert payload["trace"][-3]["outcome"] == "attempts_exhausted"
+    assert payload["trace"][-2]["node_name"] == "hitl"
     assert payload["trace"][-1]["node_name"] == "finalization"

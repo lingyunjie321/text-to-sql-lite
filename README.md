@@ -12,7 +12,8 @@
 - Prompt 裁剪：`PromptBuilder.build` 只注入 linked schema、Top-K 示例、知识库上下文和业务方言范式，不把完整 schema、所有样例或完整知识库塞进 prompt。
 - Agentic SQL 生成：`GenSQLAgenticNode.run` 根据 `ComplexityClassifier` 结果选择 `light` 或 `strong` 模型 alias，并注入 linked schema、RAG 上下文、Top-K 示例和业务方言范式。
 - SQL 安全链路：`SQLValidator` 基于 SQLGlot 做方言解析、单语句、只读 SELECT 和 schema 引用校验；`SQLExecutor` 只执行已校验 SQL。
-- 修复闭环：校验或执行失败后进入 `ReflectErrorNode` 和 `FixSQLNode`，按错误类型生成定向修复策略，最多 3 次修复尝试，失败后明确终止。
+- 策略反思闭环：校验或执行失败后进入 `ReflectionDecisionNode`，按错误类型路由到 `FIX_SQL`、`RELINK_SCHEMA`、`RETRIEVE_CONTEXT`、`REASONING_REWRITE` 或 `HITL`，最多 3 轮并有明确终止条件。
+- 轻量 SQLContext 记忆：每轮失败 SQL 尝试只沉淀 hash/长度、错误类型、反思策略和原因摘要，供生成、修复、重写 prompt 使用，不保存完整结果集。
 - 可观测 Trace：每个节点执行后由 `WorkflowEngine` 记录节点名、outcome、耗时、输入输出摘要和错误摘要。
 - 内部 metadata store：项目自身使用 SQLite 沉淀 `query_run`、`trace_event`、`saved_query` 和 `feedback`，不写入业务目标库。
 - 运行时配置：前端可临时配置数据库连接和 `light/strong` 双模型路由，请求通过 `runtime_config_id` 使用对应配置。
@@ -207,7 +208,7 @@ python scripts/run_demo.py
 
 - 复杂查询一次成功：Schema Linking、Top-K 示例、复杂度路由、SQL 校验执行和 Trace。
 - 错误字段自动修复：`unknown_column` 触发反思修复，第二轮成功。
-- 终止路径：Mock LLM 持续返回错误 SQL，三次修复后 `attempts_exhausted`。
+- 终止路径：Mock LLM 持续返回错误 SQL，三次修复后 `attempts_exhausted` 并进入 `HITL` 收敛。
 
 详细讲解见 [docs/面试演示场景.md](docs/面试演示场景.md)。
 

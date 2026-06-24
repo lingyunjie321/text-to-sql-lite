@@ -18,6 +18,12 @@ user: |
   修复历史:
   {{ repair_history }}
 
+  最近反思记忆:
+  {{ sql_context_block }}
+
+  策略反思原因:
+  {{ reflection_reason }}
+
   定向修复策略:
   {{ strategy_block }}
 

@@ -11,7 +11,10 @@ FORBIDDEN_NODE_CLASS_NAMES = {
     "ExecuteSQLNode",
     "ValidateSQLNode",
     "ReflectErrorNode",
+    "ReflectionDecisionNode",
     "FixSQLNode",
+    "ReasoningRewriteNode",
+    "HITLNode",
 }
 
 

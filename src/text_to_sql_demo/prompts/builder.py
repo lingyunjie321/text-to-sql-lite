@@ -4,6 +4,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from text_to_sql_demo.prompts.templates import PromptTemplateRenderer
+from text_to_sql_demo.reflection import format_sql_contexts
 
 
 class PromptBuildResult(BaseModel):
@@ -28,6 +29,8 @@ class PromptBuilder:
         rag_context: dict | None = None,
         original_schema: dict | None = None,
         original_example_count: int | None = None,
+        sql_contexts: list[dict] | None = None,
+        sql_context_limit: int = 3,
         template_path: str | Path | None = None,
     ) -> PromptBuildResult:
         tables = linked_schema.get("tables", [])
@@ -37,6 +40,11 @@ class PromptBuilder:
         patterns_block = _patterns_block(resolved_business_patterns)
         resolved_rag_context = rag_context or {}
         knowledge_block = _knowledge_block(resolved_rag_context)
+        resolved_sql_contexts = sql_contexts or []
+        sql_context_block = format_sql_contexts(
+            resolved_sql_contexts,
+            limit=sql_context_limit,
+        )
         injected_table_count = len(tables)
         injected_example_count = len(examples)
         original_schema_table_count = _count_schema_tables(original_schema or linked_schema)
@@ -55,6 +63,7 @@ class PromptBuilder:
             "document_context_count": len(resolved_rag_context.get("documents", [])),
             "metric_context_count": len(resolved_rag_context.get("metrics", [])),
             "semantic_model_count": len(resolved_rag_context.get("semantic_models", [])),
+            "sql_context_count": min(len(resolved_sql_contexts), sql_context_limit),
             "original_schema_table_count": original_schema_table_count,
             "injected_schema_table_count": injected_table_count,
             "original_example_count": resolved_original_example_count,
@@ -67,6 +76,7 @@ class PromptBuilder:
             "examples_block": examples_block,
             "patterns_block": patterns_block,
             "knowledge_block": knowledge_block,
+            "sql_context_block": sql_context_block,
         }
         if template_path:
             rendered_prompt = PromptTemplateRenderer.from_path(template_path).render(context)
@@ -88,6 +98,8 @@ class PromptBuilder:
                 patterns_block,
                 "Knowledge context:",
                 knowledge_block,
+                "Recent reflection memory:",
+                sql_context_block,
                 "SQL output constraints:",
                 "- Return exactly one SQL query.",
                 "- Return only SQL text without explanations.",

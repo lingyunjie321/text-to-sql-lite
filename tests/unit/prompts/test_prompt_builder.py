@@ -123,3 +123,37 @@ def test_prompt_injects_pruned_rag_context() -> None:
     assert prompt.summary["document_context_count"] == 1
     assert prompt.summary["metric_context_count"] == 1
     assert prompt.summary["semantic_model_count"] == 1
+
+
+def test_prompt_injects_recent_reflection_memory_without_full_sql() -> None:
+    prompt = PromptBuilder().build(
+        user_question="统计订单金额",
+        target_dialect="sqlite",
+        linked_schema={
+            "tables": [
+                {
+                    "name": "orders",
+                    "columns": {"amount": {"name": "amount", "type": "NUMERIC"}},
+                }
+            ]
+        },
+        examples=[],
+        sql_contexts=[
+            {
+                "attempt": 1,
+                "sql": "SELECT total_amount FROM orders",
+                "validation_error": {
+                    "category": "unknown_column",
+                    "message": "no such column: total_amount",
+                },
+                "reflection_strategy": "FIX_SQL",
+                "reflection_reason": "字段不存在，修复字段名",
+            }
+        ],
+    )
+
+    assert "Recent reflection memory:" in prompt.user_prompt
+    assert "sha256:" in prompt.user_prompt
+    assert "SELECT total_amount FROM orders" not in prompt.user_prompt
+    assert "FIX_SQL" in prompt.user_prompt
+    assert prompt.summary["sql_context_count"] == 1

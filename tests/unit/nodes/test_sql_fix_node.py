@@ -145,3 +145,65 @@ def test_fix_sql_node_injects_repair_strategy_into_prompt_and_history() -> None:
     assert "只替换不存在字段 total_amount" in llm_client.requests[0].user_prompt
     assert "不要虚构字段" in llm_client.requests[0].user_prompt
     assert state.data["repair_history"][0]["strategy_name"] == "repair_unknown_column"
+
+
+def test_fix_sql_node_injects_reflection_reason_and_context_summary() -> None:
+    state = WorkflowState(
+        user_question="统计订单金额",
+        data={
+            "attempt_count": 1,
+            "reflection_decision": {
+                "strategy": "FIX_SQL",
+                "reason": "字段不存在，按 linked schema 修复字段名",
+                "confidence": 0.8,
+                "error_category": "unknown_column",
+                "attempt_count": 1,
+                "max_attempts": 3,
+            },
+            "sql_contexts": [
+                {
+                    "attempt": 1,
+                    "sql": "SELECT total_amount FROM orders",
+                    "validation_error": {
+                        "category": "unknown_column",
+                        "message": "no such column: total_amount",
+                    },
+                    "reflection_strategy": "FIX_SQL",
+                    "reflection_reason": "字段不存在，按 linked schema 修复字段名",
+                }
+            ],
+            "repair_instruction": {
+                "original_question": "统计订单金额",
+                "current_sql": "SELECT total_amount FROM orders",
+                "error_category": "unknown_column",
+                "original_error": "字段不存在: orders.total_amount",
+                "related_schema": {"tables": [{"name": "orders"}]},
+                "repair_history": [],
+                "reason": "字段不存在，按 linked schema 修复字段名",
+            },
+        },
+    )
+    llm_client = MockLLMClient(responses={"strong": "SELECT SUM(amount) FROM orders"})
+    dependencies = NodeDependencies(
+        values={
+            "llm_client": llm_client,
+            "model_profiles": {
+                "strong": ModelProfile(alias="strong", provider="mock", model_name="strong-model"),
+            },
+        }
+    )
+    node = FixSQLNode(
+        name="reflection_fix",
+        config={"model_alias": "strong"},
+        dependencies=dependencies,
+    )
+
+    node.run(state)
+
+    assert "字段不存在，按 linked schema 修复字段名" in llm_client.requests[0].user_prompt
+    memory_block = llm_client.requests[0].user_prompt.split("最近反思记忆:", 1)[1].split(
+        "策略反思原因:",
+        1,
+    )[0]
+    assert "sha256:" in memory_block
+    assert "SELECT total_amount FROM orders" not in memory_block

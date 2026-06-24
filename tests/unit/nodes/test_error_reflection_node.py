@@ -30,9 +30,10 @@ def test_reflect_error_node_adds_targeted_strategy_for_unknown_column() -> None:
     result = node.run(state)
     instruction = result.state_patch["data"]["repair_instruction"]
 
-    assert result.outcome == "reflect_retry"
+    assert result.outcome == "fix_sql"
+    assert result.state_patch["data"]["reflection_decision"]["strategy"] == "FIX_SQL"
     assert instruction["strategy"]["name"] == "repair_unknown_column"
     assert instruction["strategy"]["focus"] == "修复不存在字段引用"
     assert "只替换不存在字段 total_amount" in instruction["strategy"]["instructions"]
     assert "不要虚构字段" in instruction["strategy"]["avoid"]
-    assert "repair_unknown_column" in instruction["reason"]
+    assert "unknown_column" in instruction["reason"]

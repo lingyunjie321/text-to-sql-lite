@@ -14,6 +14,7 @@ from text_to_sql_demo.llm.client import MockLLMClient
 from text_to_sql_demo.llm.models import ModelProfile
 from text_to_sql_demo.nodes.error_reflection import ReflectErrorNode
 from text_to_sql_demo.nodes.finalization import FinalizeNode
+from text_to_sql_demo.nodes.hitl import HITLNode
 from text_to_sql_demo.nodes.sql_execution import ExecuteSQLNode
 from text_to_sql_demo.nodes.sql_fix import FixSQLNode
 from text_to_sql_demo.nodes.sql_validation import ValidateSQLNode
@@ -47,10 +48,11 @@ def build_workflow_config(*, max_repair_attempts: int = 3) -> WorkflowConfig:
             "validate": NodeConfig(type="sql_validation", target_dialect="sqlite"),
             "execute": NodeConfig(type="sql_execution", max_rows=10),
             "reflect": NodeConfig(
-                type="error_reflection",
+                type="reflection_decision",
                 max_repair_attempts=max_repair_attempts,
             ),
             "fix": NodeConfig(type="sql_fix", model_alias="strong"),
+            "hitl": NodeConfig(type="hitl"),
             "finalize": NodeConfig(type="finalization"),
         },
         edges={
@@ -63,10 +65,12 @@ def build_workflow_config(*, max_repair_attempts: int = 3) -> WorkflowConfig:
                 on_execution_failed="reflect",
             ),
             "reflect": EdgeConfig(
-                on_reflect_retry="fix",
-                on_attempts_exhausted="finalize",
+                on_fix_sql="fix",
+                on_hitl_required="hitl",
+                on_attempts_exhausted="hitl",
             ),
             "fix": EdgeConfig(on_fix_complete="validate"),
+            "hitl": EdgeConfig(on_hitl_required="finalize"),
             "finalize": EdgeConfig(terminal=True),
         },
     )
@@ -76,8 +80,9 @@ def build_registry() -> NodeRegistry:
     registry = NodeRegistry()
     registry.register("sql_validation", ValidateSQLNode)
     registry.register("sql_execution", ExecuteSQLNode)
-    registry.register("error_reflection", ReflectErrorNode)
+    registry.register("reflection_decision", ReflectErrorNode)
     registry.register("sql_fix", FixSQLNode)
+    registry.register("hitl", HITLNode)
     registry.register("finalization", FinalizeNode)
     return registry
 
@@ -151,6 +156,8 @@ def test_unknown_column_is_reflected_fixed_and_then_executes(tmp_path: Path) -> 
 
     assert result.data["final_status"] == "success"
     assert result.data["attempt_count"] == 1
+    assert result.data["reflection_decision"]["strategy"] == "FIX_SQL"
+    assert result.data["sql_contexts"][0]["reflection_strategy"] == "FIX_SQL"
     assert result.data["repair_history"][0]["error_type"] == "unknown_column"
     assert result.data["repair_history"][0]["old_sql"] == (
         "SELECT SUM(orders.total_amount) AS total FROM orders"
@@ -178,9 +185,10 @@ def test_unknown_table_is_classified(tmp_path: Path) -> None:
         max_repair_attempts=0,
     )
 
-    assert result.data["final_status"] == "failed"
+    assert result.data["final_status"] == "needs_human_review"
     assert result.data["last_error"]["category"] == "unknown_table"
     assert result.data["validation_result"]["error"]["category"] == "unknown_table"
+    assert result.data["reflection_decision"]["strategy"] == "HITL"
 
 
 def test_repair_loop_terminates_after_three_failed_attempts(tmp_path: Path) -> None:
@@ -194,11 +202,15 @@ def test_repair_loop_terminates_after_three_failed_attempts(tmp_path: Path) -> N
 
     result = run_workflow(state=state, database_url=database_url, llm_client=llm_client)
 
-    assert result.data["final_status"] == "failed"
+    assert result.data["final_status"] == "needs_human_review"
     assert result.data["attempt_count"] == 3
     assert result.data["termination_reason"] == "attempts_exhausted"
+    assert result.data["hitl_reason"] == (
+        "修复尝试次数已达到上限，需要人工确认 SQL、Schema 或业务口径"
+    )
     assert len(result.data["repair_history"]) == 3
-    assert result.trace[-2].outcome == "attempts_exhausted"
+    assert result.trace[-3].outcome == "attempts_exhausted"
+    assert result.trace[-2].node_name == "hitl"
     assert result.trace[-1].node_name == "finalize"
 
 
@@ -213,7 +225,7 @@ def test_every_round_produces_complete_trace(tmp_path: Path) -> None:
 
     result = run_workflow(state=state, database_url=database_url, llm_client=llm_client)
 
-    assert len(result.trace) == 12
+    assert len(result.trace) == 13
     for event in result.trace:
         assert event.node_name
         assert event.node_type
