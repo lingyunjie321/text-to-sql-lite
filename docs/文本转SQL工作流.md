@@ -15,122 +15,106 @@
 - `retrieval.examples_path`: 默认 `configs/examples.yaml`，请求级配置构建时会注入到 `example_retrieval` 节点
 - `retrieval.knowledge_path`: 默认 `configs/knowledge.yaml`，请求级配置构建时会注入到 `context_retrieval` 节点
 
-维护提示：如果修改 `workflow.yaml` 的节点名、outcome 边或最大尝试次数，必须同步更新本文档、[面试演示场景](面试演示场景.md) 和相关集成测试。
-
 ## 节点与职责
 
-| 配置节点 | 实现类 | 主要输入 | 主要输出 | 成功/失败 outcome |
-| --- | --- | --- | --- | --- |
-| `begin` | `BeginNode` | `user_question`、`request_id` | `task` | `success` |
-| `selection` | `SelectionNode` | `user_question` | `intent` | `text_to_sql` |
-| `schema_linking` | `SchemaLinkingNode` | `user_question`、`state.data.schema` | `schema_linking` | `success` |
-| `context_retrieval` | `ContextRetrievalNode` | 问题、linked tables、`configs/knowledge.yaml` | `rag_context` | `success` |
-| `example_retrieval` | `ExampleRetrievalNode` | 问题、linked tables、`configs/examples.yaml` | `retrieved_examples`、`available_example_count` | `success` |
-| `sql_generation` | `GenSQLAgenticNode` | 问题、linked schema、RAG 上下文、examples、业务方言范式、LLM client、model profiles | `generated_sql`、`selected_model`、`prompt_summary` | `success` |
-| `sql_validation` | `ValidateSQLNode` | `generated_sql/current_sql`、schema、dialect | `validated_sql` 或 `last_error` | `validation_success`、`validation_failed` |
-| `sql_execution` | `ExecuteSQLNode` | `validated_sql`、database URL | `execution_result` 或 `last_error` | `execution_success`、`execution_failed` |
-| `error_classification` | `ReflectionDecisionNode`（兼容 `ReflectErrorNode`） | `last_error`、`current_sql/generated_sql`、`attempt_count`、`max_repair_attempts` | `reflection_decision`、`sql_contexts`、`last_reflection_strategy`、兼容的 `repair_instruction` | `fix_sql`、`relink_schema`、`retrieve_context`、`reasoning_rewrite`、`hitl_required`、`attempts_exhausted` |
-| `reflection_fix` | `FixSQLNode` | `repair_instruction`、`reflection_decision`、`sql_contexts`、LLM client、model profile | 新 SQL、`repair_history`、`attempt_count`，历史中记录 `strategy_name` | `fix_complete` |
-| `reasoning_rewrite` | `ReasoningRewriteNode` | 问题、linked schema、RAG 上下文、最近 SQLContext、`last_error`、反思原因 | 新 `generated_sql/current_sql`、`attempt_count` | `rewrite_complete` |
-| `hitl` | `HITLNode` | `reflection_decision`、`last_error` | `final_status=needs_human_review`、`hitl_reason`、`final_error` | `hitl_required` |
-| `finalization` | `FinalizeNode` | `execution_result`、错误状态、HITL 状态 | `final_status`、`final_sql`、`final_result/final_error` | `finalize_success`、`finalize_failed`、`finalize_hitl` |
+| 配置节点 | 实现类 | 主要输出 | 成功/失败 outcome |
+| --- | --- | --- | --- |
+| `begin` | `BeginNode` | `task` | `success` |
+| `selection` | `SelectionNode` | `intent` | `text_to_sql` |
+| `schema_linking` | `SchemaLinkingNode` | `schema_linking` | `success` |
+| `context_retrieval` | `ContextRetrievalNode` | `rag_context` | `success` |
+| `example_retrieval` | `ExampleRetrievalNode` | `retrieved_examples` | `success` |
+| `sql_generation` | `GenSQLAgenticNode` | `generated_sql`、`selected_model`、`prompt_summary` | `success` |
+| `sql_validation` | `ValidateSQLNode` | `validated_sql` 或 `last_error` | `validation_success` / `validation_failed` |
+| `sql_execution` | `ExecuteSQLNode` | `execution_result` 或 `last_error` | `execution_success` / `execution_failed` |
+| `error_classification` | `ReflectionDecisionNode` | `reflection_decision`、`sql_contexts` | `fix_sql` / `relink_schema` / `retrieve_context` / `reasoning_rewrite` / `hitl_required` / `attempts_exhausted` |
+| `reflection_fix` | `FixSQLNode` | 新 SQL、`repair_history` | `fix_complete` |
+| `reasoning_rewrite` | `ReasoningRewriteNode` | 新 SQL | `rewrite_complete` |
+| `hitl` | `HITLNode` | `final_status=needs_human_review` | `hitl_required` |
+| `finalization` | `FinalizeNode` | `final_status`、`final_sql`、`final_result/error` | `terminal` |
 
-维护提示：如果新增节点或给现有节点增加新的 outcome，需要同步更新 `workflow.yaml`、本表、plaintext/Mermaid 图和 `tests/unit/workflow/test_engine.py`。
+详细输入输出和 state.data 键见 [SQL 生成过程代码追踪](SQL生成过程代码追踪.md)。
 
 ## 流转图
 
-先看 boxed plaintext 版，适合不渲染 Mermaid 的阅读场景：
+plaintext 版（适合不渲染 Mermaid 的阅读场景）：
 
 ```text
-┌──────────────────────────────────────────────────────────────────────────────┐
-│                       Text-to-SQL 工作流流转图                               │
-└──────────────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│                    Text-to-SQL 工作流流转图                   │
+└─────────────────────────────────────────────────────────────┘
 
-                             ┌──────────────────────┐
-                             │ POST /api/v1/query   │
-                             │ QueryRequest         │
-                             └───────────┬──────────┘
-                                         │
-                             ┌───────────▼──────────┐
-                             │ begin                │
-                             │ BeginNode            │
-                             └───────────┬──────────┘
-                                         │ success
-                             ┌───────────▼──────────┐
-                             │ selection            │
-                             │ SelectionNode        │
-                             └───────────┬──────────┘
-                                         │ text_to_sql
-                             ┌───────────▼──────────┐
-                             │ schema_linking       │
-                             │ SchemaLinkingNode    │
-                             └───────────┬──────────┘
-                                         │ success
-                             ┌───────────▼──────────┐
-                             │ context_retrieval    │
-                             │ ContextRetrievalNode │
-                             └───────────┬──────────┘
-                                         │ success
-                             ┌───────────▼──────────┐
-                             │ example_retrieval    │
-                             │ ExampleRetrievalNode │
-                             └───────────┬──────────┘
-                                         │ success
-                             ┌───────────▼──────────┐
-                             │ sql_generation       │
-                             │ GenSQLAgenticNode    │
-                             └───────────┬──────────┘
-                                         │ success
-                             ┌───────────▼──────────┐
-                             │ sql_validation       │
-                             │ ValidateSQLNode      │
-                             └──────┬─────────┬─────┘
-                                    │         │
-                  validation_success│         │validation_failed
-                                    │         ▼
-                                    │  ┌──────────────────────┐
-                                    │  │ error_classification │
-                                    │  │ ReflectionDecision   │
-                                    │  └──────┬─────────┬─────┘
-                                    │         │         │
-                                    │fix_sql  │attempts_exhausted / hitl_required
-                                    │         │         ▼
-                                    │         │  ┌──────────────────────┐
-                                    │         │  │ hitl                 │
-                                    │         │  │ HITLNode            │
-                                    │         │  └───────────┬──────────┘
-                                    │         │              │ hitl_required
-                                    │         ▼              ▼
-                                    │  ┌──────────────────────┐
-                                    │  │ reflection_fix       │
-                                    │  │ FixSQLNode           │
-                                    │  └───────────┬──────────┘
-                                    │              │ fix_complete
-                                    │              └──── back to sql_validation
-                                    │
-                                    │  relink_schema -> schema_linking
-                                    │  retrieve_context -> context_retrieval
-                                    │  reasoning_rewrite -> reasoning_rewrite -> sql_validation
-                                    │
-                                    ▼
-                             ┌──────────────────────┐
-                             │ sql_execution        │
-                             │ ExecuteSQLNode       │
-                             └──────┬─────────┬─────┘
-                                    │         │
-                  execution_success │         │ execution_failed
-                                    │         └──── to error_classification
-                                    ▼
-                             ┌──────────────────────┐
-                             │ finalization         │
-                             │ FinalizeNode success │
-                             └───────────┬──────────┘
-                                         │ terminal
-                                         ▼
-                                  ┌────────────┐
-                                  │ API Result │
-                                  │ + Trace    │
-                                  └────────────┘
+  POST /api/v1/query
+         │
+         ▼
+  ┌──────────────┐
+  │ begin        │ ── success ──┐
+  └──────────────┘              ▼
+                        ┌──────────────┐
+                        │ selection    │ ── text_to_sql ──┐
+                        └──────────────┘                  ▼
+                                              ┌──────────────────┐
+                                              │ schema_linking   │
+                                              └────────┬─────────┘
+                                    success ────────────┤
+                                                       ▼
+                                              ┌──────────────────┐
+                                              │ context_retrieval│
+                                              └────────┬─────────┘
+                                    success ────────────┤
+                                                       ▼
+                                              ┌──────────────────┐
+                                              │ example_retrieval│
+                                              └────────┬─────────┘
+                                    success ────────────┤
+                                                       ▼
+                                              ┌──────────────────┐
+                                              │ sql_generation   │
+                                              └────────┬─────────┘
+                                    success ────────────┤
+                                                       ▼
+                                              ┌──────────────────┐
+                       ┌──── validation_failed │ sql_validation   │
+                       │                       └────────┬─────────┘
+                       │              validation_success │
+                       │                                ▼
+                       │                       ┌──────────────────┐
+                       │     execution_failed  │ sql_execution    │
+                       │            ┌──────────│                  │
+                       │            │          └────────┬─────────┘
+                       │            │     execution_success│
+                       │            │                     ▼
+                       │            │            ┌──────────────────┐
+                       │            │            │ finalization     │ ──► terminal
+                       │            │            │ (success)        │     API Result + Trace
+                       │            │            └──────────────────┘
+                       ▼            ▼
+              ┌─────────────────────────────┐
+              │ error_classification        │
+              │ (ReflectionDecisionNode)    │
+              └──┬───────┬───────┬──────┬───┘
+                 │       │       │      │
+        fix_sql  │  relink  retrieve  reasoning_rewrite
+                 │  _schema _context       │
+                 │       │       │      │
+                 ▼       │       │      ▼
+        ┌────────────┐   │       │  ┌──────────────────┐
+        │reflection_ │   │       │  │reasoning_rewrite │
+        │fix         │   │       │  └────────┬─────────┘
+        └─────┬──────┘   │       │           │
+              │          │       │   rewrite_complete
+       fix_complete      │       │           │
+              │          │       │           │
+              │     回到 schema   回到 context │
+              │     _linking     _retrieval  │
+              │                                │
+              └──────────────┬─────────────────┘
+                             ▼
+                     回到 sql_validation
+
+  另两条终止分支:
+    error_classification ── hitl_required / attempts_exhausted ──► hitl ──► finalization (needs_human_review)
+    WorkflowEngine step_count >= max_steps ──► terminate("max_steps_exceeded")
 ```
 
 Mermaid 渲染版如下：
@@ -165,8 +149,6 @@ flowchart TD
     FinalReview --> End
 ```
 
-维护提示：这两个图必须只表达真实配置和真实节点。若改动 `edges` 中的 `on_validation_success`、`on_execution_failed` 等键名，plaintext 版、Mermaid 版和下方路径说明要一起改。
-
 ## 成功路径
 
 一次成功路径为：
@@ -185,8 +167,6 @@ flowchart TD
 
 成功路径集成测试见 `tests/integration/test_api_workflow.py` 和 `tests/integration/test_demo_scenarios.py`。
 
-维护提示：如果修改 `TextToSQLApiService.run_query` 的初始化数据、`GenSQLAgenticNode.run` 的内部步骤或 `serialize_run` 的响应字段，需要同步更新本节和 [SQL 生成过程代码追踪](SQL生成过程代码追踪.md)。
-
 ## 策略反思闭环
 
 策略反思闭环覆盖 SQL 校验失败和执行失败：
@@ -199,8 +179,6 @@ flowchart TD
 
 当前实现保留向后兼容注册名：`error_reflection`、`error_classification` 和 `reflection_decision` 都指向策略反思节点。它不会在运行中动态插入节点，只通过 `NodeResult.outcome` 和配置边路由。
 
-维护提示：如果将来增加新策略，必须更新 `ReflectionStrategy`、`workflow.yaml` 的 `edges`、本节、集成测试和 README 的核心能力说明。
-
 ## 终止路径
 
 终止路径有两类：
@@ -209,8 +187,6 @@ flowchart TD
 - 最大步骤保护：`WorkflowEngine.run` 发现 `step_count >= workflow.max_steps`，直接 `terminate("max_steps_exceeded")`。这是配置死循环保护。
 
 当前 SQL 写入、DDL、多语句等会在 `SQLValidator` 中被拒绝为 `dialect_error`，并按配置进入修复流程；是否把安全错误改成不可修复，需要后续扩展 error category 和 edge 策略。
-
-维护提示：如果调整 `max_attempts` 请求上限、`WorkflowSection.max_repair_attempts` 默认值或不可修复错误策略，应同步更新终止路径说明和终止路径测试。
 
 ## Trace 输出
 
@@ -227,4 +203,4 @@ Trace 由 engine 自动记录，不需要每个节点手写计时逻辑。`input
 
 API 响应会额外返回 `reflection_decision`、脱敏后的 `sql_contexts`、`hitl_required` 和 `hitl_reason`。其中 SQLContext 只暴露 SQL 长度与 hash，不暴露完整 SQL 或完整结果集。
 
-维护提示：如果改变 `TraceEvent` 字段或序列化结构，要同步更新前端 `TraceEventPayload`、`GenerationDetails` 展示逻辑和本文档。
+维护规范见 [文档维护规范](文档维护规范.md)。

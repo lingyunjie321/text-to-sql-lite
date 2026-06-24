@@ -22,8 +22,6 @@ def query(request: QueryRequest) -> dict[str, Any]:
 - `debug`
 - `runtime_config_id`，可选，使用前端创建的短生命周期数据库和模型配置
 
-维护提示：如果修改请求字段或路由路径，需要同步更新 README 的 API 示例、前端 `RunQueryRequest` 和本文档。
-
 ## 2. TextToSQLApiService.run_query 初始化运行状态
 
 文件：`src/text_to_sql_demo/api/service.py`
@@ -41,8 +39,6 @@ def query(request: QueryRequest) -> dict[str, Any]:
 6. 调用 `engine.run(state)`。
 7. 保存最终状态到 `InMemoryRunStore`，并用 `serialize_run` 输出 API payload。
 
-维护提示：如果 `run_query` 增加新的 state 初始化字段，要同步更新 [工作流文档](文本转SQL工作流.md) 的状态说明和前端 API 类型。
-
 ## 3. WorkflowEngine.run 按配置流转
 
 文件：`src/text_to_sql_demo/workflow/engine.py`
@@ -56,8 +52,6 @@ def query(request: QueryRequest) -> dict[str, Any]:
 5. 如果节点返回 `terminate` 或配置边不存在，终止。
 6. 否则根据 `result.outcome` 和 `edges[current_node].target_for(outcome)` 找下一节点。
 
-维护提示：如果修改 `NodeResult` 或 edge 解析规则，要同步更新 boxed plaintext/Mermaid 图和 `tests/unit/workflow/test_engine.py`。
-
 ## 4. BeginNode 和 SelectionNode 初始化任务与意图
 
 文件：`src/text_to_sql_demo/nodes/begin.py`、`src/text_to_sql_demo/nodes/selection.py`
@@ -65,8 +59,6 @@ def query(request: QueryRequest) -> dict[str, Any]:
 `BeginNode.run` 把原始问题、`request_id` 和入口节点写入 `state.data.task`，用于把任务初始化显式纳入 Trace。
 
 `SelectionNode.run` 做轻量意图分类，当前默认输出 `text_to_sql`，写入 `state.data.intent`。`workflow.yaml` 通过 `on_text_to_sql` 把流程导向 `schema_linking`；后续如果接入非 SQL 意图，可以新增 outcome 和 edge，而不用改 `WorkflowEngine`。
-
-维护提示：如果将 Selection 改成真正多意图分类，需要补充意图枚举、分支测试和 API 响应说明。
 
 ## 5. SchemaLinkingNode.run 选择相关 Schema
 
@@ -81,8 +73,6 @@ def query(request: QueryRequest) -> dict[str, Any]:
 - 表数和字段数裁剪。
 
 输出写入 `state.data.schema_linking`，供检索和 prompt pruning 使用。
-
-维护提示：如果调整 schema linking 规则、字段上限或输出结构，必须同步更新 PromptBuilder 文档、前端使用的数据表展示和 schema linking 单元测试。
 
 ## 6. ContextRetrievalNode.run 检索知识库上下文
 
@@ -99,8 +89,6 @@ def query(request: QueryRequest) -> dict[str, Any]:
 
 检索策略按问题词项重叠和 linked tables 重叠打分，返回 Top-K，并写入 `state.data.rag_context`。当前阶段没有强依赖向量数据库；后续接入 LanceDB/FastEmbed/PyArrow 时，应保持测试可注入本地 fallback 或 Mock store。
 
-维护提示：如果调整 `rag_context` 结构，需要同步更新 `PromptBuilder`、`serialize_run`、前端 `RagContextPayload` 和上下文检索单元测试。
-
 ## 7. ExampleRetrievalNode.run 检索 Top-K SQL 示例
 
 文件：`src/text_to_sql_demo/nodes/example_retrieval.py`
@@ -114,8 +102,6 @@ def query(request: QueryRequest) -> dict[str, Any]:
 - 返回 `top_k` 个 `ExampleSearchResult`。
 
 输出写入 `state.data.retrieved_examples` 和 `state.data.available_example_count`。
-
-维护提示：如果将来接入向量检索或修改 examples 路径，README 和完成度分析必须明确说明当前能力边界变化。
 
 ## 8. GenSQLAgenticNode.run 完成路由、Prompt 和 LLM 调用
 
@@ -134,8 +120,6 @@ def query(request: QueryRequest) -> dict[str, Any]:
 9. 把 LLM 返回文本写入 `generated_sql`，并记录 `selected_model`、`complexity_level`、`routing_reason`、`prompt_summary`。
 
 默认服务中的 `llm_client` 由 `TextToSQLApiService` 根据 `workflow.yaml` 或 `runtime_config_id` 解析得到；当前默认 workflow 会构造 OpenAI-compatible adapter。测试和 demo 脚本显式传入 `MockLLMClient`，它按 alias、sequence 或 default response 返回确定性 SQL，并保存请求，方便测试断言。
-
-维护提示：如果将复杂度路由拆成独立节点，或新增模型 alias，必须同步更新 `workflow.yaml`、本文档、README 核心能力和 `tests/unit/routing/test_complexity_routing.py`。
 
 ## 9. PromptBuilder.build 做上下文裁剪
 
@@ -165,7 +149,7 @@ def query(request: QueryRequest) -> dict[str, Any]:
 - `original_example_count`
 - `injected_example_count`
 
-维护提示：如果 prompt 内容、summary 字段或裁剪策略变化，要同步更新 prompt 单元测试、Trace 展示说明和面试讲解材料。
+summary 用于在 Trace 中解释 prompt 为什么没有把完整 schema 或全部样例塞给模型。
 
 ## 10. ValidateSQLNode.run 校验 SQL
 
@@ -180,8 +164,6 @@ def query(request: QueryRequest) -> dict[str, Any]:
 
 成功时 outcome 是 `validation_success`，写入 `validated_sql`、`validated_sql_dialect` 和 `current_sql`。失败时 outcome 是 `validation_failed`，写入 `last_error`。
 
-维护提示：如果新增错误类型或改变只读安全规则，需要同步更新完成度分析和修复路径说明。
-
 ## 11. ExecuteSQLNode.run 执行已校验 SQL
 
 文件：`src/text_to_sql_demo/nodes/sql_execution.py`
@@ -193,8 +175,6 @@ def query(request: QueryRequest) -> dict[str, Any]:
 - `fetchmany(max_rows)` 限制结果行数。
 - 返回 `columns`、`rows`、`duration_ms`。
 - 捕获 `SQLAlchemyError` 并包装为 `execution_error`。
-
-维护提示：如果新增数据库 driver，不要只改 executor；还要更新配置说明、driver 到 SQLGlot dialect 的映射、只读保障策略、测试矩阵和 README 限制。
 
 ## 12. 策略反思闭环
 
@@ -216,8 +196,6 @@ def query(request: QueryRequest) -> dict[str, Any]:
 - `strategy_name`
 
 `ReasoningRewriteNode` 用用户问题、linked schema、RAG 上下文、最近 SQLContext、`last_error` 和反思原因重新生成 SQL，然后流程回到 `sql_validation`。`HITLNode` 只标记 `needs_human_review`，不实现审批 UI。
-
-维护提示：如果新增不可修复错误策略或改变修复 prompt，必须同步更新 `tests/integration/test_sql_repair_workflow.py`、前端修复提示和 [工作流文档](文本转SQL工作流.md)。
 
 ## 13. FinalizeNode.run 与 API 响应
 
@@ -249,4 +227,4 @@ def query(request: QueryRequest) -> dict[str, Any]:
 - `errors`
 - `trace`
 
-维护提示：如果 API 响应结构改变，需要同步更新 `frontend/src/api/types.ts`、`frontend/src/adapters/queryRunAdapter.ts`、README API 示例和本文档。
+维护规范见 [文档维护规范](文档维护规范.md)。

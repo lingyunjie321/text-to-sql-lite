@@ -1,23 +1,32 @@
 # Text-to-SQL Agent Demo
 
-当前 `workflow.yaml` 默认使用 OpenAI-compatible provider，并通过 `DEEPSEEK_API_KEY` / `DEEPSEEK_BASE_URL` 读取真实模型配置；默认执行数据库是本地 SQLite demo 数据库。测试和 `scripts/run_demo.py` 仍显式注入 `MockLLMClient`，不依赖真实付费 LLM API。
+一个轻量级的 Text-to-SQL Agent 项目：运营/分析师用自然语言提问，由数据团队维护可信上下文（Schema、Reference SQL、文档知识、Metric、Semantic Model），后端通过可配置的多阶段工作流生成、校验、执行并修复 SQL，全过程留有可观测 Trace。
 
-## 核心能力
+> 项目定位为**轻量业务交付版 / 面试级 demo**，不包含认证、多租户、调度、BI 看板等生产级能力。详见文末[项目定位与边界](#项目定位与边界)。
 
-- 可配置工作流：`workflow.yaml` 定义节点、边、最大步数、最大修复次数、模型 alias 和数据库连接。
-- 注册式节点体系：`BaseNode`、`NodeRegistry`、`NodeFactory` 和 `WorkflowEngine` 解耦，新增节点不需要改 engine。
-- Datus-style 核心链路：默认 workflow 已对齐 `Begin -> Selection -> Schema -> Context Retrieval -> Example Retrieval -> GenSQL -> Validation -> Execute -> Finalization`。
-- 状态驱动通信：节点通过 `WorkflowState.data` 共享 `task`、`intent`、`schema_linking`、`rag_context`、`retrieved_examples`、`generated_sql`、`validation_result`、`execution_result` 等中间结果。
-- 本地知识库检索：`ContextRetrievalNode` 从 `configs/knowledge.yaml` 和 approved saved_query 检索可信 Reference SQL、文档片段、Metric 和 Semantic Model；当前实现是 YAML/SQLite/词法 Top-K fallback，后续可替换为可选向量后端。
-- Prompt 裁剪：`PromptBuilder.build` 只注入 linked schema、Top-K 示例、知识库上下文和业务方言范式，不把完整 schema、所有样例或完整知识库塞进 prompt。
-- Agentic SQL 生成：`GenSQLAgenticNode.run` 根据 `ComplexityClassifier` 结果选择 `light` 或 `strong` 模型 alias，并注入 linked schema、RAG 上下文、Top-K 示例和业务方言范式。
-- SQL 安全链路：`SQLValidator` 基于 SQLGlot 做方言解析、单语句、只读 SELECT 和 schema 引用校验；`SQLExecutor` 只执行已校验 SQL。
-- 策略反思闭环：校验或执行失败后进入 `ReflectionDecisionNode`，按错误类型路由到 `FIX_SQL`、`RELINK_SCHEMA`、`RETRIEVE_CONTEXT`、`REASONING_REWRITE` 或 `HITL`，最多 3 轮并有明确终止条件。
-- 轻量 SQLContext 记忆：失败和成功 SQL 尝试都会沉淀 hash/长度、错误类型、结果摘要、反思策略和原因摘要；`SUCCESS` 只表示单次 workflow 成功收敛，用于回放和解释，不会自动变成跨运行可信知识。
-- 可观测 Trace：每个节点执行后由 `WorkflowEngine` 记录节点名、outcome、耗时、输入输出摘要和错误摘要。
-- 内部 metadata store：项目自身使用 SQLite 沉淀 `query_run`、`trace_event`、`saved_query` 和 `feedback`；普通 saved_query 先保存为 `draft`，经轻量审核入口更新为 `approved` 后才会作为可信 Reference SQL 进入后续检索，不写入业务目标库。
-- 运行时配置：前端可临时配置数据库连接和 `light/strong` 双模型路由，请求通过 `runtime_config_id` 使用对应配置。
-- 前端演示：React/Vite 页面支持自然语言查询、运行配置、SQL 查看/编辑、结果展示、保存 SQL、反馈、历史记录和开发者 Trace 展开。
+## 目录
+
+- [核心特性](#核心特性)
+- [技术栈](#技术栈)
+- [环境要求](#环境要求)
+- [快速启动](#快速启动)
+- [Demo 场景](#demo-场景)
+- [API 示例](#api-示例)
+- [高级配置](#高级配置)
+- [项目结构速览](#项目结构速览)
+- [测试](#测试)
+- [文档导航](#文档导航)
+- [项目定位与边界](#项目定位与边界)
+
+## 核心特性
+
+- **可配置工作流**：节点、边、最大步数、最大修复次数、模型 alias 和数据库连接都在 `workflow.yaml` 中声明，流转由节点输出和配置决定，不硬编码在 API handler 中。
+- **注册式节点体系**：节点统一实现 `BaseNode` 接口，通过注册表按 type 创建；新增节点不需要改动工作流引擎或工厂。
+- **RAG 检索与 Prompt 裁剪**：只把 linked schema、Top-K 示例、知识库上下文和业务方言范式注入 prompt，不把完整 schema 或全部样例塞给模型。
+- **SQL 安全与反思闭环**：SQLGlot 做方言解析、单语句、只读 SELECT 和 schema 引用校验；校验或执行失败后按错误类型路由到修复、重新链接 Schema、重新推理或人工介入，最多 3 轮并有明确终止条件。
+- **可观测与前端演示**：每个节点执行后记录 Trace；React/Vite 前端支持自然语言查询、运行配置、SQL 编辑执行、结果展示、保存 SQL、反馈和开发者 Trace 展开。
+
+更细的实现证据、亮点和限制见 [docs/完成度分析.md](docs/完成度分析.md)。
 
 ## 技术栈
 
@@ -30,6 +39,13 @@
 | 配置 | YAML + Pydantic config model，默认包含 `configs/examples.yaml` 和 `configs/knowledge.yaml` |
 | 测试与质量 | pytest、ruff |
 | 前端 | React 18、Vite、TypeScript、Vitest |
+
+## 环境要求
+
+- **Python 3.11+**（`pyproject.toml` 声明 `requires-python = ">=3.11"`）
+- **Node 18+**（前端使用 Vite 6 / React 18）
+- 默认执行数据库是本地 SQLite，无需额外安装数据库服务
+- 默认 LLM 走 OpenAI-compatible provider，需要可用的 API Key；测试和内置 demo 场景使用 Mock LLM，不依赖真实付费 API
 
 ## 快速启动
 
@@ -47,7 +63,9 @@ pip install -e ".[dev]"
 python scripts/init_db.py --db-path data/sqlite/demo.db
 ```
 
-配置默认 LLM。当前 `workflow.yaml` 的 `light` / `strong` alias 默认读取 `DEEPSEEK_API_KEY` 和 `DEEPSEEK_BASE_URL`；如果你的服务端点不是默认 OpenAI Chat Completions endpoint，需要同时配置 base URL：
+### 配置默认 LLM
+
+当前 `workflow.yaml` 的 `light` / `strong` alias 默认读取 `DEEPSEEK_API_KEY` 和 `DEEPSEEK_BASE_URL`。把真实密钥写到本地 `.env.local`（已被 `.gitignore` 忽略），不要提交：
 
 ```bash
 cp .env.example .env.local
@@ -56,7 +74,28 @@ cp .env.example .env.local
 # DEEPSEEK_BASE_URL=https://你的-openai-compatible-endpoint/v1/chat/completions
 ```
 
+模型名和环境变量名可以按你的账号可用模型调整，但业务代码只依赖 `light` / `strong` alias。如果不配置 base URL，项目会使用默认 OpenAI Chat Completions endpoint。当前默认 alias 配置如下：
+
+```yaml
+models:
+  aliases:
+    light:
+      provider: openai_compatible
+      model: deepseek-v4-flash
+      temperature: 0.0
+      api_key_env: DEEPSEEK_API_KEY
+      base_url_env: DEEPSEEK_BASE_URL
+    strong:
+      provider: openai_compatible
+      model: deepseek-v4-pro
+      temperature: 0.0
+      api_key_env: DEEPSEEK_API_KEY
+      base_url_env: DEEPSEEK_BASE_URL
+```
+
 如果只是运行内置面试场景，可以直接使用 `python scripts/run_demo.py`，脚本会注入 `MockLLMClient`，不需要 API Key。
+
+### 启动后端与前端
 
 启动后端 API。当前项目使用 `src/` 布局；如果没有安装 editable 包，请保留 `PYTHONPATH=src`：
 
@@ -80,125 +119,9 @@ npm run dev
 
 Vite 已把 `/api` 代理到 `http://127.0.0.1:8000`，所以前端和后端需要同时运行。
 
-## 连接服务型数据库（可选）
-
-默认仍使用本地 SQLite。若要连接带 `host + port + username + password` 的 Postgres/MySQL，先安装数据库驱动：
-
-```bash
-pip install -e ".[dev,db]"
-```
-
-结构化连接配置写在 `workflow.yaml` 的 `database.connections` 下，密码不要明文写进 YAML，只放到本地 `.env.local` 或 shell 环境变量：
-
-```bash
-TEXT_TO_SQL_DB_PASSWORD=你的数据库密码
-```
-
-Postgres 示例：
-
-```yaml
-database:
-  default: demo_postgres
-  connections:
-    demo_postgres:
-      driver: postgresql
-      host: localhost
-      port: 5432
-      database_name: text_to_sql_demo
-      username: readonly_user
-      password_env: TEXT_TO_SQL_DB_PASSWORD
-      query:
-        sslmode: prefer
-      read_only: true
-```
-
-切换工作流执行方言时，需要让生成、校验和执行保持一致：
-
-```yaml
-dialect:
-  name: postgres
-  target_dialect: postgres
-
-nodes:
-  sql_generation:
-    target_dialect: postgres
-  sql_validation:
-    target_dialect: postgres
-    render_dialect: postgres
-  sql_execution:
-    execution_dialect: postgres
-```
-
-完整 URL 环境变量仍然可用，并且优先级最高，例如 `DEMO_DATABASE_URL=postgresql+psycopg://user:password@host:5432/dbname?sslmode=require`。更推荐结构化字段，因为配置更清楚，密码也更容易统一放在环境变量中管理。
-
-## 扩展新的数据库类型（可选开发）
-
-如果只是接入新的 PostgreSQL/MySQL 数据库实例，通常不需要改代码，按上一节新增 `workflow.yaml` 连接即可。只有当项目要支持一种当前没有声明的数据库类型，例如 SQL Server、Oracle、DuckDB 等，才需要扩展 driver、方言和测试。
-
-扩展时不要修改 `WorkflowEngine`、`NodeFactory` 或具体节点流转逻辑。数据库类型属于配置、运行时解析、Schema 读取、SQL 校验和 SQLAlchemy 执行层的能力。
-
-建议按下面顺序修改：
-
-1. 在 `pyproject.toml` 的可选依赖中加入对应 SQLAlchemy 驱动，例如 `mssql+pyodbc`、`oracle+oracledb` 或其他官方推荐驱动。
-2. 在 `src/text_to_sql_demo/config/models.py` 扩展 `DatabaseConnectionConfig.driver` 的允许值。
-3. 在 `src/text_to_sql_demo/runtime/models.py` 扩展 `RuntimeDriver`，让运行时配置 API 可以接收新 driver。
-4. 在 `src/text_to_sql_demo/api/service.py` 的 `SERVER_DRIVER_NAMES` 中加入新 driver 到 SQLAlchemy driver name 的映射；如果新数据库需要额外 URL 参数，也要确保通过 `query` 或安全字段传入。
-5. 在 `src/text_to_sql_demo/runtime/resolver.py` 的 `DRIVER_TO_DIALECT` 中加入 driver 到 SQLGlot 方言名的映射。
-6. 在 `src/text_to_sql_demo/sql/dialect.py` 扩展 `DialectName` 和 `SUPPORTED_DIALECTS`。只有 SQLGlot 能解析并渲染该方言时，才应开放该方言。
-7. 如果前端也要展示或提交该数据库类型，同步更新 `frontend/src/api/types.ts` 里的 driver 和 dialect 联合类型。
-8. 在 `workflow.yaml` 增加一个只读连接预设，并把 `dialect`、`sql_generation`、`sql_validation`、`sql_execution` 的目标方言保持一致。
-9. 为新类型补测试：配置解析、URL 构造、运行时配置 API、Schema introspection、SQL 方言校验和只读执行路径。
-
-安全约束保持不变：数据库密码不要写进 YAML；优先使用 `password_env` 和 `.env.local`；数据库账号应只授予查询权限；日志、Trace 和 API 响应不能输出完整数据库 URL、密码、完整 SQL 或完整结果集。
-
-扩展完成后至少运行：
-
-```bash
-ruff check .
-python -m pytest
-```
-
-如果改了前端类型或页面，还需要运行：
-
-```bash
-cd frontend
-npm test
-npm run build
-```
-
-## 默认 LLM 配置
-
-默认配置已经使用 OpenAI-compatible Chat Completions API。请先创建本地 `.env.local`，该文件已被 `.gitignore` 忽略：
-
-```bash
-DEEPSEEK_API_KEY=你的真实_key
-DEEPSEEK_BASE_URL=https://你的-openai-compatible-endpoint/v1/chat/completions
-```
-
-当前 `workflow.yaml` 中的模型 alias 如下；模型名和环境变量名可以按你的账号可用模型调整，但业务代码只依赖 `light` / `strong` alias：
-
-```yaml
-models:
-  aliases:
-    light:
-      provider: openai_compatible
-      model: deepseek-v4-flash
-      temperature: 0.0
-      api_key_env: DEEPSEEK_API_KEY
-      base_url_env: DEEPSEEK_BASE_URL
-    strong:
-      provider: openai_compatible
-      model: deepseek-v4-pro
-      temperature: 0.0
-      api_key_env: DEEPSEEK_API_KEY
-      base_url_env: DEEPSEEK_BASE_URL
-```
-
-如果不配置 base URL，项目会使用默认 OpenAI Chat Completions endpoint。测试和内置 demo 场景仍然通过 Mock LLM 执行，不会依赖真实付费 API。
-
 ## Demo 场景
 
-运行三条内置面试场景：
+运行三条内置面试场景（使用 Mock LLM，无需 API Key）：
 
 ```bash
 python scripts/run_demo.py
@@ -241,83 +164,47 @@ curl http://127.0.0.1:8000/api/v1/runs/<request_id>
 curl http://127.0.0.1:8000/api/v1/runs
 ```
 
-保存一次成功 SQL：
+此外项目还提供以下接口，完整请求体和返回字段见 [docs/SQL生成过程代码追踪.md](docs/SQL生成过程代码追踪.md) 与 [docs/运行时配置.md](docs/运行时配置.md)：
 
-```bash
-curl -X POST http://127.0.0.1:8000/api/v1/saved-queries \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "name": "订单金额明细",
-    "request_id": "<request_id>",
-    "tags": ["运营", "订单"]
-  }'
+- `POST /api/v1/saved-queries`：保存一次成功 SQL（先存为 `draft`，轻量审核为 `approved` 后才作为可信 Reference SQL 进入后续检索）
+- `POST /api/v1/runs/<request_id>/feedback`：提交运行反馈
+- `GET /api/v1/schema`：查看当前 demo 数据库 Schema，支持 `database_preset_id` 指定自动发现的 SQLite 数据源
+- `POST /api/v1/runtime/configs`：创建临时运行配置（数据库连接 + `light/strong` 模型路由），返回的 `runtime_config_id` 可用于 `/api/v1/query`、`/api/v1/schema` 和 `/api/v1/sql/execute`；运行时配置只保存在后端内存中，用户提交的密码和 API Key 不会写入配置文件，也不会回传前端
+- `POST /api/v1/sql/execute`：执行用户编辑后的只读 SQL
+- `POST /api/v1/transpile`：转换已有 SQL 方言
+
+## 高级配置
+
+下面两类配置属于二次开发场景，普通使用者用默认 SQLite + 默认 LLM alias 即可：
+
+- **连接服务型数据库（PostgreSQL/MySQL）**：先 `pip install -e ".[dev,db]"` 安装驱动，再在 `workflow.yaml` 的 `database.connections` 下用结构化字段配置连接（密码只放 `TEXT_TO_SQL_DB_PASSWORD` 等环境变量，不要明文写进 YAML），并把 `dialect`、`sql_generation`、`sql_validation`、`sql_execution` 的目标方言保持一致。完整 URL 环境变量（如 `DEMO_DATABASE_URL`）仍然可用且优先级最高。
+- **扩展新的数据库类型（SQL Server、Oracle、DuckDB 等）**：需要在 driver、运行时模型、API 映射、SQLGlot 方言声明和测试等多个层做扩展，但不要改动工作流引擎或节点流转逻辑。
+
+这两节的完整步骤和代码改动点见 [docs/项目结构与模块职责.md](docs/项目结构与模块职责.md) 的"配置与数据文件"和"核心模块职责表"部分；数据库与模型路由的整体方案见 [docs/运行时配置.md](docs/运行时配置.md)。
+
+## 项目结构速览
+
+```Plaintext
+text_to_sql/
+├── AGENTS.md                  # 项目约束、架构规则、开发流程规范
+├── README.md                  # 项目介绍、启动方式、Demo 场景、API 示例
+├── pyproject.toml             # Python 依赖、包配置、pytest/ruff 配置
+├── workflow.yaml              # 默认 Text-to-SQL 多阶段工作流配置
+├── .env.example               # 本地环境变量示例
+│
+├── configs/                   # 示例配置（examples / knowledge / dialect_patterns / prompts）
+├── data/sqlite/               # 本地 SQLite demo 数据库
+├── docs/                      # 项目说明文档
+├── examples/                  # 最小工作流配置示例
+├── scripts/                   # init_db.py / run_demo.py
+├── src/text_to_sql_demo/      # 后端主包（api / config / workflow / nodes / schema / retrieval / routing / prompts / llm / sql / execution / runtime / metadata / observability / db）
+├── tests/                     # unit / integration
+└── frontend/                  # React/Vite 前端演示
 ```
 
-提交一次运行反馈：
+完整目录树和每个模块的入口文件、职责与依赖见 [docs/项目结构与模块职责.md](docs/项目结构与模块职责.md)。
 
-```bash
-curl -X POST http://127.0.0.1:8000/api/v1/runs/<request_id>/feedback \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "rating": "up",
-    "issue_type": "accurate",
-    "comment": "结果可直接使用"
-  }'
-```
-
-查看当前 demo 数据库 Schema：
-
-```bash
-curl http://127.0.0.1:8000/api/v1/schema
-```
-
-`data/sqlite/` 下的可见 `.db` 文件会自动作为只读 SQLite 数据源出现在前端顶部下拉框和 `/api/v1/runtime/options` 中；`metadata.db` 默认排除，因为它是项目内部运行记录库。按自动发现数据源读取 Schema 时可传 `database_preset_id`：
-
-```bash
-curl 'http://127.0.0.1:8000/api/v1/schema?database_preset_id=sqlite_file_northwind'
-```
-
-创建临时运行配置：
-
-```bash
-curl -X POST http://127.0.0.1:8000/api/v1/runtime/configs \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "database": {"mode": "preset", "preset_id": "demo_sqlite"},
-    "models": {
-      "light": {"mode": "preset", "preset_id": "light"},
-      "strong": {"mode": "preset", "preset_id": "strong"}
-    }
-  }'
-```
-
-返回的 `runtime_config_id` 可用于 `/api/v1/query`、`/api/v1/schema` 和 `/api/v1/sql/execute`。运行时配置只保存在后端内存中，用户提交的数据库密码和模型 API Key 不会写入配置文件，也不会回传给前端。
-
-执行用户编辑后的只读 SQL：
-
-```bash
-curl -X POST http://127.0.0.1:8000/api/v1/sql/execute \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "sql": "SELECT id, amount FROM orders ORDER BY id",
-    "target_dialect": "sqlite",
-    "max_rows": 100
-  }'
-```
-
-转换已有 SQL 方言：
-
-```bash
-curl -X POST http://127.0.0.1:8000/api/v1/transpile \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "sql": "SELECT name || email AS label FROM customers",
-    "source_dialect": "postgres",
-    "target_dialect": "mysql"
-  }'
-```
-
-## 测试命令
+## 测试
 
 后端质量检查：
 
@@ -337,13 +224,42 @@ npm run build
 
 ## 文档导航
 
-- [项目结构与模块职责](docs/项目结构与模块职责.md)
+完整文档导读（含每个文档的定位和推荐阅读顺序）见 [docs/README.md](docs/README.md)。
+
+**架构与工作流**
+
 - [整体架构](docs/整体架构.md)
-- [记忆架构与模块设计](docs/记忆架构与模块设计.md)
 - [文本转 SQL 工作流](docs/文本转SQL工作流.md)
 - [SQL 生成过程代码追踪](docs/SQL生成过程代码追踪.md)
+- [项目结构与模块职责](docs/项目结构与模块职责.md)
+
+**记忆与可观测**
+
+- [记忆架构与模块设计](docs/记忆架构与模块设计.md)
+- [日志与可观测性](docs/日志与可观测性.md)
+
+**运行时与配置**
+
+- [运行时配置](docs/运行时配置.md)
+- [API 参考](docs/API参考.md)
+- [知识库与配置维护](docs/知识库与配置维护.md)
+
+**扩展开发**
+
+- [数据库与方言扩展](docs/数据库与方言扩展.md)
+- [节点扩展开发](docs/节点扩展开发.md)
+
+**演示与维护**
+
 - [面试演示场景](docs/面试演示场景.md)
 - [完成度分析](docs/完成度分析.md)
-- [运行时数据库与模型路由配置方案](docs/运行时数据库与模型路由配置方案.md)
-- [日志系统设计](docs/日志系统设计.md)
 - [文档维护规范](docs/文档维护规范.md)
+
+## 项目定位与边界
+
+- **定位**：轻量业务交付版，面向运营/分析师自然语言查数，由数据团队维护可信上下文。同时也是面试级 demo，用于展示可配置工作流、注册式节点、RAG 检索、SQL 安全链路和反思闭环等工程能力。
+- **默认 LLM**：`workflow.yaml` 默认使用 OpenAI-compatible provider，需要正确配置 `DEEPSEEK_API_KEY` / `DEEPSEEK_BASE_URL`；测试和 `scripts/run_demo.py` 仍显式注入 `MockLLMClient`，不依赖真实付费 LLM API。
+- **SQL 执行安全**：SQL 只读安全依赖 SQLGlot AST 解析和执行前校验，不等同于生产级数据库权限隔离；业务目标库默认只读，项目自身的运行记录、Trace、收藏 SQL、反馈等内部表允许写入。
+- **当前限制**：运行记录和运行时配置使用内存存储，服务重启后消失；Schema 来源默认是数据库 introspection；Example retrieval 是本地词法检索，不使用向量数据库或 embedding；`ComplexityClassifier` 是规则分类器而非训练模型；不实现认证、多租户或长期密钥托管。
+
+更完整的"已实现能力 / 限制 / 后续方向"见 [docs/完成度分析.md](docs/完成度分析.md)。
