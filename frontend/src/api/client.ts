@@ -1,8 +1,14 @@
 import type {
   DialectName,
+  FeedbackCreateRequest,
+  FeedbackResponse,
+  QueryRunListResponse,
   QueryRunResponse,
   RuntimeConfigCreateRequest,
   RuntimeConfigResponse,
+  SavedQueryCreateRequest,
+  SavedQueryListResponse,
+  SavedQueryResponse,
   RuntimeOptionsResponse,
   SchemaResponse
 } from "./types";
@@ -23,8 +29,12 @@ export interface TextToSqlClient {
   getSchema: (runtimeConfigId?: string | null) => Promise<SchemaResponse>;
   getRuntimeOptions: () => Promise<RuntimeOptionsResponse>;
   createRuntimeConfig: (request: RuntimeConfigCreateRequest) => Promise<RuntimeConfigResponse>;
+  listRuns: () => Promise<QueryRunListResponse>;
   runQuery: (request: RunQueryRequest) => Promise<QueryRunResponse>;
   runEditedSql: (request: RunEditedSqlRequest) => Promise<QueryRunResponse>;
+  createSavedQuery: (request: SavedQueryCreateRequest) => Promise<SavedQueryResponse>;
+  listSavedQueries: () => Promise<SavedQueryListResponse>;
+  recordFeedback: (requestId: string, request: FeedbackCreateRequest) => Promise<FeedbackResponse>;
 }
 
 export class ApiClientError extends Error {
@@ -52,6 +62,7 @@ export function createTextToSqlClient(baseUrl = ""): TextToSqlClient {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(request)
       }),
+    listRuns: () => requestJson<QueryRunListResponse>(`${baseUrl}/api/v1/runs`),
     runQuery: (request) =>
       requestJson<QueryRunResponse>(`${baseUrl}/api/v1/query`, {
         method: "POST",
@@ -74,6 +85,19 @@ export function createTextToSqlClient(baseUrl = ""): TextToSqlClient {
           max_rows: 100,
           runtime_config_id: request.runtimeConfigId ?? null
         })
+      }),
+    createSavedQuery: (request) =>
+      requestJson<SavedQueryResponse>(`${baseUrl}/api/v1/saved-queries`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(request)
+      }),
+    listSavedQueries: () => requestJson<SavedQueryListResponse>(`${baseUrl}/api/v1/saved-queries`),
+    recordFeedback: (requestId, request) =>
+      requestJson<FeedbackResponse>(`${baseUrl}/api/v1/runs/${encodeURIComponent(requestId)}/feedback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(request)
       })
   };
 }

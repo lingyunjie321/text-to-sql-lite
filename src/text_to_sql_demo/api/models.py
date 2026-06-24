@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -30,6 +30,25 @@ class ExecuteSQLRequest(BaseModel):
     target_dialect: DialectName = "sqlite"
     max_rows: int = Field(default=100, ge=1, le=500)
     runtime_config_id: str | None = None
+
+
+class SavedQueryCreateRequest(BaseModel):
+    """保存一条可复用 SQL 的请求。"""
+
+    name: str = Field(min_length=1)
+    request_id: str | None = None
+    question: str | None = None
+    sql: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    status: Literal["draft", "approved", "deprecated"] = "draft"
+
+
+class FeedbackCreateRequest(BaseModel):
+    """提交一次查询运行反馈的请求。"""
+
+    rating: Literal["up", "down", "neutral"]
+    issue_type: str | None = None
+    comment: str | None = None
 
 
 class ErrorBody(BaseModel):

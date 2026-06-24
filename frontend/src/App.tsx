@@ -9,9 +9,12 @@ import {
   Menu,
   Play,
   RotateCw,
+  Save,
   Settings2,
   Sparkles,
   Table2,
+  ThumbsDown,
+  ThumbsUp,
   Wrench,
   X
 } from "lucide-react";
@@ -24,6 +27,7 @@ import { ApiClientError, createTextToSqlClient } from "./api/client";
 import type {
   DialectName,
   QueryCellValue,
+  QueryRunSummaryPayload,
   QueryRunResponse,
   RuntimeConfigCreateRequest,
   RuntimeConfigResponse,
@@ -95,6 +99,7 @@ export function App({ client = DEFAULT_CLIENT }: AppProps): JSX.Element {
   const [loadingMessage, setLoadingMessage] = useState<string | null>(null);
   const [runtimeError, setRuntimeError] = useState<string | null>(null);
   const [technicalError, setTechnicalError] = useState<string | null>(null);
+  const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [historyItems, setHistoryItems] = useState<QuerySession[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
   const [activePanel, setActivePanel] = useState<SidePanel>(null);
@@ -118,6 +123,25 @@ export function App({ client = DEFAULT_CLIENT }: AppProps): JSX.Element {
       .then((nextSchema) => {
         if (active) {
           setSchema(nextSchema);
+        }
+      })
+      .catch((error: unknown) => {
+        if (active) {
+          setTechnicalError(errorToTechnicalDetail(error));
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [client]);
+
+  useEffect(() => {
+    let active = true;
+    client
+      .listRuns()
+      .then((response) => {
+        if (active) {
+          setHistoryItems(response.items.map(adaptPersistedRunSummary));
         }
       })
       .catch((error: unknown) => {
@@ -179,6 +203,7 @@ export function App({ client = DEFAULT_CLIENT }: AppProps): JSX.Element {
     setIsLoading(true);
     setLoadingMessage("正在理解问题与 Schema…");
     setRuntimeError(null);
+    setActionMessage(null);
     const timer = window.setTimeout(() => {
       setLoadingMessage("正在生成、验证并执行 SQL…");
     }, 260);
@@ -250,6 +275,51 @@ export function App({ client = DEFAULT_CLIENT }: AppProps): JSX.Element {
     setIsEditingSql(false);
     setRuntimeError(null);
     closePanel();
+  }
+
+  async function saveCurrentSql(): Promise<void> {
+    if (!currentSession || !draftSql.trim()) {
+      return;
+    }
+    try {
+      const name = currentSession.question.trim() || "保存的 SQL";
+      await client.createSavedQuery(
+        currentSession.raw.trace.length > 0
+          ? {
+              name,
+              request_id: currentSession.id,
+              tags: []
+            }
+          : {
+              name,
+              question: currentSession.question,
+              sql: draftSql.trim(),
+              tags: []
+            }
+      );
+      setActionMessage("SQL 已保存");
+      setRuntimeError(null);
+    } catch (error: unknown) {
+      setRuntimeError(errorToUserMessage(error));
+      setTechnicalError(errorToTechnicalDetail(error));
+    }
+  }
+
+  async function submitFeedback(rating: "up" | "down", issueType: string): Promise<void> {
+    if (!currentSession) {
+      return;
+    }
+    try {
+      await client.recordFeedback(currentSession.id, {
+        rating,
+        issue_type: issueType
+      });
+      setActionMessage("反馈已记录");
+      setRuntimeError(null);
+    } catch (error: unknown) {
+      setRuntimeError(errorToUserMessage(error));
+      setTechnicalError(errorToTechnicalDetail(error));
+    }
   }
 
   return (
@@ -374,7 +444,20 @@ export function App({ client = DEFAULT_CLIENT }: AppProps): JSX.Element {
 
         <SchemaHint tables={schemaTables} hasError={technicalError !== null && schema === null} />
 
-        <RunSummary view={currentView} runtimeError={runtimeError} />
+        <RunSummary
+          view={currentView}
+          runtimeError={runtimeError}
+          actionMessage={actionMessage}
+          onSaveSql={() => {
+            void saveCurrentSql();
+          }}
+          onPositiveFeedback={() => {
+            void submitFeedback("up", "accurate");
+          }}
+          onNegativeFeedback={() => {
+            void submitFeedback("down", "inaccurate");
+          }}
+        />
 
         <section className="mainGrid">
           <SqlPanel
@@ -472,16 +555,25 @@ function SchemaHint({ tables, hasError }: { tables: SchemaTableSummary[]; hasErr
 
 function RunSummary({
   view,
-  runtimeError
+  runtimeError,
+  actionMessage,
+  onSaveSql,
+  onPositiveFeedback,
+  onNegativeFeedback
 }: {
   view: QueryRunView | null;
   runtimeError: string | null;
+  actionMessage: string | null;
+  onSaveSql: () => void;
+  onPositiveFeedback: () => void;
+  onNegativeFeedback: () => void;
 }): JSX.Element {
   const statusIcon =
     view?.sqlStatus === "failed" || runtimeError ? <AlertCircle size={18} /> : <CheckCircle2 size={18} />;
   const usedTables = view?.details.usedTables ?? [];
   const tableText = usedTables.length > 0 ? `使用表：${usedTables.join("、")}` : "使用表：等待生成";
   const repairText = `自动修复 ${view?.details.repairCount ?? 0} 次`;
+  const canAct = view !== null && view.sql.trim().length > 0;
 
   return (
     <section className={`runSummary ${view?.sqlStatus === "failed" || runtimeError ? "isWarning" : ""}`}>
@@ -497,6 +589,23 @@ function RunSummary({
         <span>{view?.details.executionMs === null || !view ? "耗时 --" : `耗时 ${view.details.executionMs} ms`}</span>
         <span>{view?.details.rowCount === null || !view ? "返回 --" : `返回 ${view.details.rowCount} 行`}</span>
       </div>
+      {view ? (
+        <div className="summaryActions">
+          <button className="secondaryButton compactButton" type="button" disabled={!canAct} onClick={onSaveSql}>
+            <Save size={15} />
+            保存 SQL
+          </button>
+          <button className="secondaryButton compactButton" type="button" onClick={onPositiveFeedback}>
+            <ThumbsUp size={15} />
+            结果有用
+          </button>
+          <button className="secondaryButton compactButton" type="button" onClick={onNegativeFeedback}>
+            <ThumbsDown size={15} />
+            结果不准确
+          </button>
+          {actionMessage ? <span className="actionMessage">{actionMessage}</span> : null}
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -1251,6 +1360,66 @@ function summarizeSchemaTables(schema: SchemaResponse | null): SchemaTableSummar
 
 function countColumns(table: TableSchemaPayload): number {
   return Object.keys(table.columns).length;
+}
+
+function adaptPersistedRunSummary(summary: QueryRunSummaryPayload): QuerySession {
+  const succeeded = summary.status === "success";
+  const raw: QueryRunResponse = {
+    request_id: summary.request_id,
+    status: summary.status,
+    final_sql: summary.final_sql ?? "",
+    result: null,
+    attempts: summary.attempts,
+    selected_model: summary.selected_model ?? null,
+    routing_reason: summary.routing_reason ?? null,
+    linked_schema: { tables: [] },
+    retrieved_examples: [],
+    rag_context: {
+      reference_sql: [],
+      documents: [],
+      metrics: [],
+      semantic_models: []
+    },
+    repair_history: [],
+    errors: summary.error_message
+      ? [
+          {
+            message: summary.error_message
+          }
+        ]
+      : [],
+    trace: []
+  };
+  return {
+    id: summary.request_id,
+    question: summary.question,
+    dialect: summary.target_dialect,
+    raw,
+    view: {
+      requestId: summary.request_id,
+      sqlStatus: succeeded ? "generated_valid" : "failed",
+      statusText: succeeded ? "SQL 已生成并通过验证" : "未能生成可执行 SQL",
+      sql: summary.final_sql ?? "",
+      result: null,
+      repairNotice: null,
+      details: {
+        usedTables: [],
+        validationResult: succeeded ? "通过" : "未通过",
+        repairCount: summary.attempts,
+        databaseType: summary.target_dialect,
+        executionMs: null,
+        rowCount: summary.row_count ?? null
+      },
+      developerInfo: {
+        model: summary.selected_model ?? null,
+        routingReason: summary.routing_reason ?? null,
+        retrievedExamples: [],
+        trace: [],
+        errors: raw.errors
+      },
+      userError: summary.error_message ? { message: summary.error_message } : null
+    }
+  };
 }
 
 function errorToUserMessage(error: unknown): string {

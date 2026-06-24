@@ -133,6 +133,66 @@ export interface QueryRunResponse {
   trace: TraceEventPayload[];
 }
 
+export interface QueryRunSummaryPayload {
+  request_id: string;
+  question: string;
+  status: string;
+  final_sql?: string | null;
+  attempts: number;
+  selected_model?: string | null;
+  routing_reason?: string | null;
+  target_dialect: DialectName;
+  runtime_config_id?: string | null;
+  row_count?: number | null;
+  error_message?: string | null;
+}
+
+export interface QueryRunListResponse {
+  items: QueryRunSummaryPayload[];
+  total: number;
+}
+
+export interface SavedQueryCreateRequest {
+  name: string;
+  request_id?: string;
+  question?: string;
+  sql?: string;
+  tags?: string[];
+  status?: "draft" | "approved" | "deprecated";
+}
+
+export interface SavedQueryResponse {
+  id: string;
+  name: string;
+  question: string;
+  sql: string;
+  created_from_run_id?: string | null;
+  tags: string[];
+  status: "draft" | "approved" | "deprecated";
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SavedQueryListResponse {
+  items: SavedQueryResponse[];
+  total: number;
+}
+
+export interface FeedbackCreateRequest {
+  rating: "up" | "down" | "neutral";
+  issue_type?: string;
+  comment?: string;
+}
+
+export interface FeedbackResponse {
+  id: string;
+  request_id: string;
+  rating: string;
+  issue_type?: string | null;
+  comment?: string | null;
+  created_at: string;
+}
+
 export interface ColumnSchemaPayload {
   type: string;
   nullable?: boolean;

@@ -5,11 +5,18 @@ from fastapi import FastAPI, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-from text_to_sql_demo.api.models import ExecuteSQLRequest, QueryRequest, TranspileRequest
+from text_to_sql_demo.api.models import (
+    ExecuteSQLRequest,
+    FeedbackCreateRequest,
+    QueryRequest,
+    SavedQueryCreateRequest,
+    TranspileRequest,
+)
 from text_to_sql_demo.api.service import ApiError, TextToSQLApiService
 from text_to_sql_demo.config.loader import load_workflow_config
 from text_to_sql_demo.exceptions import TextToSQLDemoError
 from text_to_sql_demo.llm.client import LLMClient
+from text_to_sql_demo.metadata.store import MetadataStore
 from text_to_sql_demo.observability.events import (
     log_service_initialization_completed,
     log_service_initialization_failed,
@@ -29,6 +36,7 @@ def create_app(
     database_url: str | None = None,
     llm_client: LLMClient | None = None,
     runtime_store: RuntimeConfigStore | None = None,
+    metadata_store: MetadataStore | None = None,
 ) -> FastAPI:
     """创建 demo 服务的 FastAPI 应用。"""
     app = FastAPI(title="Text-to-SQL Agent Demo", version="0.1.0")
@@ -47,6 +55,7 @@ def create_app(
                     database_url=database_url,
                     llm_client=llm_client,
                     runtime_store=runtime_store,
+                    metadata_store=metadata_store,
                 )
                 log_service_initialization_completed()
             except (TextToSQLDemoError, ValueError) as exc:
@@ -109,10 +118,30 @@ def create_app(
         """执行可配置 Text-to-SQL 工作流。"""
         return get_service().run_query(request)
 
+    @app.get("/api/v1/runs")
+    def list_runs(limit: int = 20) -> dict[str, Any]:
+        """列出持久化运行记录摘要。"""
+        return get_service().list_runs(limit=limit)
+
     @app.get("/api/v1/runs/{request_id}")
     def get_run(request_id: str) -> dict[str, Any]:
         """按 request_id 查询工作流运行记录。"""
         return get_service().get_run(request_id)
+
+    @app.post("/api/v1/saved-queries")
+    def create_saved_query(request: SavedQueryCreateRequest) -> dict[str, Any]:
+        """保存一条可复用 SQL。"""
+        return get_service().create_saved_query(request)
+
+    @app.get("/api/v1/saved-queries")
+    def list_saved_queries(limit: int = 20) -> dict[str, Any]:
+        """列出收藏 SQL。"""
+        return get_service().list_saved_queries(limit=limit)
+
+    @app.post("/api/v1/runs/{request_id}/feedback")
+    def record_feedback(request_id: str, request: FeedbackCreateRequest) -> dict[str, Any]:
+        """记录用户对一次查询运行的反馈。"""
+        return get_service().record_feedback(request_id=request_id, request=request)
 
     @app.get("/api/v1/schema")
     def get_schema(runtime_config_id: str | None = None) -> dict[str, Any]:

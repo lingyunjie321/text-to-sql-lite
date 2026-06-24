@@ -9,7 +9,12 @@ from uuid import uuid4
 from pydantic import SecretStr
 from sqlalchemy.engine import URL
 
-from text_to_sql_demo.api.models import ExecuteSQLRequest, QueryRequest
+from text_to_sql_demo.api.models import (
+    ExecuteSQLRequest,
+    FeedbackCreateRequest,
+    QueryRequest,
+    SavedQueryCreateRequest,
+)
 from text_to_sql_demo.config.env import load_env_files
 from text_to_sql_demo.config.loader import load_workflow_config
 from text_to_sql_demo.config.models import (
@@ -25,6 +30,15 @@ from text_to_sql_demo.llm.client import LLMClient, MockLLMClient
 from text_to_sql_demo.llm.factory import build_llm_client
 from text_to_sql_demo.llm.models import ModelProfile
 from text_to_sql_demo.llm.providers import OpenAICompatibleLLMClient
+from text_to_sql_demo.metadata.models import (
+    FeedbackRecord,
+    QueryRunRecord,
+    SavedQueryRecord,
+    StoredQueryRun,
+    TraceEventRecord,
+    utc_now,
+)
+from text_to_sql_demo.metadata.store import MetadataStore
 from text_to_sql_demo.observability.context import get_log_context
 from text_to_sql_demo.observability.events import (
     log_database_url_resolve_failed,
@@ -111,6 +125,7 @@ class TextToSQLApiService:
         llm_client: LLMClient | None = None,
         run_store: InMemoryRunStore | None = None,
         runtime_store: RuntimeConfigStore | None = None,
+        metadata_store: MetadataStore | None = None,
     ) -> None:
         load_env_files()
         self.config = load_workflow_config(config_path)
@@ -118,6 +133,7 @@ class TextToSQLApiService:
         self.llm_client = llm_client or build_llm_client(self.config)
         self.run_store = run_store or InMemoryRunStore()
         self.runtime_store = runtime_store or RuntimeConfigStore()
+        self.metadata_store = metadata_store or MetadataStore()
         self.runtime_resolver = RuntimeConfigResolver(
             workflow_config=self.config,
             store=self.runtime_store,
@@ -247,19 +263,97 @@ class TextToSQLApiService:
         )
         final_state = engine.run(state)
         self.run_store.save(final_state)
+        self._save_metadata_run(final_state)
         return serialize_run(final_state)
+
+    def list_runs(self, *, limit: int = 20) -> dict[str, Any]:
+        """列出持久化运行记录摘要。"""
+        return self.metadata_store.list_query_runs(limit=limit).model_dump(mode="python")
 
     def get_run(self, request_id: str) -> dict[str, Any]:
         """读取历史运行响应。"""
         state = self.run_store.get(request_id)
-        if state is None:
+        if state is not None:
+            return serialize_run(state)
+
+        stored_run = self.metadata_store.get_query_run(request_id)
+        if stored_run is None:
             raise ApiError(
                 status_code=404,
                 code="not_found",
                 message="未找到工作流运行记录",
                 details={"request_id": request_id},
             )
-        return serialize_run(state)
+        return _serialize_stored_run(stored_run)
+
+    def create_saved_query(self, request: SavedQueryCreateRequest) -> dict[str, Any]:
+        """从一次运行或显式 SQL 创建收藏 SQL。"""
+        source_run = (
+            self.metadata_store.get_query_run(request.request_id)
+            if request.request_id is not None
+            else None
+        )
+        if request.request_id is not None and source_run is None:
+            raise ApiError(
+                status_code=404,
+                code="not_found",
+                message="未找到可保存的运行记录",
+                details={"request_id": request.request_id},
+            )
+
+        source_record = source_run.query_run if source_run is not None else None
+        sql = request.sql or (source_record.final_sql if source_record is not None else None)
+        question = request.question or (
+            source_record.question if source_record is not None else None
+        )
+        if not sql or not question:
+            raise ApiError(
+                status_code=400,
+                code="saved_query_invalid",
+                message="保存 SQL 需要 request_id，或同时提供 question 和 sql",
+            )
+
+        now = utc_now()
+        saved_query = SavedQueryRecord(
+            id=f"sq_{uuid4().hex}",
+            name=request.name,
+            question=question,
+            sql=sql,
+            created_from_run_id=request.request_id,
+            tags=request.tags,
+            status=request.status,
+            created_at=now,
+            updated_at=now,
+        )
+        return self.metadata_store.save_saved_query(saved_query).model_dump(mode="python")
+
+    def list_saved_queries(self, *, limit: int = 20) -> dict[str, Any]:
+        """列出收藏 SQL。"""
+        return self.metadata_store.list_saved_queries(limit=limit).model_dump(mode="python")
+
+    def record_feedback(
+        self,
+        *,
+        request_id: str,
+        request: FeedbackCreateRequest,
+    ) -> dict[str, Any]:
+        """记录一次运行反馈，供后续知识库治理使用。"""
+        if self.metadata_store.get_query_run(request_id) is None:
+            raise ApiError(
+                status_code=404,
+                code="not_found",
+                message="未找到可反馈的运行记录",
+                details={"request_id": request_id},
+            )
+        feedback = FeedbackRecord(
+            id=f"fb_{uuid4().hex}",
+            request_id=request_id,
+            rating=request.rating,
+            issue_type=request.issue_type,
+            comment=request.comment,
+            created_at=utc_now(),
+        )
+        return self.metadata_store.save_feedback(feedback).model_dump(mode="python")
 
     def execute_sql(self, request: ExecuteSQLRequest) -> dict[str, Any]:
         """校验并执行用户编辑后的只读 SQL，不进入 Agent 工作流。"""
@@ -291,6 +385,49 @@ class TextToSQLApiService:
             result=result.model_dump(mode="python"),
             error=result.error,
         )
+
+    def _save_metadata_run(self, state: WorkflowState) -> None:
+        """把工作流最终状态沉淀到内部 metadata store。"""
+        now = utc_now()
+        serialized = serialize_run(state)
+        result = serialized.get("result") or {}
+        rows = result.get("rows") if isinstance(result, dict) else None
+        row_count = len(rows) if isinstance(rows, list) else None
+        record = QueryRunRecord(
+            request_id=state.request_id,
+            question=state.user_question,
+            status=str(serialized["status"]),
+            final_sql=serialized.get("final_sql"),
+            attempts=int(serialized.get("attempts", 0)),
+            selected_model=serialized.get("selected_model"),
+            routing_reason=serialized.get("routing_reason"),
+            target_dialect=str(
+                state.data.get("target_dialect") or self.config.dialect.target_dialect
+            ),
+            runtime_config_id=state.data.get("runtime_config_id"),
+            row_count=row_count,
+            error_message=_first_error_message(serialized.get("errors", [])),
+            created_at=state.started_at,
+            updated_at=now,
+        )
+        trace_events = [
+            TraceEventRecord(
+                request_id=event.request_id,
+                step=event.step,
+                node_name=event.node_name,
+                node_type=event.node_type,
+                status=event.status,
+                outcome=event.outcome,
+                duration_ms=event.duration_ms,
+                input_summary=event.input_summary,
+                output_summary=event.output_summary,
+                error=event.error,
+                started_at=event.started_at,
+                ended_at=event.ended_at,
+            )
+            for event in state.trace
+        ]
+        self.metadata_store.save_query_run(record, trace_events=trace_events)
 
     def get_schema(self, *, runtime_config_id: str | None = None) -> DatabaseSchemaMetadata:
         """按可选 runtime_config_id 返回对应数据库 Schema。"""
@@ -523,6 +660,67 @@ def serialize_run(state: WorkflowState) -> dict[str, Any]:
         "errors": _serialize_errors(state),
         "trace": [_serialize_trace_event(event) for event in state.trace],
     }
+
+
+def _serialize_stored_run(stored_run: StoredQueryRun) -> dict[str, Any]:
+    """把持久化运行记录转换为兼容前端的轻量响应。"""
+    run = stored_run.query_run
+    errors = []
+    if run.error_message:
+        errors.append(
+            {
+                "node_name": None,
+                "error_type": "stored_run_error",
+                "message": run.error_message,
+            }
+        )
+    return {
+        "request_id": run.request_id,
+        "status": run.status,
+        "final_sql": run.final_sql,
+        "result": None,
+        "attempts": run.attempts,
+        "selected_model": run.selected_model,
+        "routing_reason": run.routing_reason,
+        "linked_schema": {"tables": []},
+        "retrieved_examples": [],
+        "rag_context": _summarize_rag_context({}),
+        "repair_history": [],
+        "errors": errors,
+        "trace": [_serialize_stored_trace_event(event) for event in stored_run.trace_events],
+    }
+
+
+def _serialize_stored_trace_event(event: TraceEventRecord) -> dict[str, Any]:
+    return {
+        "node_name": event.node_name,
+        "node_type": event.node_type,
+        "start_time": event.started_at.isoformat(),
+        "end_time": event.ended_at.isoformat(),
+        "duration_ms": event.duration_ms,
+        "status": event.status,
+        "outcome": event.outcome,
+        "input_summary": event.input_summary,
+        "output_summary": event.output_summary,
+        "error": event.error,
+    }
+
+
+def _first_error_message(errors: object) -> str | None:
+    """从 API 错误数组中提取适合列表展示的第一条错误信息。"""
+    if not isinstance(errors, list):
+        return None
+    for error in errors:
+        if isinstance(error, dict):
+            message = error.get("message")
+            if isinstance(message, str) and message:
+                return message
+            nested = error.get("error")
+            if isinstance(nested, dict) and isinstance(nested.get("message"), str):
+                return nested["message"]
+            if isinstance(nested, str) and nested:
+                return nested
+    return None
 
 
 def _serialize_direct_sql(

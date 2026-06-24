@@ -14,8 +14,9 @@
 - SQL 安全链路：`SQLValidator` 基于 SQLGlot 做方言解析、单语句、只读 SELECT 和 schema 引用校验；`SQLExecutor` 只执行已校验 SQL。
 - 修复闭环：校验或执行失败后进入 `ReflectErrorNode` 和 `FixSQLNode`，按错误类型生成定向修复策略，最多 3 次修复尝试，失败后明确终止。
 - 可观测 Trace：每个节点执行后由 `WorkflowEngine` 记录节点名、outcome、耗时、输入输出摘要和错误摘要。
+- 内部 metadata store：项目自身使用 SQLite 沉淀 `query_run`、`trace_event`、`saved_query` 和 `feedback`，不写入业务目标库。
 - 运行时配置：前端可临时配置数据库连接和 `light/strong` 双模型路由，请求通过 `runtime_config_id` 使用对应配置。
-- 前端演示：React/Vite 页面支持自然语言查询、运行配置、SQL 查看/编辑、结果展示、修复提示和开发者 Trace 展开。
+- 前端演示：React/Vite 页面支持自然语言查询、运行配置、SQL 查看/编辑、结果展示、保存 SQL、反馈、历史记录和开发者 Trace 展开。
 
 ## 技术栈
 
@@ -231,6 +232,36 @@ curl -X POST http://127.0.0.1:8000/api/v1/query \
 
 ```bash
 curl http://127.0.0.1:8000/api/v1/runs/<request_id>
+```
+
+列出最近运行记录：
+
+```bash
+curl http://127.0.0.1:8000/api/v1/runs
+```
+
+保存一次成功 SQL：
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/saved-queries \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "name": "订单金额明细",
+    "request_id": "<request_id>",
+    "tags": ["运营", "订单"]
+  }'
+```
+
+提交一次运行反馈：
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/runs/<request_id>/feedback \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "rating": "up",
+    "issue_type": "accurate",
+    "comment": "结果可直接使用"
+  }'
 ```
 
 查看当前 demo 数据库 Schema：

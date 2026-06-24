@@ -71,6 +71,7 @@ textarea:disabled {
 .headerControls,
 .summaryStatus,
 .summaryMetrics,
+.summaryActions,
 .schemaHint,
 .schemaHintTitle,
 .schemaChips,
@@ -369,6 +370,7 @@ button:focus-visible {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 18px;
   min-height: 76px;
   border: 1px solid #d6eadf;
@@ -427,6 +429,28 @@ button:focus-visible {
   color: #374151;
   padding: 0 10px;
   font-size: 13px;
+}
+
+.summaryActions {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.compactButton {
+  min-height: 32px;
+  padding: 0 10px;
+  font-size: 13px;
+}
+
+.actionMessage {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  color: #0f766e;
+  font-size: 13px;
+  font-weight: 650;
 }
 
 .mainGrid {
@@ -1005,6 +1029,7 @@ button:focus-visible {
   }
 
   .summaryMetrics,
+  .summaryActions,
   .schemaChips,
   .submitGroup {
     justify-content: flex-start;

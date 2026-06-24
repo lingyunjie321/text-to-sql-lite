@@ -201,7 +201,32 @@ function buildClient(responses: QueryRunResponse[] = [successResponse]): TextToS
       const next = queue.shift() ?? responses.at(-1) ?? successResponse;
       return Promise.resolve(next);
     }),
-    runEditedSql: vi.fn<TextToSqlClient["runEditedSql"]>().mockResolvedValue(successResponse)
+    runEditedSql: vi.fn<TextToSqlClient["runEditedSql"]>().mockResolvedValue(successResponse),
+    listRuns: vi.fn<TextToSqlClient["listRuns"]>().mockResolvedValue({ items: [], total: 0 }),
+    createSavedQuery: vi
+      .fn<TextToSqlClient["createSavedQuery"]>()
+      .mockResolvedValue({
+        id: "saved_1",
+        name: "列出订单金额",
+        question: "列出订单金额",
+        sql: "SELECT id, amount FROM orders ORDER BY id",
+        created_from_run_id: "run_1",
+        tags: [],
+        status: "draft",
+        created_at: "2026-06-24T10:00:00Z",
+        updated_at: "2026-06-24T10:00:00Z"
+      }),
+    listSavedQueries: vi.fn<TextToSqlClient["listSavedQueries"]>().mockResolvedValue({ items: [], total: 0 }),
+    recordFeedback: vi
+      .fn<TextToSqlClient["recordFeedback"]>()
+      .mockResolvedValue({
+        id: "feedback_1",
+        request_id: "run_1",
+        rating: "up",
+        issue_type: "accurate",
+        comment: null,
+        created_at: "2026-06-24T10:00:00Z"
+      })
   };
 }
 
@@ -358,6 +383,63 @@ describe("App", () => {
     await user.click(within(panel).getByRole("button", { name: /触发一个无法修复的查询/ }));
 
     expect(screen.getByDisplayValue("SELECT missing_amount FROM missing_orders")).toBeInTheDocument();
+  });
+
+  it("历史记录面板加载后端持久化运行记录", async () => {
+    const user = userEvent.setup();
+    const client = buildClient();
+    vi.mocked(client.listRuns).mockResolvedValueOnce({
+      total: 1,
+      items: [
+        {
+          request_id: "persisted_run",
+          question: "历史订单明细",
+          status: "success",
+          final_sql: "SELECT id, amount FROM orders",
+          attempts: 0,
+          selected_model: "light",
+          routing_reason: "历史记录",
+          target_dialect: "sqlite",
+          row_count: 2,
+          error_message: null
+        }
+      ]
+    });
+
+    render(<App client={client} />);
+
+    await user.click(screen.getByRole("button", { name: "打开工作台菜单" }));
+    await user.click(screen.getByRole("button", { name: "历史记录" }));
+
+    const panel = screen.getByRole("dialog", { name: "历史记录" });
+    expect(await within(panel).findByRole("button", { name: /历史订单明细/ })).toBeInTheDocument();
+    await user.click(within(panel).getByRole("button", { name: /历史订单明细/ }));
+    expect(screen.getByDisplayValue("SELECT id, amount FROM orders")).toBeInTheDocument();
+  });
+
+  it("成功生成后可以保存 SQL 并提交反馈", async () => {
+    const user = userEvent.setup();
+    const client = buildClient([successResponse]);
+    render(<App client={client} />);
+
+    await user.type(screen.getByLabelText("用自然语言描述你需要的数据"), "列出订单金额");
+    await user.click(screen.getByRole("button", { name: "生成并验证" }));
+    await screen.findByText("SQL 已生成并通过验证");
+
+    await user.click(screen.getByRole("button", { name: "保存 SQL" }));
+    expect(client.createSavedQuery).toHaveBeenCalledWith({
+      name: "列出订单金额",
+      request_id: "run_1",
+      tags: []
+    });
+    expect(await screen.findByText("SQL 已保存")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "结果有用" }));
+    expect(client.recordFeedback).toHaveBeenCalledWith("run_1", {
+      rating: "up",
+      issue_type: "accurate"
+    });
+    expect(await screen.findByText("反馈已记录")).toBeInTheDocument();
   });
 
   it("编辑状态下可以运行修改后的 SQL 并刷新结果", async () => {
