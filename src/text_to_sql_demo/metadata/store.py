@@ -16,7 +16,9 @@ from sqlalchemy import (
     delete,
     func,
     insert,
+    inspect,
     select,
+    text,
 )
 from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.exc import SQLAlchemyError
@@ -198,6 +200,19 @@ class MetadataStore:
 
     def _ensure_schema(self) -> None:
         self._metadata.create_all(self._engine)
+        self._ensure_query_run_response_column()
+
+    def _ensure_query_run_response_column(self) -> None:
+        """兼容上一版 metadata.db，补齐历史详情响应字段。"""
+        inspector = inspect(self._engine)
+        column_names = {
+            column["name"]
+            for column in inspector.get_columns(self.query_runs.name)
+        }
+        if "response_json" in column_names:
+            return
+        with self._engine.begin() as connection:
+            connection.execute(text("ALTER TABLE query_run ADD COLUMN response_json TEXT"))
 
 
 def _query_runs_table(metadata: MetaData) -> Table:
@@ -215,6 +230,7 @@ def _query_runs_table(metadata: MetaData) -> Table:
         Column("runtime_config_id", String(120)),
         Column("row_count", Integer),
         Column("error_message", Text),
+        Column("response_json", Text),
         Column("created_at", String(40), nullable=False),
         Column("updated_at", String(40), nullable=False),
     )
@@ -271,6 +287,10 @@ def _feedback_table(metadata: MetaData) -> Table:
 
 def _query_run_to_row(run: QueryRunRecord) -> dict[str, Any]:
     payload = run.model_dump(mode="python")
+    payload["response_json"] = (
+        _dump_json(run.response_payload) if run.response_payload is not None else None
+    )
+    del payload["response_payload"]
     payload["created_at"] = run.created_at.isoformat()
     payload["updated_at"] = run.updated_at.isoformat()
     return payload
@@ -309,6 +329,7 @@ def _feedback_to_row(feedback: FeedbackRecord) -> dict[str, Any]:
 
 def _row_to_query_run(row: Any) -> QueryRunRecord:
     payload = dict(row)
+    payload["response_payload"] = _load_json(payload.pop("response_json", None), default=None)
     payload["created_at"] = _parse_datetime(payload["created_at"])
     payload["updated_at"] = _parse_datetime(payload["updated_at"])
     return QueryRunRecord.model_validate(payload)

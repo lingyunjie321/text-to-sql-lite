@@ -45,7 +45,7 @@ Text-to-SQL Agent 项目。
 - 不要在业务代码中硬编码模型名称。模型别名必须从配置中读取。
 - 不要把 Prompt 直接写在 API 路由处理函数里。
 - 不要在代码中暴露数据库凭据。
-- 这个演示项目中的 SQL 执行必须是只读的。
+- 业务目标数据库的 SQL 执行必须默认只读；项目自身 metadata store、运行记录、知识库、收藏 SQL 等内部表允许写入。
 
 # 工作流扩展规则
 
@@ -60,10 +60,17 @@ Text-to-SQL Agent 项目。
 
 - 不要引入分布式基础设施。
 - 存储/知识库对齐 datus 时允许引入可选向量检索后端；默认仍可使用 SQLite/YAML fallback。
-- 不要实现无关的认证或多租户功能。
+- 第一阶段不做复杂认证、多租户和权限系统；如需区分运营用户和数据团队，只允许加入轻量角色字段或状态字段，不实现完整权限平台。
 - 不要编造或宣称性能指标。
 - 避免无关重构。
 - 优先选择小而易审查的改动。
+
+# 产品边界范围
+
+- 本项目产品化目标是轻量业务交付版：面向运营/分析师自然语言查数，由数据团队维护可信上下文。
+- 允许新增 datasource、schema_catalog、business_metric、reference_sql、business_knowledge、saved_query、query_run、trace_event、feedback 等轻量模块；
+- 禁止一次性引入 CLI/TUI、Gateway、MCP 工具体系、多 Agent 工作台、BI dashboard、scheduler、复杂 OAuth、多租户和强依赖向量库。
+- 参考 datus 时，只参考知识分层、datasource 管理、prompt/version、trace/trajectory、成功 SQL 沉淀等思想；不得直接搬运其 CLI/TUI、Gateway、MCP、多 Agent、scheduler、BI 平台等重型模块。
 
 # 质量要求
 

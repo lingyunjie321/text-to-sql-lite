@@ -88,3 +88,55 @@ def test_validator_rejects_write_statement(tmp_path: Path) -> None:
     assert result.success is False
     assert result.error is not None
     assert result.error.category == "dialect_error"
+
+
+def test_validator_accepts_single_level_cte_output_columns(tmp_path: Path) -> None:
+    result = SQLValidator().validate(
+        sql=(
+            "WITH monthly AS ("
+            "SELECT customer_id, SUM(amount) AS total FROM orders GROUP BY customer_id"
+            ") "
+            "SELECT customer_id, total FROM monthly"
+        ),
+        schema=load_schema(tmp_path),
+        dialect="sqlite",
+    )
+
+    assert result.success is True
+    assert result.error is None
+
+
+def test_validator_rejects_unknown_table_inside_cte(tmp_path: Path) -> None:
+    result = SQLValidator().validate(
+        sql=(
+            "WITH monthly AS ("
+            "SELECT customer_id, SUM(amount) AS total FROM missing_orders GROUP BY customer_id"
+            ") "
+            "SELECT customer_id, total FROM monthly"
+        ),
+        schema=load_schema(tmp_path),
+        dialect="sqlite",
+    )
+
+    assert result.success is False
+    assert result.error is not None
+    assert result.error.category == "unknown_table"
+    assert result.error.table == "missing_orders"
+
+
+def test_validator_rejects_unknown_column_inside_cte(tmp_path: Path) -> None:
+    result = SQLValidator().validate(
+        sql=(
+            "WITH monthly AS ("
+            "SELECT customer_id, SUM(missing_amount) AS total FROM orders GROUP BY customer_id"
+            ") "
+            "SELECT customer_id, total FROM monthly"
+        ),
+        schema=load_schema(tmp_path),
+        dialect="sqlite",
+    )
+
+    assert result.success is False
+    assert result.error is not None
+    assert result.error.category == "unknown_column"
+    assert result.error.column == "missing_amount"

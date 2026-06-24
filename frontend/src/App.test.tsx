@@ -203,6 +203,7 @@ function buildClient(responses: QueryRunResponse[] = [successResponse]): TextToS
     }),
     runEditedSql: vi.fn<TextToSqlClient["runEditedSql"]>().mockResolvedValue(successResponse),
     listRuns: vi.fn<TextToSqlClient["listRuns"]>().mockResolvedValue({ items: [], total: 0 }),
+    getRun: vi.fn<TextToSqlClient["getRun"]>().mockResolvedValue(successResponse),
     createSavedQuery: vi
       .fn<TextToSqlClient["createSavedQuery"]>()
       .mockResolvedValue({
@@ -387,7 +388,20 @@ describe("App", () => {
 
   it("历史记录面板加载后端持久化运行记录", async () => {
     const user = userEvent.setup();
-    const client = buildClient();
+    const detailResponse: QueryRunResponse = {
+      ...successResponse,
+      request_id: "persisted_run",
+      final_sql: "SELECT id, amount FROM orders",
+      result: {
+        success: true,
+        columns: ["id", "amount"],
+        rows: [{ id: 99, amount: 301 }],
+        duration_ms: 14
+      }
+    };
+    const client = Object.assign(buildClient(), {
+      getRun: vi.fn().mockResolvedValue(detailResponse)
+    });
     vi.mocked(client.listRuns).mockResolvedValueOnce({
       total: 1,
       items: [
@@ -414,7 +428,9 @@ describe("App", () => {
     const panel = screen.getByRole("dialog", { name: "历史记录" });
     expect(await within(panel).findByRole("button", { name: /历史订单明细/ })).toBeInTheDocument();
     await user.click(within(panel).getByRole("button", { name: /历史订单明细/ }));
+    expect(client.getRun).toHaveBeenCalledWith("persisted_run");
     expect(screen.getByDisplayValue("SELECT id, amount FROM orders")).toBeInTheDocument();
+    expect(await screen.findByText("301")).toHaveClass("cellNumeric");
   });
 
   it("成功生成后可以保存 SQL 并提交反馈", async () => {
@@ -440,6 +456,28 @@ describe("App", () => {
       issue_type: "accurate"
     });
     expect(await screen.findByText("反馈已记录")).toBeInTheDocument();
+  });
+
+  it("保存 SQL 时优先使用编辑器中的当前草稿", async () => {
+    const user = userEvent.setup();
+    const client = buildClient([successResponse]);
+    render(<App client={client} />);
+
+    await user.type(screen.getByLabelText("用自然语言描述你需要的数据"), "列出订单金额");
+    await user.click(screen.getByRole("button", { name: "生成并验证" }));
+    await screen.findByText("SQL 已生成并通过验证");
+
+    await user.click(screen.getByRole("button", { name: "编辑 SQL" }));
+    await user.clear(screen.getByLabelText("SQL 编辑器"));
+    await user.type(screen.getByLabelText("SQL 编辑器"), "SELECT id FROM orders ORDER BY id");
+    await user.click(screen.getByRole("button", { name: "保存 SQL" }));
+
+    expect(client.createSavedQuery).toHaveBeenCalledWith({
+      name: "列出订单金额",
+      question: "列出订单金额",
+      sql: "SELECT id FROM orders ORDER BY id",
+      tags: []
+    });
   });
 
   it("编辑状态下可以运行修改后的 SQL 并刷新结果", async () => {

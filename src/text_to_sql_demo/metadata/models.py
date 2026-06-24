@@ -42,6 +42,7 @@ class QueryRunRecord(BaseModel):
     runtime_config_id: str | None = None
     row_count: int | None = None
     error_message: str | None = None
+    response_payload: dict[str, Any] | None = None
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
 

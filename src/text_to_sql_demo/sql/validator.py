@@ -106,36 +106,57 @@ def _validate_read_only(expression: exp.Expression) -> SQLError | None:
 def _validate_schema(
     expression: exp.Expression,
     schema: DatabaseSchemaMetadata,
+    *,
+    skip_cte_contents: bool = True,
 ) -> SQLError | None:
-    table_aliases: dict[str, str] = {}
-    referenced_tables: list[str] = []
+    cte_columns = _collect_cte_columns(expression)
+    for cte in expression.find_all(exp.CTE):
+        error = _validate_schema(cte.this, schema, skip_cte_contents=False)
+        if error is not None:
+            return error
+
+    source_columns: dict[str, set[str]] = {}
+    source_names: dict[str, str] = {}
+    referenced_sources: list[str] = []
     derived_columns = _collect_derived_columns(expression)
     for table in expression.find_all(exp.Table):
+        if skip_cte_contents and _is_inside_cte(table):
+            continue
         table_name = table.name
-        if table_name not in schema.tables:
+        if table_name in cte_columns:
+            columns = cte_columns[table_name]
+        elif table_name in schema.tables:
+            columns = set(schema.tables[table_name].columns)
+        else:
             return SQLError(
                 category="unknown_table",
                 message=f"表不存在: {table_name}",
                 table=table_name,
             )
-        referenced_tables.append(table_name)
-        table_aliases[table.alias_or_name] = table_name
-        table_aliases[table_name] = table_name
+        source_key = table.alias_or_name
+        referenced_sources.append(source_key)
+        source_columns[source_key] = columns
+        source_columns[table_name] = columns
+        source_names[source_key] = table_name
+        source_names[table_name] = table_name
 
     for column in expression.find_all(exp.Column):
+        if skip_cte_contents and _is_inside_cte(column):
+            continue
         column_name = column.name
         if column_name == "*":
             continue
         qualifier = column.table
         if qualifier:
-            table_name = table_aliases.get(qualifier, qualifier)
-            if table_name not in schema.tables:
+            columns = source_columns.get(qualifier)
+            table_name = source_names.get(qualifier, qualifier)
+            if columns is None:
                 return SQLError(
                     category="unknown_table",
                     message=f"表不存在: {table_name}",
                     table=table_name,
                 )
-            if column_name not in schema.tables[table_name].columns:
+            if column_name not in columns:
                 return SQLError(
                     category="unknown_column",
                     message=f"字段不存在: {table_name}.{column_name}",
@@ -145,9 +166,9 @@ def _validate_schema(
             continue
 
         matching_tables = [
-            table_name
-            for table_name in referenced_tables
-            if column_name in schema.tables[table_name].columns
+            source_names[source_key]
+            for source_key in referenced_sources
+            if column_name in source_columns[source_key]
         ]
         if not matching_tables:
             if column_name in derived_columns:
@@ -165,6 +186,25 @@ def _validate_schema(
             )
 
     return None
+
+
+def _collect_cte_columns(expression: exp.Expression) -> dict[str, set[str]]:
+    """收集当前查询内 CTE 名称及其对外暴露的列。"""
+    cte_columns: dict[str, set[str]] = {}
+    for cte in expression.find_all(exp.CTE):
+        if cte.alias_or_name:
+            cte_columns[cte.alias_or_name] = _select_output_columns(cte.this)
+    return cte_columns
+
+
+def _is_inside_cte(expression: exp.Expression) -> bool:
+    """判断表达式是否位于 CTE 定义内部。"""
+    parent = expression.parent
+    while parent is not None:
+        if isinstance(parent, exp.CTE):
+            return True
+        parent = parent.parent
+    return False
 
 
 def _collect_derived_columns(expression: exp.Expression) -> set[str]:

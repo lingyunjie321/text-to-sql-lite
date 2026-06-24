@@ -23,6 +23,20 @@ def build_client(tmp_path: Path) -> TestClient:
     return TestClient(app)
 
 
+def build_client_with_metadata_path(tmp_path: Path, metadata_path: Path) -> TestClient:
+    app = create_app(
+        database_url=f"sqlite:///{tmp_path / 'demo.db'}",
+        llm_client=MockLLMClient(
+            responses={
+                "light": "SELECT id, amount FROM orders ORDER BY id",
+                "strong": "SELECT id, amount FROM orders ORDER BY id",
+            }
+        ),
+        metadata_store=MetadataStore(database_url=f"sqlite:///{metadata_path}"),
+    )
+    return TestClient(app)
+
+
 def test_runs_endpoint_lists_persisted_query_runs(tmp_path: Path) -> None:
     client = build_client(tmp_path)
     query_response = client.post(
@@ -80,3 +94,54 @@ def test_saved_query_and_feedback_api_use_persisted_run(tmp_path: Path) -> None:
     list_response = client.get("/api/v1/saved-queries")
     assert list_response.status_code == 200
     assert list_response.json()["items"][0]["name"] == "订单金额明细"
+
+
+def test_get_persisted_run_returns_full_response_after_service_restart(
+    tmp_path: Path,
+) -> None:
+    metadata_path = tmp_path / "metadata.db"
+    client = build_client_with_metadata_path(tmp_path, metadata_path)
+    query_response = client.post(
+        "/api/v1/query",
+        json={"question": "列出订单金额", "target_dialect": "sqlite", "max_attempts": 1},
+    )
+    request_id = query_response.json()["request_id"]
+
+    restarted_client = build_client_with_metadata_path(tmp_path, metadata_path)
+    response = restarted_client.get(f"/api/v1/runs/{request_id}")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["request_id"] == request_id
+    assert payload["final_sql"] == "SELECT id, amount FROM orders ORDER BY id"
+    assert payload["result"]["columns"] == ["id", "amount"]
+    assert payload["result"]["rows"]
+    assert payload["trace"]
+    assert payload["rag_context"]["reference_sql"]
+
+
+def test_execute_sql_records_metadata_so_feedback_can_attach(
+    tmp_path: Path,
+) -> None:
+    client = build_client(tmp_path)
+
+    execute_response = client.post(
+        "/api/v1/sql/execute",
+        json={
+            "sql": "SELECT id, amount FROM orders ORDER BY id",
+            "target_dialect": "sqlite",
+            "max_rows": 2,
+        },
+    )
+    request_id = execute_response.json()["request_id"]
+
+    feedback_response = client.post(
+        f"/api/v1/runs/{request_id}/feedback",
+        json={"rating": "up", "issue_type": "manual_sql_accurate"},
+    )
+    run_response = client.get(f"/api/v1/runs/{request_id}")
+
+    assert feedback_response.status_code == 200
+    assert feedback_response.json()["request_id"] == request_id
+    assert run_response.status_code == 200
+    assert run_response.json()["result"]["rows"]

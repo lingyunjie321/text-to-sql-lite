@@ -30,6 +30,7 @@ export interface TextToSqlClient {
   getRuntimeOptions: () => Promise<RuntimeOptionsResponse>;
   createRuntimeConfig: (request: RuntimeConfigCreateRequest) => Promise<RuntimeConfigResponse>;
   listRuns: () => Promise<QueryRunListResponse>;
+  getRun: (requestId: string) => Promise<QueryRunResponse>;
   runQuery: (request: RunQueryRequest) => Promise<QueryRunResponse>;
   runEditedSql: (request: RunEditedSqlRequest) => Promise<QueryRunResponse>;
   createSavedQuery: (request: SavedQueryCreateRequest) => Promise<SavedQueryResponse>;
@@ -63,6 +64,8 @@ export function createTextToSqlClient(baseUrl = ""): TextToSqlClient {
         body: JSON.stringify(request)
       }),
     listRuns: () => requestJson<QueryRunListResponse>(`${baseUrl}/api/v1/runs`),
+    getRun: (requestId) =>
+      requestJson<QueryRunResponse>(`${baseUrl}/api/v1/runs/${encodeURIComponent(requestId)}`),
     runQuery: (request) =>
       requestJson<QueryRunResponse>(`${baseUrl}/api/v1/query`, {
         method: "POST",
@@ -71,7 +74,6 @@ export function createTextToSqlClient(baseUrl = ""): TextToSqlClient {
           question: request.question,
           target_dialect: request.targetDialect,
           max_attempts: 3,
-          debug: true,
           runtime_config_id: request.runtimeConfigId ?? null
         })
       }),

@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from hashlib import sha256
 from time import perf_counter
 from typing import Any
 
@@ -226,6 +227,6 @@ def _summarize_value(value: Any) -> Any:
         return {
             "type": "str",
             "length": len(value),
-            "preview": value[:120],
+            "hash": f"sha256:{sha256(value.encode('utf-8')).hexdigest()[:16]}",
         }
     return value

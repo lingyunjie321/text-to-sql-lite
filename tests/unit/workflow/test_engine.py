@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import ClassVar
 
 import pytest
@@ -64,6 +65,18 @@ class HookExplodingNode(HookNode):
     def run(self, state: WorkflowState) -> NodeResult:
         self.events.append(f"run:{self.name}")
         raise RuntimeError("hook boom")
+
+
+class SqlSummaryNode(BaseNode):
+    """返回包含 SQL 的结果，用于验证 Trace 默认不泄露 SQL 文本。"""
+
+    def run(self, state: WorkflowState) -> NodeResult:
+        sql = "SELECT id, amount FROM orders"
+        return NodeResult(
+            outcome="success",
+            output={"generated_sql": sql},
+            state_patch={"data": {"current_sql": sql}},
+        )
 
 
 def make_config(
@@ -235,3 +248,25 @@ def test_lifecycle_hooks_are_called_for_success_and_error() -> None:
         "run:first",
         "error:first:hook boom",
     ]
+
+
+def test_trace_summary_records_string_hash_without_raw_sql_preview() -> None:
+    registry = NodeRegistry()
+    registry.register("sql_summary", SqlSummaryNode)
+    config = make_config(
+        nodes={"first": NodeConfig(type="sql_summary")},
+        edges={"first": EdgeConfig(terminal=True)},
+    )
+
+    state = make_engine(registry, config).run(WorkflowState(user_question="列出订单金额"))
+
+    output_summary = state.trace[0].output_summary
+    serialized_summary = json.dumps(output_summary, ensure_ascii=False)
+    assert "SELECT id, amount FROM orders" not in serialized_summary
+    output_sql = output_summary["output"]["generated_sql"]
+    state_sql = output_summary["state_patch"]["data"]["current_sql"]
+    assert output_sql["type"] == "str"
+    assert output_sql["length"] == len("SELECT id, amount FROM orders")
+    assert output_sql["hash"].startswith("sha256:")
+    assert "preview" not in output_sql
+    assert state_sql["hash"] == output_sql["hash"]

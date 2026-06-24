@@ -55,6 +55,7 @@ interface QuerySession {
   dialect: DialectName;
   view: QueryRunView;
   raw: QueryRunResponse;
+  isSummaryOnly?: boolean;
 }
 
 type SidePanel = "runtime" | "demo" | "debug" | "history" | null;
@@ -268,12 +269,27 @@ export function App({ client = DEFAULT_CLIENT }: AppProps): JSX.Element {
     });
   }
 
-  function selectHistoryItem(item: QuerySession): void {
+  async function selectHistoryItem(item: QuerySession): Promise<void> {
     setQuestion(item.question);
-    setCurrentSession(item);
-    setDraftSql(item.view.sql);
-    setIsEditingSql(false);
     setRuntimeError(null);
+    if (item.isSummaryOnly) {
+      try {
+        const response = await client.getRun(item.id);
+        applyResponse({
+          response,
+          question: item.question,
+          dialect: item.dialect
+        });
+      } catch (error: unknown) {
+        setRuntimeError(errorToUserMessage(error));
+        setTechnicalError(errorToTechnicalDetail(error));
+        return;
+      }
+    } else {
+      setCurrentSession(item);
+      setDraftSql(item.view.sql);
+      setIsEditingSql(false);
+    }
     closePanel();
   }
 
@@ -283,8 +299,10 @@ export function App({ client = DEFAULT_CLIENT }: AppProps): JSX.Element {
     }
     try {
       const name = currentSession.question.trim() || "保存的 SQL";
+      const trimmedSql = draftSql.trim();
+      const originalSql = (currentSession.view.sql || currentSession.raw.final_sql || "").trim();
       await client.createSavedQuery(
-        currentSession.raw.trace.length > 0
+        trimmedSql === originalSql && currentSession.raw.trace.length > 0
           ? {
               name,
               request_id: currentSession.id,
@@ -293,7 +311,7 @@ export function App({ client = DEFAULT_CLIENT }: AppProps): JSX.Element {
           : {
               name,
               question: currentSession.question,
-              sql: draftSql.trim(),
+              sql: trimmedSql,
               tags: []
             }
       );
@@ -523,7 +541,13 @@ export function App({ client = DEFAULT_CLIENT }: AppProps): JSX.Element {
         <DebugPanel session={currentSession} technicalError={technicalError} onClose={closePanel} />
       ) : null}
       {activePanel === "history" ? (
-        <HistoryPanel items={historyItems} onClose={closePanel} onSelect={selectHistoryItem} />
+        <HistoryPanel
+          items={historyItems}
+          onClose={closePanel}
+          onSelect={(item) => {
+            void selectHistoryItem(item);
+          }}
+        />
       ) : null}
     </div>
   );
@@ -1394,6 +1418,7 @@ function adaptPersistedRunSummary(summary: QueryRunSummaryPayload): QuerySession
     id: summary.request_id,
     question: summary.question,
     dialect: summary.target_dialect,
+    isSummaryOnly: true,
     raw,
     view: {
       requestId: summary.request_id,

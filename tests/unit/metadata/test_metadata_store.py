@@ -29,6 +29,18 @@ def test_metadata_store_persists_query_run_trace_saved_query_and_feedback(
         runtime_config_id=None,
         row_count=1,
         error_message=None,
+        response_payload={
+            "request_id": "req-1",
+            "status": "success",
+            "final_sql": "SELECT SUM(amount) AS total_amount FROM orders",
+            "result": {
+                "success": True,
+                "columns": ["total_amount"],
+                "rows": [{"total_amount": 208.5}],
+                "duration_ms": 12,
+            },
+            "trace": [],
+        },
         created_at=NOW,
         updated_at=NOW,
     )
@@ -74,6 +86,10 @@ def test_metadata_store_persists_query_run_trace_saved_query_and_feedback(
     loaded_run = store.get_query_run("req-1")
     assert loaded_run is not None
     assert loaded_run.query_run == run
+    assert loaded_run.query_run.response_payload is not None
+    assert loaded_run.query_run.response_payload["result"]["rows"] == [
+        {"total_amount": 208.5}
+    ]
     assert loaded_run.trace_events == [trace]
 
     assert store.list_query_runs(limit=10).items[0].request_id == "req-1"

@@ -360,18 +360,27 @@ class TextToSQLApiService:
         resolved = self._resolve_runtime_config(request.runtime_config_id)
         self.ensure_database(database_url=resolved.database_url)
         schema = self.read_schema(database_url=resolved.database_url)
+        request_id = str(uuid4())
         validation = SQLValidator().validate(
             sql=request.sql,
             schema=schema,
             dialect=resolved.target_dialect,
         )
         if not validation.success:
-            return _serialize_direct_sql(
+            response = _serialize_direct_sql(
+                request_id=request_id,
                 status="failed",
                 sql=request.sql,
                 result=None,
                 error=validation.error,
             )
+            self._save_direct_sql_run(
+                response=response,
+                sql=request.sql,
+                error=validation.error,
+                resolved=resolved,
+            )
+            return response
 
         executable_sql = validation.rendered_sql or validation.normalized_sql or request.sql
         result = SQLExecutor().execute(
@@ -379,12 +388,20 @@ class TextToSQLApiService:
             database_url=resolved.database_url,
             max_rows=request.max_rows,
         )
-        return _serialize_direct_sql(
+        response = _serialize_direct_sql(
+            request_id=request_id,
             status="success" if result.success else "failed",
             sql=executable_sql,
             result=result.model_dump(mode="python"),
             error=result.error,
         )
+        self._save_direct_sql_run(
+            response=response,
+            sql=executable_sql,
+            error=result.error,
+            resolved=resolved,
+        )
+        return response
 
     def _save_metadata_run(self, state: WorkflowState) -> None:
         """把工作流最终状态沉淀到内部 metadata store。"""
@@ -407,6 +424,7 @@ class TextToSQLApiService:
             runtime_config_id=state.data.get("runtime_config_id"),
             row_count=row_count,
             error_message=_first_error_message(serialized.get("errors", [])),
+            response_payload=serialized,
             created_at=state.started_at,
             updated_at=now,
         )
@@ -428,6 +446,37 @@ class TextToSQLApiService:
             for event in state.trace
         ]
         self.metadata_store.save_query_run(record, trace_events=trace_events)
+
+    def _save_direct_sql_run(
+        self,
+        *,
+        response: dict[str, Any],
+        sql: str,
+        error: SQLError | None,
+        resolved: ResolvedRuntimeConfig,
+    ) -> None:
+        """把手动 SQL 执行沉淀为可反馈、可回放的轻量运行记录。"""
+        now = utc_now()
+        result = response.get("result") or {}
+        rows = result.get("rows") if isinstance(result, dict) else None
+        row_count = len(rows) if isinstance(rows, list) else None
+        record = QueryRunRecord(
+            request_id=str(response["request_id"]),
+            question="手动执行 SQL",
+            status=str(response["status"]),
+            final_sql=sql,
+            attempts=0,
+            selected_model=None,
+            routing_reason=None,
+            target_dialect=resolved.target_dialect,
+            runtime_config_id=resolved.runtime_config_id,
+            row_count=row_count,
+            error_message=error.message if error is not None else None,
+            response_payload=response,
+            created_at=now,
+            updated_at=now,
+        )
+        self.metadata_store.save_query_run(record, trace_events=[])
 
     def get_schema(self, *, runtime_config_id: str | None = None) -> DatabaseSchemaMetadata:
         """按可选 runtime_config_id 返回对应数据库 Schema。"""
@@ -665,6 +714,12 @@ def serialize_run(state: WorkflowState) -> dict[str, Any]:
 def _serialize_stored_run(stored_run: StoredQueryRun) -> dict[str, Any]:
     """把持久化运行记录转换为兼容前端的轻量响应。"""
     run = stored_run.query_run
+    trace = [_serialize_stored_trace_event(event) for event in stored_run.trace_events]
+    if run.response_payload is not None:
+        payload = dict(run.response_payload)
+        payload["trace"] = trace or payload.get("trace", [])
+        return payload
+
     errors = []
     if run.error_message:
         errors.append(
@@ -687,7 +742,7 @@ def _serialize_stored_run(stored_run: StoredQueryRun) -> dict[str, Any]:
         "rag_context": _summarize_rag_context({}),
         "repair_history": [],
         "errors": errors,
-        "trace": [_serialize_stored_trace_event(event) for event in stored_run.trace_events],
+        "trace": trace,
     }
 
 
@@ -725,6 +780,7 @@ def _first_error_message(errors: object) -> str | None:
 
 def _serialize_direct_sql(
     *,
+    request_id: str,
     status: str,
     sql: str,
     result: dict[str, Any] | None,
@@ -742,7 +798,7 @@ def _serialize_direct_sql(
             }
         )
     return {
-        "request_id": str(uuid4()),
+        "request_id": request_id,
         "status": status,
         "final_sql": sql,
         "result": result if status == "success" else None,
