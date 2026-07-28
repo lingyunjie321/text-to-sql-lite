@@ -57,7 +57,17 @@ Text-to-SQL 闭环。
 - Token usage、模型标识和 Prompt 版本统一结果；
 - 生成后串联 Stage 3 安全校验的 Stub/协议集成测试。
 
-真实执行编排属于第六阶段，尚未实现。
+第六开发阶段已实现：
+
+- 以同一可信授权快照重新运行 Stage 3，并要求校验结果完全一致的执行边界；
+- 只执行 `ValidationResult.normalized_sql`，避免校验与执行 SQL 不一致；
+- 无效、失败、旧策略或内部不一致结果零数据库调用；
+- 成功结果/脱敏数据库错误严格二选一；
+- 复用 Connector 的只读事务、30 秒超时、1000 行截断、取消和同 SQL 连接
+  重试，不增加第二套重试；
+- 普通查询、CTE/聚合、合法空结果、截断和运行时错误的真实 Pagila 集成测试。
+
+SQL attempt、指纹和有限反思修复属于第七阶段，尚未实现。
 
 ## 本地准备
 
@@ -127,6 +137,7 @@ with PostgreSQLConnector(settings) as connector:
 ## 校验 SQL
 
 ```python
+from app.execution import execute_validated_sql
 from app.validation import validate_sql
 
 
@@ -137,12 +148,21 @@ result = validate_sql(
     snapshot=snapshot,
 )
 if result.is_valid:
-    execution = connector.execute(result.normalized_sql)
+    execution = execute_validated_sql(
+        result,
+        allowed_schemas=("public",),
+        allowed_tables=("public.film",),
+        snapshot=snapshot,
+        connector=connector,
+    )
 ```
 
 `allowed_schemas`、`allowed_tables` 和 `snapshot` 必须来自同一份服务端可信授权
 上下文。`is_valid` 为 false 时不得执行；失败结果不会返回部分 SQL、对象引用或
-SQLGlot 原始错误。
+SQLGlot 原始错误。执行入口不接收第二份 SQL，只会使用当前策略校验结果中的
+`normalized_sql`；执行前还会用传入的同一份服务端可信授权范围和 Snapshot
+重新校验，防止公开结果工厂被伪造成安全凭证。返回值严格包含 `result` 或脱敏
+`error` 之一。
 
 ## 关联 Schema
 

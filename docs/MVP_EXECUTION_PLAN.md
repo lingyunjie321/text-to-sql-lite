@@ -26,8 +26,8 @@
 |---|---|---|---|---|---|
 | Stage 3 SQL 安全校验 | completed | `docs/superpowers/specs/2026-07-28-stage-3-sqlglot-validation-design.md` | `docs/superpowers/plans/2026-07-28-stage-3-sqlglot-validation.md` | `a1dba99` | Stage 4 |
 | Stage 4 Schema Linking | completed | `docs/superpowers/specs/2026-07-28-stage-4-schema-linking-design.md` | `docs/superpowers/plans/2026-07-28-stage-4-schema-linking.md` | `12574b5` | Stage 5 |
-| Stage 5 SQL 生成 | completed | `docs/superpowers/specs/2026-07-28-stage-5-sql-generation-design.md` | `docs/superpowers/plans/2026-07-28-stage-5-sql-generation.md` | Stage 6 入口回填 | Stage 6 |
-| Stage 6 真实执行 | not_started | 进入阶段后创建 | 进入阶段后创建 | 未产生 | Stage 7 |
+| Stage 5 SQL 生成 | completed | `docs/superpowers/specs/2026-07-28-stage-5-sql-generation-design.md` | `docs/superpowers/plans/2026-07-28-stage-5-sql-generation.md` | `6630de3` | Stage 6 |
+| Stage 6 真实执行 | completed | `docs/superpowers/specs/2026-07-28-stage-6-real-execution-design.md` | `docs/superpowers/plans/2026-07-28-stage-6-real-execution.md` | Stage 7 入口回填 | Stage 7 |
 | Stage 7 反思修复 | not_started | 进入阶段后创建 | 进入阶段后创建 | 未产生 | Stage 8 |
 | Stage 8 LangGraph Workflow | not_started | 进入阶段后创建 | 进入阶段后创建 | 未产生 | Stage 9 |
 | Stage 9 FastAPI | not_started | 进入阶段后创建 | 进入阶段后创建 | 未产生 | Stage 10 |
@@ -249,6 +249,75 @@
 - 下一阶段：Stage 6 真实执行
 
 ## 阶段记录
+
+### Stage 6：校验后真实执行
+
+- 阶段状态：`completed`
+- 上一阶段：Stage 5 SQL 生成，提交 `6630de3`
+- 设计文档：
+  `docs/superpowers/specs/2026-07-28-stage-6-real-execution-design.md`
+- 实施计划：
+  `docs/superpowers/plans/2026-07-28-stage-6-real-execution.md`
+- 计划修改范围：
+  - `app/execution/`
+  - `tests/unit/test_execution_*.py`
+  - `tests/security/test_execution_boundary_security.py`
+  - `tests/integration/test_validated_execution.py`
+  - `docs/decisions/0006-validated-real-execution.md`
+  - `README.md`
+  - 本设计、实施计划和执行台账
+- 验证命令：
+  - `.venv/bin/python -m pytest tests/unit -q`
+  - `.venv/bin/python -m pytest tests/security -q`
+  - `.venv/bin/python -m pytest tests/integration -q -m integration`
+  - `.venv/bin/python -m compileall -q app tools tests`
+  - `.venv/bin/python -m pip check`
+  - `docker compose -f infrastructure/pagila/compose.yaml config --quiet`
+  - `git diff --check`
+- 实际修改范围：
+  - `app/execution/`
+  - `tests/unit/test_execution_models.py`
+  - `tests/unit/test_execution_service.py`
+  - `tests/security/test_execution_boundary_security.py`
+  - `tests/integration/test_validated_execution.py`
+  - `docs/decisions/0006-validated-real-execution.md`
+  - `README.md`
+  - 本设计、实施计划和执行台账
+- TDD 失败证据：
+  - `app.execution` 不存在，两个单元测试和一个安全测试在收集阶段均以
+    `ModuleNotFoundError` 失败；
+  - 实现最小 Outcome/Protocol/Service 后，聚焦单元与安全测试转绿；
+  - 独立审查复现公开 `success_result()` 可伪造 DML、多 statement 和
+    `pg_sleep` 成功结果并触发 Connector；新增 3 项红灯后，执行入口改为用同一
+    可信授权快照重新运行 Stage 3 并要求结果完全一致，修复通过；
+  - 真实 Pagila 校验后执行集成测试随后通过。
+- 测试结果：
+  - Stage 6 聚焦单元/安全测试：`27 passed`
+  - Stage 6 真实 Pagila 集成测试：`6 passed`
+  - Stage 1–6 单元测试：`294 passed`
+  - Stage 1–6 安全测试：`46 passed`
+  - Stage 1–6 Pagila/本地协议集成测试：`60 passed`
+  - `python -m compileall`：通过
+  - `pip check`：通过
+  - Docker Compose 配置检查：通过
+  - `git diff --check`：通过
+  - 受保护文件 SHA-256：与基线一致
+  - 作用域 Secret 扫描：未发现真实凭据；README 仅有环境变量占位 DSN
+- 代码审查结果：
+  - 初审：`blocking=0`、`high=1`。High 为公开 `success_result()` 可伪造危险
+    SQL 成功结果并绕过 Stage 3；以 DELETE、多 statement 和 `pg_sleep` 红灯
+    复现后，改为同一可信授权上下文重新校验并要求结果完全一致。
+  - 复审确认 High 已关闭，伪造和替换 SQL 均零 Connector 调用。
+  - Outcome 运行时类型 medium 以 2 项红灯复现并修复。
+  - 未限定表名/search_path medium 在锁定 public-only Pagila 权限模型下为
+    非阻塞已知边界；多可读 Schema 扩展前必须处理。
+  - 最终独立复审：`blocking=0`、`high=0`、`medium=0`、
+    `low=2`，Approved with Low。
+- 阶段提交 SHA：待 Stage 7 入口回填
+- 遗留问题：Stage 3 规范 SQL 保留未限定表名；当前锁定 public-only Pagila
+  权限模型安全，未来多可读 Schema 扩展前必须绑定 Schema 或固定安全
+  `search_path`。
+- 下一阶段：Stage 7 反思修复
 
 后续每个阶段完成后，在此追加实际修改范围、失败测试证据、单元/集成/安全/
 回归测试结果、独立审查结论、提交 SHA、遗留限制和下一阶段入口。任何用户定义
