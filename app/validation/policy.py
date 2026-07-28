@@ -93,6 +93,9 @@ ALLOWED_FUNCTION_NAMES = {
     exp.Case: "CASE",
     exp.Cast: "CAST",
 }
+ALLOWED_FUNCTIONS = tuple(
+    sorted(set(ALLOWED_FUNCTION_NAMES.values()))
+)
 
 ALLOWED_CAST_TARGET_TYPES = frozenset(
     {

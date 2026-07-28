@@ -46,7 +46,18 @@ Text-to-SQL 闭环。
 - 无命中窄授权 fallback 和授权视图 `schema_version`；
 - 真实 Pagila Gold Case 的表字段召回集成测试。
 
-SQL 生成属于第五阶段，尚未实现。
+第五开发阶段已实现：
+
+- 单模型 OpenAI-compatible `LLMProvider` 协议；
+- 无厂商 SDK 的标准库 `chat/completions` 实现；
+- `GeneratedSQL` 的 SQL/澄清严格二选一结构输出；
+- 同版本授权候选、字段、PK/FK 和 JOIN Path 的确定性 Prompt；
+- 固定 `temperature=0`、1～30 秒可配置（默认 30 秒）的超时和 1 MiB 响应上限；
+- 禁止 HTTP redirect、API key 控制字符和原始 Provider 错误泄漏；
+- Token usage、模型标识和 Prompt 版本统一结果；
+- 生成后串联 Stage 3 安全校验的 Stub/协议集成测试。
+
+真实执行编排属于第六阶段，尚未实现。
 
 ## 本地准备
 
@@ -152,6 +163,39 @@ Linker 只使用传入的可信授权快照，不查询数据库，也不会根�
 上下文，`join_paths` 只包含授权快照中的真实 FK。调用方不得把不同
 `schema_version` 的候选和快照混用。
 
+## 生成 SQL
+
+LLM 配置使用 `.env.example` 中的 `LLM_*` 变量名。API key 只放在被 Git
+忽略的本地环境或 Secret 管理中，不要写入源码、README、提交或日志。
+
+```python
+from app.config import load_llm_settings
+from app.generation import (
+    GenerationContext,
+    OpenAICompatibleLLMProvider,
+    generate_sql,
+)
+
+
+llm_settings = load_llm_settings()
+provider = OpenAICompatibleLLMProvider(llm_settings)
+generated = generate_sql(
+    GenerationContext(
+        question="列出影片标题和语言名称",
+        normalized_question="列出影片标题和语言名称",
+        normalized_time=None,
+        dialect="postgres",
+        schema_linking=linking,
+        snapshot=snapshot,
+    ),
+    provider=provider,
+)
+```
+
+`snapshot` 必须是生成 `linking` 的同一授权快照。模型返回 SQL 时，调用方仍须
+使用原始可信权限和该快照调用 `validate_sql()`；只有校验成功的规范 SQL 才能
+进入 Connector。澄清结果不得执行。
+
 ## 运行测试
 
 单元测试不需要数据库：
@@ -192,4 +236,6 @@ docker compose -f infrastructure/pagila/compose.yaml down
   `app.validation.validate_sql()`；
 - Schema Linking 的候选不是新的授权结果；后续 SQL 校验仍必须使用原始可信
   `allowed_schemas`、`allowed_tables` 和同版本快照；
+- Prompt 和结构化输出不是安全边界；模型 SQL 无论看起来是否只读，都必须通过
+  `app.validation.validate_sql()`，Provider 错误不得记录完整请求或响应；
 - 第一阶段的只读账号和只读事务是数据库侧第二道防线，不替代上层校验。

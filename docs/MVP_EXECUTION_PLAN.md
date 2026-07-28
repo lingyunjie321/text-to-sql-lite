@@ -25,8 +25,8 @@
 | 阶段 | 当前状态 | 设计文档 | 实施计划 | 阶段提交 SHA | 下一阶段 |
 |---|---|---|---|---|---|
 | Stage 3 SQL 安全校验 | completed | `docs/superpowers/specs/2026-07-28-stage-3-sqlglot-validation-design.md` | `docs/superpowers/plans/2026-07-28-stage-3-sqlglot-validation.md` | `a1dba99` | Stage 4 |
-| Stage 4 Schema Linking | completed | `docs/superpowers/specs/2026-07-28-stage-4-schema-linking-design.md` | `docs/superpowers/plans/2026-07-28-stage-4-schema-linking.md` | Stage 5 入口回填 | Stage 5 |
-| Stage 5 SQL 生成 | not_started | 进入阶段后创建 | 进入阶段后创建 | 未产生 | Stage 6 |
+| Stage 4 Schema Linking | completed | `docs/superpowers/specs/2026-07-28-stage-4-schema-linking-design.md` | `docs/superpowers/plans/2026-07-28-stage-4-schema-linking.md` | `12574b5` | Stage 5 |
+| Stage 5 SQL 生成 | completed | `docs/superpowers/specs/2026-07-28-stage-5-sql-generation-design.md` | `docs/superpowers/plans/2026-07-28-stage-5-sql-generation.md` | Stage 6 入口回填 | Stage 6 |
 | Stage 6 真实执行 | not_started | 进入阶段后创建 | 进入阶段后创建 | 未产生 | Stage 7 |
 | Stage 7 反思修复 | not_started | 进入阶段后创建 | 进入阶段后创建 | 未产生 | Stage 8 |
 | Stage 8 LangGraph Workflow | not_started | 进入阶段后创建 | 进入阶段后创建 | 未产生 | Stage 9 |
@@ -155,11 +155,98 @@
     Pagila Gold JOIN 边真空断言、缺失字段后重新 Linking 测试缺口。
   - 三项 medium 均已修复；最终独立复审：
     `blocking=0`、`high=0`、`medium=0`，Approved。
-- 阶段提交 SHA：提交后在 Stage 5 入口回填
+- 阶段提交 SHA：`12574b5`
 - 遗留问题：Pagila 3.1.0 的 `payment` 分区父表不携带
   `customer_id → customer.customer_id` 物理 FK，Stage 4 不伪造该路径；
   其余真实 Gold JOIN 边均已覆盖。
 - 下一阶段：Stage 5 SQL 生成
+
+### Stage 5：OpenAI-compatible 结构化 SQL 生成
+
+- 阶段状态：`completed`
+- 上一阶段：Stage 4 Schema Linking，提交 `12574b5`
+- 设计文档：
+  `docs/superpowers/specs/2026-07-28-stage-5-sql-generation-design.md`
+- 实施计划：
+  `docs/superpowers/plans/2026-07-28-stage-5-sql-generation.md`
+- 计划修改范围：
+  - `.env.example`
+  - `app/config.py`
+  - `app/validation/__init__.py`
+  - `app/validation/policy.py`
+  - `app/generation/`
+  - `tests/unit/test_generation_*.py`
+  - `tests/unit/test_llm_*.py`
+  - `tests/security/test_generation_*.py`
+  - `tests/security/test_llm_provider_security.py`
+  - `tests/integration/test_openai_compatible_provider.py`
+  - `tests/integration/test_generation_validation_pipeline.py`
+  - `docs/decisions/0005-openai-compatible-generation.md`
+  - `README.md`
+  - `docs/MVP_EXECUTION_PLAN.md`
+- 验证命令：
+  - `.venv/bin/python -m pytest tests/unit -q`
+  - `.venv/bin/python -m pytest tests/security -q`
+  - `.venv/bin/python -m pytest tests/integration -q -m integration`
+  - `.venv/bin/python -m compileall -q app tools tests`
+  - `.venv/bin/python -m pip check`
+  - `docker compose -f infrastructure/pagila/compose.yaml config --quiet`
+  - `git diff --check`
+- 实际修改范围：
+  - `.env.example`
+  - `app/config.py`
+  - `app/validation/__init__.py`
+  - `app/validation/policy.py`
+  - `app/generation/`
+  - `tests/unit/test_generation_*.py`
+  - `tests/unit/test_llm_*.py`
+  - `tests/security/test_generation_prompt_security.py`
+  - `tests/security/test_llm_provider_security.py`
+  - `tests/security/test_generated_sql_safety.py`
+  - `tests/integration/test_openai_compatible_provider.py`
+  - `tests/integration/test_generation_validation_pipeline.py`
+  - `docs/decisions/0005-openai-compatible-generation.md`
+  - `README.md`
+  - 本设计、实施计划和执行台账
+- TDD 失败证据：
+  - `app.generation` 和 `LLMSettings` 缺失导致契约测试收集失败；
+  - `build_generation_messages` 缺失导致 Prompt 测试收集失败；
+  - 合法 JOIN Path 首次暴露相邻表 strict zip 长度错误，修复后通过；
+  - Provider 类型缺失导致协议测试收集失败；
+  - `generate_sql` 缺失导致服务/危险输出测试收集失败；
+  - 本地 HTTP server 首次因沙箱禁止端口绑定失败，获准在受控环境重跑通过；
+  - 新安全红灯证明换行 API key 被接受且 urllib 会跟随 302，修复为控制字符
+    拒绝和禁用 redirect 后通过。
+  - 独立审查红灯证明不完整 HTTP 响应会逃逸为原始异常；修复为脱敏的 Provider
+    错误后通过。
+  - 独立审查红灯证明 Prompt 未携带精确函数白名单和结果行上限；改为从
+    Stage 3 单一来源导出函数集，并显式序列化 `max_result_rows` 后通过。
+  - 独立审查红灯证明远程 HTTP 会明文发送认证头和 Prompt；改为远程仅 HTTPS、
+    回环地址可 HTTP 后通过。
+  - 非 `stop` completion、超过 Top-K 候选和伪造候选描述元数据的复审测试先
+    失败；改为 fail-closed、强制 Top-K，并从同版本 Snapshot 读取描述元数据。
+- 测试结果：
+  - Stage 1–5 单元测试：`276 passed`
+  - Stage 1–5 安全测试：`37 passed`
+  - Stage 1–5 Pagila/本地协议/生成管线集成：`54 passed`
+  - `python -m compileall`：通过
+  - `pip check`：通过
+  - Docker Compose 配置检查：通过
+  - `git diff --check`：通过
+  - 受保护文件 SHA-256：与基线一致
+  - 作用域 Secret 扫描：未发现真实凭据；README 仅有环境变量占位 DSN
+  - `.env` LLM 配置结构和 Secret repr：通过（未输出值）
+  - 可选真实外部模型烟测因外部数据发送权限未获批准而未执行；Stage 10
+    真实模型 E2E 门禁不变
+- 代码审查结果：
+  - 初审发现 3 个 high：底层 HTTP 异常可能逃逸、Prompt 缺失精确函数白名单/
+    1000 行约束、远程 HTTP 明文传输；均以失败测试重现并修复。
+  - 复审提出 `finish_reason`、Snapshot 元数据来源、Top-K 边界和文档同步等
+    nonblocking medium；实现和文档均已补齐。
+  - 最终独立复审：`blocking=0`、`high=0`，Approved。
+- 阶段提交 SHA：待 Stage 6 入口回填
+- 遗留问题：无
+- 下一阶段：Stage 6 真实执行
 
 ## 阶段记录
 
