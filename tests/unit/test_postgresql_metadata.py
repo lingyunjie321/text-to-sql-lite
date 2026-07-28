@@ -439,6 +439,8 @@ def test_metadata_read_honors_connection_retry_budget(
         call(scope)
         for _ in range(retry_count + 1)
     ]
+    assert connector._consume_retry_count() == retry_count
+    assert connector._consume_retry_count() == 0
 
 
 @pytest.mark.parametrize(

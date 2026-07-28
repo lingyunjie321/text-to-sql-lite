@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from contextvars import ContextVar
 from types import TracebackType
 
 import psycopg
@@ -42,6 +43,10 @@ from app.connectors.models import (
 class PostgreSQLConnector:
     def __init__(self, settings: DatabaseSettings) -> None:
         self._settings = settings
+        self._retry_count: ContextVar[int] = ContextVar(
+            f"postgresql_connector_retry_count_{id(self)}",
+            default=0,
+        )
         self._pool = ConnectionPool(
             conninfo=settings.dsn_value,
             min_size=settings.min_pool_size,
@@ -92,9 +97,11 @@ class PostgreSQLConnector:
             raise normalize_database_error(error) from None
 
     def execute(self, sql: str) -> ExecutionResult:
+        self._retry_count.set(0)
         for retry_index in range(
             self._settings.connection_retry_count + 1
         ):
+            self._retry_count.set(retry_index)
             try:
                 return self._execute_once(sql)
             except Exception as error:
@@ -112,6 +119,7 @@ class PostgreSQLConnector:
         allowed_schemas: tuple[str, ...],
         allowed_tables: tuple[str, ...],
     ) -> SchemaSnapshot:
+        self._retry_count.set(0)
         scope = normalize_metadata_scope(
             allowed_schemas,
             allowed_tables,
@@ -122,6 +130,7 @@ class PostgreSQLConnector:
         for retry_index in range(
             self._settings.connection_retry_count + 1
         ):
+            self._retry_count.set(retry_index)
             try:
                 return self._read_metadata_once(scope)
             except Exception as error:
@@ -133,6 +142,11 @@ class PostgreSQLConnector:
                 ):
                     raise normalized from None
         raise AssertionError("unreachable")
+
+    def _consume_retry_count(self) -> int:
+        retry_count = self._retry_count.get()
+        self._retry_count.set(0)
+        return retry_count
 
     def _read_metadata_once(
         self,

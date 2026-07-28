@@ -131,6 +131,8 @@ def test_execute_honors_connection_retry_budget(retry_count: int) -> None:
 
     assert connector.execute("SELECT 1") == _result()
     assert connector._execute_once.call_count == retry_count + 1
+    assert connector._consume_retry_count() == retry_count
+    assert connector._consume_retry_count() == 0
 
 
 def test_execute_stops_after_connection_retry_budget() -> None:

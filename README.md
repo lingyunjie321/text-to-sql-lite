@@ -76,7 +76,23 @@ Text-to-SQL 闭环。
 - 语法最小修复、Schema 重新 Linking、方言重生成和非修复错误的确定性路由；
 - PG-MVP-018 字段错误经重新 Linking、完整校验和真实 Pagila 执行的修复回归。
 
-九节点 LangGraph 状态机和 32 步总上限属于第八阶段，尚未实现。
+第八开发阶段已实现：
+
+- 固定 LangGraph 1.2.9，显式注册主规格要求的九个业务节点；
+- Pydantic `SQLTaskState` 与 frozen `WorkflowContext` 分离业务状态和可信依赖；
+- 请求预处理、静态权限、Linking、生成、校验、执行、反思、澄清和 Finalize
+  完整闭环；
+- 首次成功、合法空结果、一次到三次不同修复、重复 SQL 和澄清的确定性路由；
+- 权限/危险 SQL 零执行，连接/超时/资源风险零 LLM 盲修；
+- 最多 32 个业务节点步骤、120 秒总请求预算和 LangGraph recursion limit
+  双重终止保护；
+- Token、模型/Prompt 版本、attempt、节点耗时和唯一 `FinalStatus` 进入严格
+  State；
+- Connector 内部同调用连接重试会累计到 `infrastructure_retry_count`，不增加
+  SQL repair count；
+- Stub Provider + 真实 Pagila 的首次成功和 Schema 修复集成测试。
+
+FastAPI 接口属于第九阶段，尚未实现。
 
 ## 本地准备
 
@@ -225,6 +241,39 @@ generated = generate_sql(
 使用原始可信权限和该快照调用 `validate_sql()`；只有校验成功的规范 SQL 才能
 进入 Connector。澄清结果不得执行。
 
+## 运行 Workflow
+
+```python
+from app.workflow import (
+    WorkflowContext,
+    new_task_state,
+    run_workflow,
+)
+
+
+state = new_task_state(
+    request_id="request-id",
+    trace_id="trace-id",
+    question="列出前 10 部影片标题",
+    datasource_id="pagila",
+    requested_schemas=("public",),
+)
+result = run_workflow(
+    state,
+    context=WorkflowContext(
+        provider=provider,
+        connector=connector,
+        datasource_id="pagila",
+        allowed_schemas=("public",),
+        allowed_tables=("public.film",),
+    ),
+)
+```
+
+`WorkflowContext` 中的数据源和授权范围必须来自服务端可信配置。客户端请求只能
+缩小 Schema 范围，不能扩大表权限。Workflow 中每个生成或修复 SQL 都会重新
+经过 Stage 3 校验和 Stage 6 执行边界；不要直接调用 Connector 执行模型输出。
+
 ## 运行测试
 
 单元测试不需要数据库：
@@ -267,4 +316,6 @@ docker compose -f infrastructure/pagila/compose.yaml down
   `allowed_schemas`、`allowed_tables` 和同版本快照；
 - Prompt 和结构化输出不是安全边界；模型 SQL 无论看起来是否只读，都必须通过
   `app.validation.validate_sql()`，Provider 错误不得记录完整请求或响应；
+- Workflow 的 Provider、Connector、DSN 和完整 Prompt 不进入 State；
+  澄清和公开错误使用固定、脱敏内容；
 - 第一阶段的只读账号和只读事务是数据库侧第二道防线，不替代上层校验。

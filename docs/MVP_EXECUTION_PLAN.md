@@ -28,8 +28,8 @@
 | Stage 4 Schema Linking | completed | `docs/superpowers/specs/2026-07-28-stage-4-schema-linking-design.md` | `docs/superpowers/plans/2026-07-28-stage-4-schema-linking.md` | `12574b5` | Stage 5 |
 | Stage 5 SQL 生成 | completed | `docs/superpowers/specs/2026-07-28-stage-5-sql-generation-design.md` | `docs/superpowers/plans/2026-07-28-stage-5-sql-generation.md` | `6630de3` | Stage 6 |
 | Stage 6 真实执行 | completed | `docs/superpowers/specs/2026-07-28-stage-6-real-execution-design.md` | `docs/superpowers/plans/2026-07-28-stage-6-real-execution.md` | `1a301aa` | Stage 7 |
-| Stage 7 反思修复 | completed | `docs/superpowers/specs/2026-07-28-stage-7-reflection-repair-design.md` | `docs/superpowers/plans/2026-07-28-stage-7-reflection-repair.md` | Stage 8 入口回填 | Stage 8 |
-| Stage 8 LangGraph Workflow | not_started | 进入阶段后创建 | 进入阶段后创建 | 未产生 | Stage 9 |
+| Stage 7 反思修复 | completed | `docs/superpowers/specs/2026-07-28-stage-7-reflection-repair-design.md` | `docs/superpowers/plans/2026-07-28-stage-7-reflection-repair.md` | `0d4c6b8` | Stage 8 |
+| Stage 8 LangGraph Workflow | completed | `docs/superpowers/specs/2026-07-28-stage-8-langgraph-workflow-design.md` | `docs/superpowers/plans/2026-07-28-stage-8-langgraph-workflow.md` | 待 Stage 9 入口回填 | Stage 9 |
 | Stage 9 FastAPI | not_started | 进入阶段后创建 | 进入阶段后创建 | 未产生 | Stage 10 |
 | Stage 10 评测与安全回归 | not_started | 进入阶段后创建 | 进入阶段后创建 | 未产生 | 最终验收 |
 
@@ -244,7 +244,7 @@
   - 复审提出 `finish_reason`、Snapshot 元数据来源、Top-K 边界和文档同步等
     nonblocking medium；实现和文档均已补齐。
   - 最终独立复审：`blocking=0`、`high=0`，Approved。
-- 阶段提交 SHA：待 Stage 6 入口回填
+- 阶段提交 SHA：`6630de3`
 - 遗留问题：无
 - 下一阶段：Stage 6 真实执行
 
@@ -313,7 +313,7 @@
     非阻塞已知边界；多可读 Schema 扩展前必须处理。
   - 最终独立复审：`blocking=0`、`high=0`、`medium=0`、
     `low=2`，Approved with Low。
-- 阶段提交 SHA：待 Stage 7 入口回填
+- 阶段提交 SHA：`1a301aa`
 - 遗留问题：Stage 3 规范 SQL 保留未限定表名；当前锁定 public-only Pagila
   权限模型安全，未来多可读 Schema 扩展前必须绑定 Schema 或固定安全
   `search_path`。
@@ -391,6 +391,88 @@
     low；计数已刷新，两个 low 均已以红灯加固。
   - 最终独立复审：`blocking=0`、`high=0`、`medium=0`、`low=0`，
     Approved。
-- 阶段提交 SHA：待 Stage 8 入口回填
+- 阶段提交 SHA：`0d4c6b8`
 - 遗留问题：无
 - 下一阶段：Stage 8 LangGraph Workflow
+
+### Stage 8：九节点 LangGraph Workflow
+
+- 阶段状态：`completed`
+- 上一阶段：Stage 7 反思修复，提交 `0d4c6b8`
+- 设计文档：
+  `docs/superpowers/specs/2026-07-28-stage-8-langgraph-workflow-design.md`
+- 实施计划：
+  `docs/superpowers/plans/2026-07-28-stage-8-langgraph-workflow.md`
+- 计划修改范围：
+  - `pyproject.toml`
+  - `app/connectors/postgresql.py`
+  - `app/workflow/`
+  - `tests/unit/test_postgresql_connector.py`
+  - `tests/unit/test_postgresql_metadata.py`
+  - `tests/unit/test_workflow_*.py`
+  - `tests/security/test_workflow_*.py`
+  - `tests/integration/test_langgraph_workflow.py`
+  - `docs/decisions/0008-langgraph-workflow.md`
+  - `README.md`
+  - 本设计、实施计划和执行台账
+- 验证命令：
+  - `.venv/bin/python -m pytest tests/unit -q`
+  - `.venv/bin/python -m pytest tests/security -q`
+  - `.venv/bin/python -m pytest tests/integration -q -m integration`
+  - `.venv/bin/python -m compileall -q app tools tests`
+  - `.venv/bin/python -m pip check`
+  - `docker compose -f infrastructure/pagila/compose.yaml config --quiet`
+  - `git diff --check`
+- 实际修改范围：
+  - `pyproject.toml`
+  - `app/connectors/postgresql.py` 的私有、并发隔离重试观测，不改变公开接口
+  - `app/workflow/`
+  - `tests/unit/test_postgresql_connector.py`
+  - `tests/unit/test_postgresql_metadata.py`
+  - `tests/unit/test_workflow_*.py`
+  - `tests/security/test_workflow_*.py`
+  - `tests/integration/test_workflow_pagila.py`
+  - `docs/decisions/0008-langgraph-workflow.md`
+  - `README.md`
+  - 本设计、实施计划和执行台账
+- TDD 失败证据：
+  - `app.workflow` 缺失导致 State、预处理和权限测试收集失败；
+  - 九节点图 API 缺失导致图与安全路由测试收集失败；
+  - Stage 1 递归 `JsonValue` 首次使 Pydantic State Schema 生成递归溢出；
+    将递归对象在 Schema 中保持 opaque，并在 State validator 中恢复严格运行
+    时类型和 `AttemptHistory` 检查后通过；
+  - 外部执行跨过 120 秒总预算最初仍返回成功；新增红灯后在 Finalize 丢弃超时
+    结果并返回 `FAILED_TIMEOUT`；
+  - 独立审查红灯证明模型 ID/Prompt 版本丢失、修复 Prompt 无独立版本；新增逐
+    调用 `GenerationObservation`、Token 汇总不变量和 `repair-v1` 后通过；
+  - 精确图边测试首次只看到 `START → RequestPreprocess → END`；为所有条件边
+    增加显式 `path_map` 后，九节点 23 条允许边可静态检查；
+  - 基础设施重试最初始终记录为 0；Connector 的 0/1/3 次重试和 Workflow
+    元数据+执行累计红灯失败后，以私有 `ContextVar` 观测修复，公开接口不变；
+  - 终态错误类型可与 `FinalStatus` 错配、Generate timing 错归前一 attempt；
+    两项红灯后补齐严格终态和本节点 attempt 归属。
+- 测试结果：
+  - Stage 8 聚焦模型/图/权限/安全测试：通过
+  - Stage 1–8 单元测试：`371 passed`
+  - Stage 1–8 安全测试：`69 passed`
+  - Stage 1–8 Pagila/本地协议集成测试：`64 passed`
+  - Stage 8 真实 Pagila Workflow：首次成功与一次 Schema 修复均通过
+  - `python -m compileall`：通过
+  - `pip check`：通过
+  - Docker Compose 配置检查：通过
+  - `git diff --check`：通过
+  - 受保护文件 SHA-256：与基线一致
+  - 作用域 Secret 扫描：未发现真实凭据；README 只有环境变量占位 DSN
+- 代码审查结果：
+  - 独立审查初审：`blocking=0`、`high=2`。High 为模型/Prompt 身份丢失和
+    Connector 内部重试不可观测，均已按 TDD 修复。
+  - 初审另有 4 个 medium：attempt timing、静态图边、严格终态和路由测试
+    缺口，均已补红灯并修复。
+  - 追加语义类错误经 Reflect 进入 Clarification 的路由红灯和实现后再次复审；
+    权限、安全、连接、超时、资源、重复和 UNKNOWN 均未被扩入 Reflect。
+  - 最终独立复审：定向无缓存 `81 passed`；
+    `blocking=0`、`high=0`、`medium=0`、`low=0`，Approved。
+- 阶段提交 SHA：尚未产生
+- 遗留问题：Stage 6 已记录的 public-only 未限定表名边界仍存在；未新增 Stage 8
+  问题。
+- 下一阶段：Stage 9 FastAPI
