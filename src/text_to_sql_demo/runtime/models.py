@@ -59,7 +59,7 @@ class RuntimeDatabaseConfig(BaseModel):
 
 
 class RuntimeConfigDisplay(BaseModel):
-    """可返回给前端展示的脱敏运行时配置摘要。"""
+    """可通过 API 返回的脱敏运行时配置摘要。"""
 
     database: str
     models: dict[str, str]

@@ -26,7 +26,7 @@ def discover_sqlite_databases(
     reserved_preset_ids: set[str] | None = None,
     cwd: Path | None = None,
 ) -> list[DiscoveredSQLiteDatabase]:
-    """扫描本地目录，生成可给前端选择的 SQLite 预设。"""
+    """扫描本地目录，生成可由 API 调用方选择的 SQLite 预设。"""
     if not config.enabled:
         return []
 

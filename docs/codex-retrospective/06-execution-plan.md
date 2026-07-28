@@ -28,7 +28,6 @@
 - `README.md`
 - `AGENTS.md`
 - `pyproject.toml`
-- `frontend/package.json`
 - `workflow.yaml`
 - `docs/codex-retrospective/00-project-analysis.md`
 
@@ -48,7 +47,7 @@ Goal
 基于当前仓库整理 Text-to-SQL demo 的 MVP、边界和证据基线。
 
 Context
-当前仓库已有 FastAPI 后端、React 前端、workflow.yaml、pytest/ruff、Vitest/typecheck/build，以及 docs/codex-retrospective 文档。
+当前仓库已有 FastAPI API、workflow.yaml、pytest/ruff，以及 docs/codex-retrospective 文档。
 
 Constraints
 - 不改业务代码。
@@ -57,7 +56,7 @@ Constraints
 - 不把 demo 包装成完整生产系统。
 
 Tasks
-1. 扫描 README、pyproject.toml、frontend/package.json、workflow.yaml。
+1. 扫描 README、pyproject.toml、workflow.yaml。
 2. 总结目标用户、MVP、非 MVP、核心成功路径、修复路径、终止路径。
 3. 输出证据表和待确认项。
 
@@ -534,7 +533,7 @@ Report
 
 - 写入 SQL、DDL、多语句不能执行。
 - 修复循环有上限，不会无限跑。
-- HITL 状态和错误信息可被 API/前端展示。
+- HITL 状态和错误信息可通过 API 响应获取。
 
 ### 验证命令
 
@@ -646,102 +645,6 @@ python -m pytest tests/integration/test_api_workflow.py tests/integration/test_m
 - 回退新增 API route，保留 service 层可测试能力。
 - 如果 runtime config 风险过高，回退到只支持默认配置并记录限制。
 
-## Milestone 7：前端工作台
-
-### 目标
-
-构建 React/Vite/TypeScript 工作台，支持自然语言查询、运行配置、SQL 展示与编辑执行、结果表格、历史、反馈和 Debug Trace。
-
-### 涉及文件
-
-- `frontend/package.json`
-- `frontend/vite.config.ts`
-- `frontend/src/App.tsx`
-- `frontend/src/api/client.ts`
-- `frontend/src/api/config.ts`
-- `frontend/src/components/*`
-- `frontend/src/styles.css`
-- `frontend/src/lib/*`
-- `frontend/src/**/*.test.ts`
-- `frontend/src/**/*.test.tsx`
-
-### 具体任务
-
-1. 先计划：列出组件拆分、API client、状态流、错误展示和测试计划。
-2. 再实现：查询输入、运行配置、SQL 面板、结果面板、历史面板、Debug 面板。
-3. 再验证：运行前端 test、typecheck、build。
-4. 再总结：说明用户视角和开发者 Debug 视角如何分层。
-
-### Codex Prompt
-
-```text
-请执行 Milestone 7：前端工作台。
-
-Goal
-实现可用于 demo 的 React 工作台，而不是 landing page。
-
-Context
-后端 API 已提供 query、schema、sql execute、runs、saved queries、feedback、runtime config。
-
-Constraints
-- 编码前先输出组件计划、API 类型计划和测试计划。
-- 第一屏是实际工作台，不做营销页。
-- 不把密钥写入 localStorage。
-- 用户错误和技术错误分层展示。
-- Debug 面板可以展示 trace、routing、Top-K、修复历史，但不得展示完整密钥。
-- UI 改动保持小步，不顺手重写无关组件。
-
-Tasks
-1. 实现 API client 和类型。
-2. 实现 QueryComposer。
-3. 实现 RuntimeConfigPanel。
-4. 实现 ResultPanel 和 SqlPanel。
-5. 实现 HistoryPanel、DebugPanel、feedback。
-6. 添加 Vitest 测试。
-
-Done when
-- 用户能提交自然语言查询并看到 SQL、结果和摘要。
-- 用户能编辑只读 SQL 并执行。
-- Debug 面板能看到 trace 和修复历史。
-- 错误状态清晰可读。
-
-Verification
-- cd frontend && npm test
-- cd frontend && npm run typecheck
-- cd frontend && npm run build
-
-Failure rule
-如果前端 test/typecheck/build 任一失败，停止新增 UI，先修失败。
-
-Report
-总结组件结构、API 契约、验证结果和 UI 限制。
-```
-
-### 验收标准
-
-- 前端首屏是可操作工作台。
-- API client 有类型约束和错误包装。
-- Debug 信息可用于解释 workflow 过程。
-
-### 验证命令
-
-```bash
-cd frontend && npm test
-cd frontend && npm run typecheck
-cd frontend && npm run build
-```
-
-### 风险点
-
-- 前端保存密钥或敏感配置。
-- 组件一次性过大，后续难维护。
-- 技术错误直接暴露给普通用户。
-
-### 回滚策略
-
-- 回退本阶段新增组件，保留 API client 和最小 App。
-- 如果 UI 状态管理复杂化，回退到单页受控状态，再小步拆分。
-
 ## Milestone 8：测试补齐与端到端演示
 
 ### 目标
@@ -753,15 +656,13 @@ cd frontend && npm run build
 - `tests/unit/*`
 - `tests/integration/*`
 - `scripts/run_demo.py`
-- `frontend/src/**/*.test.ts`
-- `frontend/src/**/*.test.tsx`
 - `README.md`
 
 ### 具体任务
 
 1. 先计划：列出测试矩阵、fixture、Mock LLM sequence 和断言。
-2. 再实现：补足成功路径、修复路径、终止路径、架构约束、安全边界、前端关键交互测试。
-3. 再验证：运行完整后端、demo、前端测试和构建。
+2. 再实现：补足成功路径、修复路径、终止路径、架构约束和安全边界测试。
+3. 再验证：运行完整 pytest 和离线验证脚本。
 4. 再总结：说明测试覆盖了哪些风险，哪些仍需人工验证。
 
 ### Codex Prompt
@@ -773,35 +674,29 @@ Goal
 用测试锁住 Text-to-SQL demo 的核心行为和 AI 生成代码的架构边界。
 
 Context
-后端、前端和核心 workflow 已实现。现在不新增业务功能，只补测试、fixture 和 demo 验证。
+API 和核心 workflow 已实现。现在不新增业务功能，只补测试、fixture 和离线验证。
 
 Constraints
 - 编码前先输出测试计划。
 - 不调用真实付费 LLM API。
 - 不连接外部数据库；使用 SQLite fixture。
 - 失败测试不能通过放宽 SQL 安全、删除断言或跳过测试解决。
-- 前端测试覆盖用户主要交互，不追求脆弱快照。
 
 Tasks
 1. 覆盖 workflow core 和架构约束。
 2. 覆盖 SQL validator/executor 安全边界。
 3. 覆盖 Mock LLM 成功、修复、终止路径。
 4. 覆盖 metadata、runtime config、observability。
-5. 覆盖前端 API client 和关键工作台交互。
-6. 更新 scripts/run_demo.py 或 README demo 命令。
+5. 更新 scripts/run_demo.py 或 README 离线验证命令。
 
 Done when
 - 后端完整 pytest 通过。
-- 前端 test/typecheck/build 通过。
 - demo 脚本可展示成功、修复、终止路径中的关键场景。
 
 Verification
 - ruff check .
 - python -m pytest
 - python scripts/run_demo.py
-- cd frontend && npm test
-- cd frontend && npm run typecheck
-- cd frontend && npm run build
 
 Failure rule
 任何验证失败都停止推进，先分类为实现 bug、测试假设错误或环境问题，再做最小修复。
@@ -814,7 +709,6 @@ Report
 
 - 成功路径、修复路径、终止路径都有集成测试。
 - 架构约束测试能防止 engine/factory 依赖具体节点。
-- 前端构建和类型检查通过。
 
 ### 验证命令
 
@@ -822,9 +716,6 @@ Report
 ruff check .
 python -m pytest
 python scripts/run_demo.py
-cd frontend && npm test
-cd frontend && npm run typecheck
-cd frontend && npm run build
 ```
 
 ### 风险点
@@ -960,7 +851,7 @@ Goal
 把当前 Text-to-SQL demo 整理成可运行、可审查、可面试复盘的项目材料。
 
 Context
-代码仓库已有后端、前端、测试、workflow、observability、runtime config 和 docs/codex-retrospective。
+代码仓库已有 API、测试、workflow、observability、runtime config 和 docs/codex-retrospective。
 
 Constraints
 - 不改业务代码。
@@ -1047,7 +938,7 @@ Goal
 识别当前 demo 距离生产级代码的差距，并生成后续可执行加固任务。
 
 Context
-项目已具备 workflow、LLM abstraction、SQL safety、metadata、runtime config、frontend 和测试，但仍是轻量 demo。
+项目已具备 API、workflow、LLM abstraction、SQL safety、metadata、runtime config 和测试，但仍是轻量 Engine。
 
 Constraints
 - 先输出风险分级，不直接大改。
@@ -1058,7 +949,7 @@ Constraints
 Tasks
 1. 列出 P0：SQL 权限隔离、密钥托管、敏感日志。
 2. 列出 P1：CI/CD、部署、provider 稳定性、runtime config 持久化。
-3. 列出 P2：RAG 评估、Schema YAML loader、前端 UX、文档同步。
+3. 列出 P2：RAG 评估、Schema YAML loader、API 易用性、文档同步。
 4. 为每项写可交给 Codex 的 Prompt 示例。
 
 Done when
@@ -1126,7 +1017,7 @@ rg -n "已生产可用|完整生产|性能指标|召回率" docs/codex-retrospec
 ### 4. 审查测试证据
 
 - 后端是否运行 `ruff check .` 和对应 `pytest`。
-- 前端变更是否运行 `npm test`、`npm run typecheck`、`npm run build`。
+- API 变更是否运行对应集成测试。
 - 新增核心模块是否有单元测试。
 - workflow 主链路是否覆盖成功、修复、终止路径。
 - 测试失败时是否先定位和修复，而不是跳过测试。
@@ -1146,7 +1037,7 @@ rg -n "已生产可用|完整生产|性能指标|召回率" docs/codex-retrospec
 2. 主要设计决策。
 3. 执行过的命令。
 4. 测试结果。
-5. 是否影响 workflow / node / state / API / frontend。
+5. 是否影响 workflow / node / state / API。
 6. 剩余限制或后续工作。
 7. 如果有失败，失败原因、修复方式和重新验证结果。
 

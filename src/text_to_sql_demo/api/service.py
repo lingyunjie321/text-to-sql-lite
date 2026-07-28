@@ -153,7 +153,7 @@ class TextToSQLApiService:
         import text_to_sql_demo.nodes  # noqa: F401
 
     def get_runtime_options(self) -> dict[str, Any]:
-        """返回前端可选择的运行时预设，所有字段均不包含真实密钥。"""
+        """返回 API 调用方可选择的运行时预设，所有字段均不包含真实密钥。"""
         return {
             "database_presets": self._database_preset_options(),
             "model_presets": self._model_preset_options(),
@@ -184,7 +184,7 @@ class TextToSQLApiService:
         return [*configured_presets, *discovered_presets]
 
     def _model_preset_options(self) -> dict[str, list[dict[str, Any]]]:
-        """按轻量/强力槽位返回模型预设数组，保持前端响应结构稳定。"""
+        """按轻量/强力槽位返回模型预设数组，保持 API 响应结构稳定。"""
         return {
             alias: [
                 {
@@ -831,7 +831,7 @@ def serialize_run(state: WorkflowState) -> dict[str, Any]:
 
 
 def _serialize_stored_run(stored_run: StoredQueryRun) -> dict[str, Any]:
-    """把持久化运行记录转换为兼容前端的轻量响应。"""
+    """把持久化运行记录转换为稳定的轻量 API 响应。"""
     run = stored_run.query_run
     trace = [_serialize_stored_trace_event(event) for event in stored_run.trace_events]
     if run.response_payload is not None:
@@ -909,7 +909,7 @@ def _serialize_direct_sql(
     result: dict[str, Any] | None,
     error: SQLError | None,
 ) -> dict[str, Any]:
-    """把用户编辑 SQL 的执行结果转换为前端可复用响应。"""
+    """把调用方提交 SQL 的执行结果转换为可复用 API 响应。"""
     errors = []
     if error is not None:
         errors.append(

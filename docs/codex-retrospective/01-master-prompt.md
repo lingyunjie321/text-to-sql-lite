@@ -7,10 +7,10 @@
 ## Master Prompt
 
 ```text
-你是我的资深全栈架构师、Text-to-SQL Agent 工程负责人和 AI 编程协作代理。
+	你是我的资深后端架构师、Text-to-SQL Agent 工程负责人和 AI 编程协作代理。
 
 Goal
-构建一个轻量业务交付版 Text-to-SQL Agent demo。目标用户是运营/分析师，他们用自然语言查数；数据团队维护可信上下文，包括 Schema、Reference SQL、业务文档、Metric 和 Semantic Model。系统需要通过可配置多阶段工作流生成、校验、执行、反思和修复 SQL，并提供前端演示工作台。
+	构建一个 API-first 的轻量 Text-to-SQL Engine。调用方通过 HTTP API 提交自然语言问题；数据团队维护可信上下文，包括 Schema、Reference SQL、业务文档、Metric 和 Semantic Model。系统通过可配置多阶段工作流生成、校验、执行、反思和修复 SQL。
 
 Context
 - 项目定位是 interview-grade demo / 轻量业务交付版，不是完整商业 BI 平台。
@@ -29,8 +29,7 @@ Technical Stack
 - Workflow: 自研轻量 WorkflowEngine，不使用 LangGraph 或 LangChain
 - Database: SQLite 默认可执行数据库；PostgreSQL/MySQL 作为可选能力
 - LLM: Provider-neutral LLMClient Protocol；OpenAI-compatible adapter；MockLLMClient for tests
-- Frontend: React 18, Vite, TypeScript, Vitest
-- Quality: pytest, ruff, TypeScript typecheck, frontend build
+- Quality: pytest, ruff
 
 Architecture Constraints
 - WorkflowEngine 不得导入具体业务节点类。
@@ -85,8 +84,8 @@ Functional Requirements
    - 不在日志和响应中泄露 API key。
 
 6. Runtime Config
-   - 前端可以选择数据库预设或自定义数据库连接。
-   - 前端可以选择 light/strong 模型预设或自定义模型。
+   - API 调用方可以选择数据库预设或提交自定义数据库连接。
+   - API 调用方可以选择 light/strong 模型预设或提交自定义模型配置。
    - 后端创建短生命周期 runtime_config_id。
    - Secret 使用 SecretStr 或等价机制，响应必须脱敏。
    - 创建配置前做数据库和模型连通性测试。
@@ -95,12 +94,6 @@ Functional Requirements
    - 内部 metadata store 保存 query_run、trace_event、saved_query、feedback。
    - saved_query 默认 draft，只有 approved 才能进入可信 Reference SQL 检索。
    - 不把内部 metadata 写到业务目标库。
-
-8. Frontend
-   - 第一屏必须是可用工作台，不是营销 landing page。
-   - 支持自然语言输入、数据源选择、运行配置、Schema 提示、SQL 展示/编辑/执行、结果表格、运行摘要、保存 SQL、反馈、历史记录、开发者 Debug Trace。
-   - Debug 面板展示 trace、模型路由、Top-K 示例、修复历史、原始 JSON。
-   - 用户错误提示和技术错误详情分层展示。
 
 Non-functional Requirements
 - 所有公共函数和类都必须有类型注解。
@@ -181,15 +174,6 @@ Done when:
 Verification:
 - python -m pytest tests/integration/test_api_workflow.py tests/integration/test_metadata_api.py tests/integration/test_runtime_config_api.py
 
-M7 - Frontend Workbench
-Done when:
-- React 工作台支持查询、SQL 编辑执行、结果展示、Runtime 配置、历史、反馈和 Debug Trace。
-- API client 有类型定义和错误包装。
-Verification:
-- cd frontend && npm test
-- cd frontend && npm run typecheck
-- cd frontend && npm run build
-
 M8 - Observability & Docs
 Done when:
 - 日志包含 request_id、workflow/node 上下文。
@@ -199,9 +183,6 @@ Verification:
 - ruff check .
 - python -m pytest
 - python scripts/run_demo.py
-- cd frontend && npm test
-- cd frontend && npm run typecheck
-- cd frontend && npm run build
 
 Acceptance Criteria
 - 成功路径：复杂查询一次生成、校验、执行成功，trace 中无修复节点。
@@ -210,7 +191,7 @@ Acceptance Criteria
 - Prompt 裁剪：响应或 trace 能证明使用 linked schema、Top-K examples、RAG context summary，而不是完整 schema 全量注入。
 - 安全：写入 SQL 被拒绝，API key/Authorization/数据库密码不会出现在响应或日志。
 - 架构：新增节点不需要修改 WorkflowEngine 或 NodeFactory。
-- 测试：后端 ruff + pytest 通过；前端 test + typecheck + build 通过。
+- 测试：ruff、pytest 和离线验证脚本通过。
 
 Failure Rule
 - 任一验证命令失败时，停止开发新功能。

@@ -110,7 +110,7 @@ Goal
 产出可执行架构方案，后续 Codex 能按该方案小步实现。
 
 Context
-MVP 需要：FastAPI API、自研可配置 workflow、Schema Linking、Top-K 示例和知识库检索、LLM SQL 生成、SQLGlot 校验、SQLAlchemy 执行、反思修复、最多 3 次终止、Trace、React 前端演示。
+MVP 需要：FastAPI API、自研可配置 workflow、Schema Linking、Top-K 示例和知识库检索、LLM SQL 生成、SQLGlot 校验、SQLAlchemy 执行、反思修复、最多 3 次终止和 Trace。
 
 Constraints
 - 只做方案，不写代码。
@@ -128,7 +128,7 @@ Constraints
 5. 关键模块职责表。
 6. 状态模型、节点接口、注册表、工厂和依赖注入设计。
 7. SQL 生成、校验、执行、反思修复的状态转移。
-8. 测试策略：unit、integration、frontend。
+8. 测试策略：unit、integration、offline fixture。
 9. 风险与生产化短板。
 
 Done when
@@ -148,7 +148,7 @@ Failure rule
 初始化最小可运行项目结构，建立质量工具和基础 README。
 
 **Context**
-已经确认 Python + FastAPI 后端、React/Vite 前端、自研 workflow。
+已经确认 Python + FastAPI API、自研 workflow。
 
 **Constraints**
 - 先列出将创建/修改的文件。
@@ -158,15 +158,11 @@ Failure rule
 
 **Done when**
 - `pyproject.toml`、`src/text_to_sql_demo/main.py`、`tests/unit/test_app_health.py` 可运行。
-- 前端 `frontend/package.json`、`vite.config.ts`、`src/App.tsx` 最小页面可 build。
 - README 有本地启动和测试命令。
 
 **Verification**
 - `ruff check .`
 - `python -m pytest tests/unit/test_app_health.py`
-- `cd frontend && npm test`
-- `cd frontend && npm run typecheck`
-- `cd frontend && npm run build`
 
 **Failure rule**
 - 任一命令失败，停止新增功能，先修复脚手架。
@@ -180,7 +176,7 @@ Goal
 建立最小可运行 Text-to-SQL demo 仓库骨架。
 
 Context
-技术方案已确认：FastAPI + Pydantic 后端，React/Vite/TypeScript 前端，自研 workflow 后续实现。
+技术方案已确认：FastAPI + Pydantic API，自研 workflow 后续实现。
 
 Constraints
 - 编码前先列出文件计划：新增/修改文件、原因、是否影响 workflow/node/state/API。
@@ -193,21 +189,16 @@ Tasks
 1. 创建 Python package 和 FastAPI /health。
 2. 配置 pyproject.toml：依赖、pytest、ruff。
 3. 创建基础 pytest。
-4. 创建 frontend 最小 Vite React TS 项目。
-5. 创建 README：环境要求、启动命令、测试命令、项目边界。
+4. 创建 README：环境要求、启动命令、测试命令、项目边界。
 
 Done when
 - 后端健康检查测试通过。
-- 前端最小 build 通过。
 - README 能让新人本地启动。
 
 Verification
 运行：
 - ruff check .
 - python -m pytest tests/unit/test_app_health.py
-- cd frontend && npm test
-- cd frontend && npm run typecheck
-- cd frontend && npm run build
 
 Failure rule
 如果任一验证失败，先修复失败，不要继续下一个阶段。
@@ -317,7 +308,7 @@ Workflow core 已实现。现在需要真实节点、PromptBuilder、LLMClient�
 
 Constraints
 - 编码前先输出本阶段计划，说明改哪些文件、类、函数，以及是否影响 workflow/node/state/API。
-- 每次只做一个里程碑，不要混入 runtime config、metadata、frontend。
+- 每次只做一个里程碑，不要混入 runtime config 或 metadata。
 - Prompt 模板放在 configs/prompts，不写进 API route。
 - LLM 使用 `LLMClient` 协议，测试使用 `MockLLMClient`。
 - SQL 执行只能执行 SQLValidator 校验后的 SQL。
@@ -365,14 +356,11 @@ Failure rule
 - 后端关键模块都有 unit tests。
 - 集成测试覆盖三条 demo 场景。
 - 架构约束测试存在。
-- 前端 API client、adapter、主交互有 Vitest。
+- API 请求、响应和错误路径有集成测试。
 
 **Verification**
 - `ruff check .`
 - `python -m pytest`
-- `cd frontend && npm test`
-- `cd frontend && npm run typecheck`
-- `cd frontend && npm run build`
 
 **Failure rule**
 - 如果测试暴露真实 bug，修代码；如果测试本身假设错误，说明原因再修测试。
@@ -403,7 +391,7 @@ Required tests
 5. LLM: Mock sequence/alias responses, provider error handling。
 6. Integration: complex query success once, wrong column reflected and fixed, 3 failed repairs -> HITL。
 7. API: error response, saved query draft/review, feedback, runtime config。
-8. Frontend: query submit, runtime panel, debug panel, SQL edit execution, error display。
+8. API: query、runtime config、trace、只读 SQL execution、稳定错误响应。
 
 Done when
 测试能证明成功路径、修复路径、终止路径和架构边界。
@@ -411,9 +399,6 @@ Done when
 Verification
 - ruff check .
 - python -m pytest
-- cd frontend && npm test
-- cd frontend && npm run typecheck
-- cd frontend && npm run build
 
 Failure rule
 失败后先分类：实现 bug / 测试假设错 / 环境问题。分类写清楚，再做最小修复。
@@ -453,7 +438,7 @@ Goal
 找出影响正确性、安全性、可维护性、测试可靠性和生产化边界的问题。
 
 Context
-这是 Text-to-SQL Agent demo。重点模块是 workflow、nodes、LLM、SQL validator/executor、runtime config、metadata、observability、frontend API/client。
+这是 Text-to-SQL Engine。重点模块是 API、workflow、nodes、LLM、SQL validator/executor、runtime config、metadata 和 observability。
 
 Constraints
 - 只做审查，不要改代码。
@@ -473,7 +458,7 @@ Review checklist
 7. Runtime config 是否脱敏、过期、错误响应稳定？
 8. 日志是否输出完整 SQL、prompt、数据库 URL 或密钥？
 9. Metadata 是否和业务目标库隔离？
-10. 前端是否有用户错误和技术错误分层？
+10. API 是否用稳定错误码区分用户输入错误和系统错误？
 11. 测试是否覆盖成功、修复、终止、架构约束？
 
 Done when
@@ -510,9 +495,6 @@ Failure rule
 - `ruff check .`
 - `python -m pytest`
 - `python scripts/run_demo.py`
-- `cd frontend && npm test`
-- `cd frontend && npm run typecheck`
-- `cd frontend && npm run build`
 
 **Failure rule**
 - 生产化加固失败时，不用“demo 可以忽略”掩盖；要明确是修复还是记录为限制。
@@ -526,7 +508,7 @@ Goal
 在保持轻量 demo 边界的前提下，提高安全、可配置、可观测和可维护性。
 
 Context
-系统已有 workflow、SQL 校验执行、runtime config、metadata、frontend。现在要补齐最值得做的生产化 guardrails。
+系统已有 API、workflow、SQL 校验执行、runtime config 和 metadata。现在要补齐最值得做的生产化 guardrails。
 
 Constraints
 - 先输出加固计划和风险分级，得到确认后再改。
@@ -553,9 +535,6 @@ Verification
 - ruff check .
 - python -m pytest
 - python scripts/run_demo.py
-- cd frontend && npm test
-- cd frontend && npm run typecheck
-- cd frontend && npm run build
 
 Failure rule
 任何验证失败都先修复；如果属于外部环境问题，记录具体命令、错误和人工验证方式。
@@ -596,7 +575,7 @@ Goal
 展示我重度使用 Codex / Claude Code 等 AI 编程工具，并且具备 Prompt 编写、约束 AI、审查 AI 输出、验证代码和项目级交付能力。
 
 Context
-当前仓库真实实现包括：可配置 workflow、节点注册、Pydantic state、Schema/RAG Top-K、LLM provider abstraction、SQLGlot 校验、SQLAlchemy 执行、反思修复、最多 3 次终止、Trace、metadata、runtime config、React 前端、pytest/Vitest。
+当前仓库真实实现包括：FastAPI API、可配置 workflow、节点注册、Pydantic state、Schema/RAG Top-K、LLM provider abstraction、SQLGlot 校验、SQLAlchemy 执行、反思修复、最多 3 次终止、Trace、metadata、runtime config 和 pytest。
 
 Constraints
 - 不要伪造历史真实聊天记录。

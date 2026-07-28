@@ -152,7 +152,7 @@ Before coding
 1. 修改文件列表。
 2. 修改类/函数。
 3. 修改原因。
-4. 是否影响 workflow / node / state / API / frontend。
+4. 是否影响 workflow / node / state / API。
 5. 风险和回滚方式。
 
 得到确认后再改代码。如果本轮我已经明确要求直接修改，也必须先在回复中简短说明计划，再开始改。
@@ -188,7 +188,7 @@ Findings first:
 - `OpenAICompatibleLLMClient` 是否泄露 key/prompt。
 - `RuntimeConfig` 是否脱敏和过期。
 - `MetadataStore` 是否和业务库隔离。
-- 前端是否把用户错误和技术错误分层。
+- API 是否用稳定错误码区分用户输入错误和系统错误。
 
 ## 如何跑测试和修复
 
@@ -200,15 +200,6 @@ Findings first:
 ruff check .
 python -m pytest
 python scripts/run_demo.py
-```
-
-前端验证：
-
-```bash
-cd frontend
-npm test
-npm run typecheck
-npm run build
 ```
 
 失败处理 Prompt：
@@ -272,7 +263,7 @@ Verification failed.
 - 是否新增/修改了测试？
 - 是否更新 README/docs？
 - 是否运行 ruff/pytest？
-- 前端变更是否运行 npm test/typecheck/build？
+- API 变更是否运行对应集成测试？
 - 是否有敏感信息进入日志/响应？
 - 是否把推断写成事实？
 - 是否记录剩余限制？

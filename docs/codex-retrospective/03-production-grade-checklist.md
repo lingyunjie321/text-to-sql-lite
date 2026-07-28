@@ -9,14 +9,13 @@
 | 可配置工作流 | `workflow.yaml`、`WorkflowEngine`、`EdgeConfig.target_for()` | API handler 不硬编码流程，可通过配置调整节点边 |
 | 节点扩展 | `BaseNode`、`NodeRegistry`、`NodeFactory` | 新增节点不需要改 engine/factory |
 | 状态通信 | `WorkflowState`、`NodeResult.state_patch` | 节点通过显式状态传递，不靠全局变量 |
-| 类型约束 | Pydantic models、TypeScript API types | 输入输出可校验，便于测试和前端协作 |
+| 类型约束 | Pydantic models | 配置、请求、状态和响应可校验，便于测试 |
 | LLM 抽象 | `LLMClient` Protocol、`MockLLMClient` | 测试不依赖真实付费 API |
 | Prompt 管理 | `PromptBuilder`、`configs/prompts/*.yaml` | Prompt 不散落在 route handler |
 | SQL 安全 | `SQLValidator` 使用 SQLGlot parse、只读 SELECT、schema 校验 | 不是直接执行 LLM 原始输出 |
 | 修复闭环 | `ReflectionDecisionNode`、`FixSQLNode`、`HITLNode` | 错误可分类、修复有上限、失败可收敛 |
 | 可观测性 | `TraceEvent`、`observability/events.py`、SQL hash | 能看每个节点状态，日志避免泄露完整 SQL |
 | 内部数据沉淀 | `MetadataStore` | 运行记录、Trace、收藏 SQL、反馈和业务目标库分离 |
-| 前端工作台 | `frontend/src/App.tsx`、`DebugPanel` | 用户视角和开发者视角分开 |
 | 测试 | `tests/integration/test_demo_scenarios.py`、`test_architecture_constraints.py` | 覆盖成功、修复、终止和架构边界 |
 
 ## 离生产级还差什么
@@ -30,9 +29,8 @@
 | P1 | CI/CD | 仓库未看到 GitHub Actions 配置 | 添加 lint/test/build pipeline | Prompt E |
 | P1 | 部署 | 无 Dockerfile / compose | 增加最小 Dockerfile 或部署手册 | Prompt F |
 | P1 | 检索质量 | YAML + 词法 Top-K | 增加离线评测集；可选 embedding/vector backend | Prompt G |
-| P2 | Schema 来源 | 主链路以 introspection 为主 | 补 YAML schema loader 或数据团队维护 UI | Prompt H |
-| P2 | 前端运行配置 UX | 创建时统一测试连接 | 加独立测试连接、字段级错误、provider 帮助文案 | Prompt I |
-| P2 | 文档同步 | 当前工作区前端组件有未提交改动，既有 docs 可能未完全同步 | 增加文档同步 checklist | Prompt J |
+| P2 | Schema 来源 | 主链路以 introspection 为主 | 补 YAML schema loader 或数据团队维护配置 | Prompt H |
+| P2 | 文档同步 | API 和 docs 可能随实现演进产生漂移 | 增加文档同步 checklist | Prompt J |
 
 ## Prompt A：SQL 执行安全加固
 
@@ -77,7 +75,7 @@ Constraints
 - 不得把密钥写入配置文件、日志、响应或测试快照。
 
 Done when
-- 输出泄露路径清单：response、log、trace、metadata、frontend state。
+- 输出泄露路径清单：response、log、trace、metadata、runtime state。
 - 给出 P0/P1/P2 修复建议。
 - 只实现低风险修复。
 
@@ -148,7 +146,7 @@ Failure rule
 
 ```text
 Goal
-添加最小 CI，确保 PR 中自动运行后端和前端验证。
+添加最小 CI，确保 PR 中自动运行后端验证。
 
 Context
 当前 README 已列出本地命令，但仓库未看到 CI 配置。
@@ -163,10 +161,7 @@ Done when
 CI 执行：
 - ruff check .
 - python -m pytest
-- cd frontend && npm ci
-- cd frontend && npm test
-- cd frontend && npm run typecheck
-- cd frontend && npm run build
+- python scripts/run_demo.py
 
 Verification
 - 本地至少运行同等命令。
@@ -186,20 +181,19 @@ Context
 项目用于 demo 和面试，当前没有 Dockerfile。
 
 Constraints
-- 写文档前先扫描 README、pyproject.toml、frontend/package.json 和运行脚本。
+- 写文档前先扫描 README、pyproject.toml 和运行脚本。
 - 先写部署文档，再决定是否加 Dockerfile。
 - 明确环境变量、数据目录、日志目录、密钥配置。
 - 不编造性能指标。
 
 Done when
-- 文档包含后端启动、前端构建、环境变量、SQLite 初始化、日志路径、限制。
+- 文档包含 API 启动、环境变量、SQLite Fixture 初始化、日志路径和限制。
 - 明确生产中必须替换只读账号和密钥管理。
 
 Verification
 - ruff check .
 - python -m pytest
-- cd frontend && npm run typecheck
-- cd frontend && npm run build
+- python scripts/run_demo.py
 - 人工检查文档命令与实际配置一致。
 
 Failure rule
@@ -261,35 +255,6 @@ Failure rule
 如果发现已有 loader，不重复造轮子；只补测试或文档说明。
 ```
 
-## Prompt I：前端 Runtime UX
-
-```text
-Goal
-改进 RuntimeConfigPanel 的用户体验和错误反馈。
-
-Context
-当前面板支持预设/自定义数据库和 light/strong 模型，创建配置时统一测试连接。
-
-Constraints
-- 编码前先输出 UI/API 影响面和组件文件计划。
-- 不改后端安全边界。
-- 不把密钥写入 localStorage。
-- UI 文案要面向真实用户，不写成技术说明书。
-
-Done when
-- 表单字段错误可定位。
-- 创建失败区分数据库连接失败和模型连接失败。
-- Debug 面板仍能展示技术详情。
-
-Verification
-- cd frontend && npm test
-- cd frontend && npm run typecheck
-- cd frontend && npm run build
-
-Failure rule
-如果前端测试或 build 失败，先修复失败；不要顺手重构无关组件。
-```
-
 ## Prompt J：文档同步 Checklist
 
 ```text
@@ -297,7 +262,7 @@ Goal
 建立文档同步检查，避免 README/docs 与代码结构漂移。
 
 Context
-当前工作区前端组件已有未提交变化，部分既有文档可能还保留旧组件名。
+当前 API、配置和文档可能随实现演进产生漂移。
 
 Constraints
 - 修改前先用 `rg --files` 和 `rg` 列出需要同步的文档引用。

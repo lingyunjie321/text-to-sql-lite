@@ -12,7 +12,7 @@
 
 ## 项目概览
 
-该仓库是一个轻量级 Text-to-SQL Agent demo，面向运营/分析师自然语言查数，由数据团队维护可信上下文。后端通过可配置多阶段工作流完成 Schema Linking、上下文检索、SQL 生成、SQL 校验、SQL 执行、反思修复和 HITL 收敛，前端提供查询、运行配置、SQL 编辑执行、结果展示、历史、反馈和 Debug Trace。
+该仓库当前定位为 API-first 的轻量 Text-to-SQL Engine。调用方通过 HTTP API 使用 Schema Linking、上下文检索、SQL 生成、SQL 校验、只读执行、反思修复、HITL 收敛、运行记录、反馈和 Trace。
 
 真实证据：
 
@@ -20,7 +20,6 @@
 - 默认工作流写在 `workflow.yaml`，包含 `begin -> selection -> schema_linking -> context_retrieval -> example_retrieval -> sql_generation -> sql_validation -> sql_execution -> finalization`，失败后进入 `reflection_decision`、`reflection_fix`、`reasoning_rewrite` 或 `hitl`。
 - 后端入口是 `src/text_to_sql_demo/main.py` 的 `create_app()`。
 - API 编排集中在 `src/text_to_sql_demo/api/service.py` 的 `TextToSQLApiService`。
-- 前端入口是 `frontend/src/App.tsx`，API client 在 `frontend/src/api/client.ts`。
 
 ## 技术栈
 
@@ -36,8 +35,7 @@
 | 检索 | YAML fallback 的 Top-K 词法检索 | `retrieval/examples.py`、`retrieval/knowledge.py` |
 | 运行记录 | 内部 SQLite metadata store | `metadata/store.py` |
 | 可观测性 | request_id、结构化日志、Trace、SQL hash 摘要 | `observability/`、`workflow/state.py` |
-| 前端 | React 18、Vite、TypeScript、Vitest | `frontend/package.json`、`frontend/src/App.tsx` |
-| 测试 | pytest、ruff、Vitest、TypeScript build | `pyproject.toml`、`frontend/package.json` |
+| 测试 | pytest、ruff | `pyproject.toml`、`tests/` |
 
 ## 核心模块
 
@@ -53,14 +51,12 @@
 | 反思闭环 | `reflection/policy.py`、`nodes/error_reflection.py`、`nodes/sql_fix.py` | 错误分类、策略路由、修复历史、HITL | 修复有上限，失败可解释 |
 | Metadata | `metadata/store.py`、`memory/trusted.py` | 运行记录、Trace、收藏 SQL、反馈 | 区分业务库和内部库 |
 | Runtime config | `runtime/*.py` | 临时数据库和模型配置，`light/strong` 路由 | SecretStr、TTL、脱敏展示 |
-| 前端工作台 | `frontend/src/App.tsx`、`components/*`、`api/*` | 查询、编辑 SQL、Runtime、历史、Debug Trace | 用户视角和开发者视角分离 |
 
 ## 主链路
 
 ```mermaid
 sequenceDiagram
     participant User as 用户
-    participant UI as React 工作台
     participant API as FastAPI
     participant Service as TextToSQLApiService
     participant Engine as WorkflowEngine
@@ -68,8 +64,7 @@ sequenceDiagram
     participant DB as SQLite/目标库
     participant LLM as LLMClient
 
-    User->>UI: 输入自然语言问题
-    UI->>API: POST /api/v1/query
+    User->>API: POST /api/v1/query
     API->>Service: run_query(request)
     Service->>DB: 读取 Schema metadata
     Service->>Engine: run(WorkflowState)
@@ -80,14 +75,14 @@ sequenceDiagram
     Nodes-->>Engine: NodeResult + TraceEvent
     Engine-->>Service: final WorkflowState
     Service-->>API: serialize_run()
-    API-->>UI: SQL、结果、Trace、修复历史
+    API-->>User: SQL、结果、Trace、修复历史
 ```
 
 ## 已体现的项目级开发能力
 
 1. 可配置工作流：`workflow.yaml` 配置节点、边、最大步数、最大修复次数、模型 alias 和数据库连接。
 2. 节点扩展边界：`WorkflowEngine` 只依赖 `NodeFactory`，`NodeFactory` 只依赖 `NodeRegistry`，具体节点通过 `@register_node` 注册。
-3. 类型约束：后端大量使用 Pydantic 模型；前端通过 TypeScript interface 定义 API 响应。
+3. 类型约束：后端使用 Pydantic 模型约束配置、请求、状态和响应。
 4. LLM 解耦：业务节点依赖 `LLMClient` 协议，测试使用 `MockLLMClient`。
 5. Prompt 工程化：生成和修复 Prompt 模板放在 `configs/prompts/`，`PromptBuilder` 只注入裁剪后的上下文。
 6. SQL 安全链路：SQLGlot parse、只读 SELECT、schema 引用校验、执行方言一致性检查。
@@ -105,15 +100,14 @@ sequenceDiagram
 | 我会让 LLM 输出可测试 | `llm/client.py`、`llm/providers.py`、`tests/*llm*` | “真实 provider 被接口隔离，测试用 Mock LLM。” | 不说已经支持所有 provider |
 | 我重视 SQL 安全 | `sql/validator.py`、`execution/sql_executor.py`、`tests/unit/sql` | “LLM SQL 必须先 parse、只读校验和 schema 校验再执行。” | 不说应用层校验等于生产数据库权限隔离 |
 | 我会审查 AI 输出 | `tests/integration/test_demo_scenarios.py`、`observability/*`、`metadata/store.py` | “我要求测试覆盖成功、修复、终止，并检查日志脱敏和 trace。” | 不说 demo 已具备完整审计平台 |
-| 我能做产品级演示 | `frontend/src/App.tsx`、`frontend/src/components/*`、`frontend/src/api/client.ts` | “前端能展示查询、SQL、结果、历史、反馈和 Debug Trace。” | 不说这是成熟 BI 产品 |
 
 ## 当前完成度
 
 | 维度 | 当前状态 | 判断 |
 | --- | --- | --- |
-| MVP 可演示性 | 已具备自然语言查询、SQL 生成、校验执行、修复、Trace、前端工作台 | 较完整 |
+| API 主链路 | 已具备自然语言查询、SQL 生成、校验执行、修复、Trace 和运行记录接口 | 较完整 |
 | 工程化结构 | API、workflow、nodes、llm、sql、retrieval、runtime、metadata 分层明确 | 较强 |
-| 测试 | 后端 unit/integration 较多，前端有 Vitest | 较强 |
+| 测试 | unit/integration 覆盖核心节点、API 和修复路径 | 较强 |
 | 生产部署 | 缺少 Docker/CI、认证、密钥托管、持久 runtime config | demo 级 |
 | 数据安全 | 有 SQL 校验和脱敏日志，但不等于数据库权限隔离 | 需加固 |
 | 检索质量 | 当前是 YAML/SQLite + 词法 Top-K fallback | 可演示，非高召回生产 RAG |
@@ -127,9 +121,7 @@ sequenceDiagram
 - OpenAI-compatible provider 可用，但多 provider 策略、重试、超时、熔断、预算控制仍可增强。
 - Schema 来源以 introspection 为主，`SchemaConfig.catalog_source = yaml` 的配置模型存在，但主链路 YAML schema loader 待确认。
 - 检索是词法 Top-K，没有 embedding/vector backend、召回评估或离线评测集。
-- 前端 Runtime 配置存在基本表单和创建时连接测试，但缺少独立“测试连接”、更细的 provider 校验和密钥托管。
 - CI/CD、Dockerfile、生产部署手册、监控指标、认证、多租户仍未实现。
-- 待确认：当前工作区前端组件有未提交改动，部分既有 docs 的组件树可能需要同步。
 
 ## 推断的开发阶段
 
@@ -139,10 +131,9 @@ sequenceDiagram
 2. 可配置真实 LLM 与结构化数据库连接：`接入可配置真实 LLM API`、`Add structured database connection config`
 3. 可观测性与异常体系：`[observability] 增加日志系统与异常体系`
 4. Runtime 配置：`[runtime] 增加运行时配置存储`、`[api] 增加运行时配置接口`
-5. 前端演示：`[frontend] 增加运行配置面板`
-6. Agentic 生成和 SQL 修复闭环：`[node] 补齐Agentic生成链路`、`[sql] 增强定向修复闭环`
-7. 对齐 datus 思想和 metadata 沉淀：`[workflow] 对齐datus核心链路`、`[metadata] 增加运行记录沉淀`
-8. 记忆体系和数据源发现：`[memory] 完善三层记忆架构`、`[data]新增数据库自动扫描`
-9. 文档整理：`[docs]项目文档全量整理优化`
+5. Agentic 生成和 SQL 修复闭环：`[node] 补齐Agentic生成链路`、`[sql] 增强定向修复闭环`
+6. 对齐 datus 思想和 metadata 沉淀：`[workflow] 对齐datus核心链路`、`[metadata] 增加运行记录沉淀`
+7. 记忆体系和数据源发现：`[memory] 完善三层记忆架构`、`[data]新增数据库自动扫描`
+8. 文档整理：`[docs]项目文档全量整理优化`
 
 这些阶段不能描述为“历史真实 Prompt 顺序”，只能作为复盘时构造 Prompt Playbook 的工程化参考。

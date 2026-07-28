@@ -20,7 +20,7 @@ def query(request: QueryRequest) -> dict[str, Any]:
 - `target_dialect`，默认 `sqlite`
 - `max_attempts`，范围 `0..3`
 - `debug`
-- `runtime_config_id`，可选，使用前端创建的短生命周期数据库和模型配置
+- `runtime_config_id`，可选，使用 `POST /api/v1/runtime/configs` 创建的短生命周期数据库和模型配置
 
 ## 2. TextToSQLApiService.run_query 初始化运行状态
 

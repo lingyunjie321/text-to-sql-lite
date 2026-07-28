@@ -34,7 +34,7 @@
 | `target_dialect` | `string` | 否 | `sqlite` | 目标 SQL 方言，可选 `sqlite`/`postgres`/`mysql` |
 | `max_attempts` | `int` | 否 | `3` | 最大修复尝试次数，范围 0-3 |
 | `debug` | `bool` | 否 | `false` | 是否返回调试信息（trace summary 等） |
-| `runtime_config_id` | `string` | 否 | - | 运行时配置 ID，使用前端创建的临时配置 |
+| `runtime_config_id` | `string` | 否 | - | 通过 `POST /api/v1/runtime/configs` 创建的短生命周期配置 ID |
 | `database_preset_id` | `string` | 否 | - | 数据库预设 ID，指定自动发现的 SQLite 数据源 |
 
 **响应**（`serialize_run` 输出）：
