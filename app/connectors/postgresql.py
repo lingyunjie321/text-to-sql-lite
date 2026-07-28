@@ -13,6 +13,25 @@ from app.connectors.errors import (
     PostgreSQLConnectorError,
     normalize_database_error,
 )
+from app.connectors.metadata import (
+    ColumnMetadata,
+    ForeignKeyMetadata,
+    MetadataScope,
+    PrimaryKeyMetadata,
+    SchemaSnapshot,
+    TableMetadata,
+    UniqueConstraintMetadata,
+    UniqueIndexMetadata,
+    build_schema_snapshot,
+    empty_schema_snapshot,
+    normalize_metadata_scope,
+)
+from app.connectors.metadata_queries import (
+    FOREIGN_KEYS_SQL,
+    KEY_CONSTRAINTS_SQL,
+    TABLE_COLUMNS_SQL,
+    UNIQUE_INDEXES_SQL,
+)
 from app.connectors.models import (
     ExecutionResult,
     ResultColumn,
@@ -88,6 +107,119 @@ class PostgreSQLConnector:
                     raise normalized from None
         raise AssertionError("unreachable")
 
+    def read_metadata(
+        self,
+        allowed_schemas: tuple[str, ...],
+        allowed_tables: tuple[str, ...],
+    ) -> SchemaSnapshot:
+        scope = normalize_metadata_scope(
+            allowed_schemas,
+            allowed_tables,
+        )
+        if scope.is_empty:
+            return empty_schema_snapshot()
+
+        for retry_index in range(
+            self._settings.connection_retry_count + 1
+        ):
+            try:
+                return self._read_metadata_once(scope)
+            except Exception as error:
+                normalized = normalize_database_error(error)
+                if (
+                    not normalized.details.retryable
+                    or retry_index
+                    >= self._settings.connection_retry_count
+                ):
+                    raise normalized from None
+        raise AssertionError("unreachable")
+
+    def _read_metadata_once(
+        self,
+        scope: MetadataScope,
+    ) -> SchemaSnapshot:
+        try:
+            with self._pool.connection(
+                timeout=self._settings.pool_timeout_seconds
+            ) as connection:
+                with connection.transaction():
+                    connection.execute("SET TRANSACTION READ ONLY")
+                    connection.execute(
+                        "SELECT set_config('statement_timeout', %s, true)",
+                        (
+                            f"{self._settings.statement_timeout_seconds}s",
+                        ),
+                    )
+                    params = (
+                        scope.schema_parameters,
+                        scope.table_parameters,
+                    )
+                    table_rows = connection.execute(
+                        TABLE_COLUMNS_SQL, params
+                    ).fetchall()
+                    key_rows = connection.execute(
+                        KEY_CONSTRAINTS_SQL, params
+                    ).fetchall()
+                    foreign_key_rows = connection.execute(
+                        FOREIGN_KEYS_SQL, params
+                    ).fetchall()
+                    unique_index_rows = connection.execute(
+                        UNIQUE_INDEXES_SQL, params
+                    ).fetchall()
+                    authorized = set(scope.table_pairs)
+                    tables = _map_tables(
+                        [
+                            row
+                            for row in table_rows
+                            if (str(row[0]), str(row[1]))
+                            in authorized
+                        ]
+                    )
+                    primary_keys, unique_constraints = _map_keys(
+                        [
+                            row
+                            for row in key_rows
+                            if (str(row[2]), str(row[3]))
+                            in authorized
+                        ]
+                    )
+                    foreign_keys = _map_foreign_keys(
+                        [
+                            row
+                            for row in foreign_key_rows
+                            if (
+                                (str(row[1]), str(row[2]))
+                                in authorized
+                                and (str(row[4]), str(row[5]))
+                                in authorized
+                            )
+                        ]
+                    )
+                    unique_indexes = _map_unique_indexes(
+                        [
+                            row
+                            for row in unique_index_rows
+                            if (str(row[1]), str(row[2]))
+                            in authorized
+                        ]
+                    )
+                    _validate_metadata_references(
+                        tables=tables,
+                        primary_keys=primary_keys,
+                        foreign_keys=foreign_keys,
+                        unique_constraints=unique_constraints,
+                        unique_indexes=unique_indexes,
+                    )
+                    return build_schema_snapshot(
+                        tables=tables,
+                        primary_keys=primary_keys,
+                        foreign_keys=foreign_keys,
+                        unique_constraints=unique_constraints,
+                        unique_indexes=unique_indexes,
+                    )
+        except Exception as error:
+            raise normalize_database_error(error) from None
+
     def _execute_once(self, sql: str) -> ExecutionResult:
         try:
             with self._pool.connection(
@@ -149,3 +281,287 @@ class PostgreSQLConnector:
                     )
         except Exception as error:
             raise normalize_database_error(error) from None
+
+
+def _map_tables(
+    rows: list[tuple[object, ...]],
+) -> tuple[TableMetadata, ...]:
+    grouped: dict[
+        tuple[str, str],
+        tuple[str, str | None, list[ColumnMetadata]],
+    ] = {}
+    for row in rows:
+        schema_name = str(row[0])
+        table_name = str(row[1])
+        table_key = (schema_name, table_name)
+        relation_kind = str(row[2])
+        table_comment = None if row[3] is None else str(row[3])
+        column = ColumnMetadata(
+            schema_name=schema_name,
+            table_name=table_name,
+            column_name=str(row[4]),
+            ordinal_position=int(row[5]),
+            data_type=str(row[6]),
+            formatted_type=str(row[7]),
+            nullable=bool(row[8]),
+            comment=None if row[9] is None else str(row[9]),
+        )
+        if table_key not in grouped:
+            grouped[table_key] = (
+                relation_kind,
+                table_comment,
+                [column],
+            )
+        else:
+            relation, comment, columns = grouped[table_key]
+            if relation != relation_kind or comment != table_comment:
+                raise _metadata_schema_error()
+            if any(
+                existing.ordinal_position
+                == column.ordinal_position
+                for existing in columns
+            ):
+                raise _metadata_schema_error()
+            grouped[table_key][2].append(column)
+
+    return tuple(
+        TableMetadata(
+            schema_name=schema_name,
+            table_name=table_name,
+            relation_kind=relation_kind,
+            comment=comment,
+            columns=tuple(columns),
+        )
+        for (schema_name, table_name), (
+            relation_kind,
+            comment,
+            columns,
+        ) in grouped.items()
+    )
+
+
+def _map_keys(
+    rows: list[tuple[object, ...]],
+) -> tuple[
+    tuple[PrimaryKeyMetadata, ...],
+    tuple[UniqueConstraintMetadata, ...],
+]:
+    grouped: dict[
+        tuple[str, str, str, str],
+        list[tuple[int, str]],
+    ] = {}
+    for row in rows:
+        key = (
+            str(row[1]),
+            str(row[2]),
+            str(row[3]),
+            str(row[0]),
+        )
+        grouped.setdefault(key, []).append(
+            (int(row[5]), str(row[4]))
+        )
+
+    primary_keys: list[PrimaryKeyMetadata] = []
+    unique_constraints: list[UniqueConstraintMetadata] = []
+    for (
+        kind,
+        schema_name,
+        table_name,
+        constraint_name,
+    ), positioned_columns in grouped.items():
+        columns = _ordered_columns(positioned_columns)
+        if kind == "p":
+            primary_keys.append(
+                PrimaryKeyMetadata(
+                    constraint_name=constraint_name,
+                    schema_name=schema_name,
+                    table_name=table_name,
+                    columns=columns,
+                )
+            )
+        elif kind == "u":
+            unique_constraints.append(
+                UniqueConstraintMetadata(
+                    constraint_name=constraint_name,
+                    schema_name=schema_name,
+                    table_name=table_name,
+                    columns=columns,
+                )
+            )
+        else:
+            raise _metadata_schema_error()
+    return tuple(primary_keys), tuple(unique_constraints)
+
+
+def _map_foreign_keys(
+    rows: list[tuple[object, ...]],
+) -> tuple[ForeignKeyMetadata, ...]:
+    grouped: dict[
+        tuple[str, str, str, str, str],
+        list[tuple[int, str, str]],
+    ] = {}
+    for row in rows:
+        key = (
+            str(row[1]),
+            str(row[2]),
+            str(row[0]),
+            str(row[4]),
+            str(row[5]),
+        )
+        grouped.setdefault(key, []).append(
+            (int(row[7]), str(row[3]), str(row[6]))
+        )
+
+    foreign_keys: list[ForeignKeyMetadata] = []
+    for (
+        source_schema,
+        source_table,
+        constraint_name,
+        target_schema,
+        target_table,
+    ), positioned_pairs in grouped.items():
+        positions = [position for position, _, _ in positioned_pairs]
+        if not positions or len(positions) != len(set(positions)):
+            raise _metadata_schema_error()
+        ordered_pairs = sorted(
+            positioned_pairs,
+            key=lambda item: item[0],
+        )
+        foreign_keys.append(
+            ForeignKeyMetadata(
+                constraint_name=constraint_name,
+                source_schema=source_schema,
+                source_table=source_table,
+                source_columns=tuple(
+                    source_column
+                    for _, source_column, _ in ordered_pairs
+                ),
+                target_schema=target_schema,
+                target_table=target_table,
+                target_columns=tuple(
+                    target_column
+                    for _, _, target_column in ordered_pairs
+                ),
+            )
+        )
+    return tuple(foreign_keys)
+
+
+def _map_unique_indexes(
+    rows: list[tuple[object, ...]],
+) -> tuple[UniqueIndexMetadata, ...]:
+    unique_indexes: list[UniqueIndexMetadata] = []
+    for row in rows:
+        raw_columns = row[3]
+        if not isinstance(raw_columns, (list, tuple)):
+            raise _metadata_schema_error()
+        columns = tuple(str(column) for column in raw_columns)
+        if not columns:
+            raise _metadata_schema_error()
+        unique_indexes.append(
+            UniqueIndexMetadata(
+                index_name=str(row[0]),
+                schema_name=str(row[1]),
+                table_name=str(row[2]),
+                columns=columns,
+                definition=str(row[4]),
+                predicate=None if row[5] is None else str(row[5]),
+            )
+        )
+    return tuple(unique_indexes)
+
+
+def _ordered_columns(
+    positioned_columns: list[tuple[int, str]],
+) -> tuple[str, ...]:
+    positions = [position for position, _ in positioned_columns]
+    if not positions or len(positions) != len(set(positions)):
+        raise _metadata_schema_error()
+    return tuple(
+        column
+        for _, column in sorted(
+            positioned_columns,
+            key=lambda item: item[0],
+        )
+    )
+
+
+def _validate_metadata_references(
+    *,
+    tables: tuple[TableMetadata, ...],
+    primary_keys: tuple[PrimaryKeyMetadata, ...],
+    foreign_keys: tuple[ForeignKeyMetadata, ...],
+    unique_constraints: tuple[UniqueConstraintMetadata, ...],
+    unique_indexes: tuple[UniqueIndexMetadata, ...],
+) -> None:
+    table_identities = {
+        (table.schema_name, table.table_name)
+        for table in tables
+    }
+    column_identities = {
+        (
+            column.schema_name,
+            column.table_name,
+            column.column_name,
+        )
+        for table in tables
+        for column in table.columns
+    }
+
+    for key in (*primary_keys, *unique_constraints, *unique_indexes):
+        table_identity = (key.schema_name, key.table_name)
+        if table_identity not in table_identities or any(
+            (key.schema_name, key.table_name, column)
+            not in column_identities
+            for column in key.columns
+        ):
+            raise _metadata_schema_error()
+
+    for foreign_key in foreign_keys:
+        source_table = (
+            foreign_key.source_schema,
+            foreign_key.source_table,
+        )
+        target_table = (
+            foreign_key.target_schema,
+            foreign_key.target_table,
+        )
+        if (
+            source_table not in table_identities
+            or target_table not in table_identities
+            or len(foreign_key.source_columns)
+            != len(foreign_key.target_columns)
+            or any(
+                (
+                    foreign_key.source_schema,
+                    foreign_key.source_table,
+                    column,
+                )
+                not in column_identities
+                for column in foreign_key.source_columns
+            )
+            or any(
+                (
+                    foreign_key.target_schema,
+                    foreign_key.target_table,
+                    column,
+                )
+                not in column_identities
+                for column in foreign_key.target_columns
+            )
+        ):
+            raise _metadata_schema_error()
+
+
+def _metadata_schema_error() -> PostgreSQLConnectorError:
+    return PostgreSQLConnectorError(
+        DatabaseError(
+            sqlstate=None,
+            error_type=ErrorType.SCHEMA_ERROR,
+            code="DB_SCHEMA_ERROR",
+            retryable=False,
+            public_message=(
+                "The database metadata snapshot is inconsistent."
+            ),
+        )
+    )

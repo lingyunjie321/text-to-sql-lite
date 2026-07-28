@@ -1,6 +1,6 @@
 # Stage 2 PostgreSQL Schema Introspection Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Add authorization-scoped PostgreSQL metadata snapshots with tables, columns, comments, PK/FK, unique constraint/index information, and deterministic schema-version fingerprints.
 
@@ -52,7 +52,7 @@
 - Produces: `ColumnMetadata`, `TableMetadata`, `PrimaryKeyMetadata`, `ForeignKeyMetadata`, `UniqueConstraintMetadata`, `UniqueIndexMetadata`, `SchemaSnapshot`, `empty_schema_snapshot()`, and `build_schema_snapshot(...)`.
 - Consumes: only Python standard-library values; no psycopg objects.
 
-- [ ] **Step 1: Write failing immutable-model tests**
+- [x] **Step 1: Write failing immutable-model tests**
 
 Create literal model fixtures and verify frozen behavior:
 
@@ -83,7 +83,7 @@ def test_column_metadata_is_immutable() -> None:
 
 Instantiate every model from the design and assert its tuple fields remain tuples.
 
-- [ ] **Step 2: Write failing fingerprint tests**
+- [x] **Step 2: Write failing fingerprint tests**
 
 Use hand-built snapshots to prove:
 
@@ -116,7 +116,7 @@ def test_schema_version_is_independent_of_input_order() -> None:
     assert first.schema_version == second.schema_version
 ```
 
-- [ ] **Step 3: Run tests and verify expected failure**
+- [x] **Step 3: Run tests and verify expected failure**
 
 Run:
 
@@ -126,7 +126,7 @@ Run:
 
 Expected: collection fails because `app.connectors.metadata` does not exist.
 
-- [ ] **Step 4: Implement exact metadata model shapes**
+- [x] **Step 4: Implement exact metadata model shapes**
 
 Use frozen, slotted dataclasses. Define:
 
@@ -169,7 +169,7 @@ class SchemaSnapshot:
     schema_version: str
 ```
 
-- [ ] **Step 5: Implement canonical assembly and fingerprint**
+- [x] **Step 5: Implement canonical assembly and fingerprint**
 
 `build_schema_snapshot()` accepts unsorted tuples, sorts every collection by
 the keys in the design, sorts each table's columns by `ordinal_position`, derives
@@ -189,7 +189,7 @@ schema_version = hashlib.sha256(payload).hexdigest()
 Do not include an empty or provisional `schema_version` in `canonical_data`.
 `empty_schema_snapshot()` must call the same builder with empty tuples.
 
-- [ ] **Step 6: Export public contracts and run focused tests**
+- [x] **Step 6: Export public contracts and run focused tests**
 
 Export all models and builders from `app/connectors/__init__.py`, then run:
 
@@ -200,7 +200,7 @@ Export all models and builders from `app/connectors/__init__.py`, then run:
 
 Expected: all metadata model and fingerprint tests pass; compile exits 0.
 
-- [ ] **Step 7: Review checkpoint**
+- [x] **Step 7: Review checkpoint**
 
 Review that `metadata.py` imports neither psycopg nor application config, contains
 no mutable collection field, and contains no cache or Schema Linking code.
@@ -225,7 +225,7 @@ git commit -m "feat: add immutable schema metadata contracts"
 - Consumes: `allowed_schemas: tuple[str, ...]`, `allowed_tables: tuple[str, ...]`.
 - Produces: `MetadataScope`, `normalize_metadata_scope(...)`, and fixed SQL constants `TABLE_COLUMNS_SQL`, `KEY_CONSTRAINTS_SQL`, `FOREIGN_KEYS_SQL`, `UNIQUE_INDEXES_SQL`.
 
-- [ ] **Step 1: Write failing scope tests**
+- [x] **Step 1: Write failing scope tests**
 
 Cover:
 
@@ -253,7 +253,7 @@ Also verify:
 - either empty input produces `scope.is_empty is True`;
 - identifiers are not lowercased.
 
-- [ ] **Step 2: Run the scope tests and verify failure**
+- [x] **Step 2: Run the scope tests and verify failure**
 
 Run:
 
@@ -263,7 +263,7 @@ Run:
 
 Expected: tests fail because `normalize_metadata_scope` is missing.
 
-- [ ] **Step 3: Implement `MetadataScope`**
+- [x] **Step 3: Implement `MetadataScope`**
 
 Use:
 
@@ -289,7 +289,7 @@ class MetadataScope:
 Split each authorized table once at the first dot. Reject an empty side and
 filter pairs whose Schema is not allowed.
 
-- [ ] **Step 4: Add the shared authorized CTE**
+- [x] **Step 4: Add the shared authorized CTE**
 
 Every query starts with:
 
@@ -311,7 +311,7 @@ JOIN authorized AS auth
 The first parameter is `scope.schema_parameters`, the second is
 `scope.table_parameters`. Do not create dynamic placeholder counts.
 
-- [ ] **Step 5: Define the table/column query**
+- [x] **Step 5: Define the table/column query**
 
 `TABLE_COLUMNS_SQL` selects these aliases in this order:
 
@@ -332,7 +332,7 @@ col_description(relation.oid, attribute.attnum) AS column_comment
 Filter `relation.relkind IN ('r', 'p')`, `attribute.attnum > 0`, and
 `NOT attribute.attisdropped`. Order by Schema, table, and `attnum`.
 
-- [ ] **Step 6: Define constraint and index queries**
+- [x] **Step 6: Define constraint and index queries**
 
 `KEY_CONSTRAINTS_SQL` returns `contype IN ('p', 'u')`, one row per key column,
 using `unnest(constraint.conkey) WITH ORDINALITY`. It returns constraint name,
@@ -362,7 +362,7 @@ indexes referenced by `pg_constraint.conindid`. Return one row per index with:
 Exclude expression indexes when any `indkey` entry is zero; Stage 2 must not
 invent a column name for an expression.
 
-- [ ] **Step 7: Verify query constants are parameterized**
+- [x] **Step 7: Verify query constants are parameterized**
 
 Run:
 
@@ -394,7 +394,7 @@ git commit -m "feat: define authorized PostgreSQL metadata queries"
 - Produces: `PostgreSQLConnector.read_metadata(...)`,
   `_read_metadata_once(scope)`, and table/column mapping inside one read-only transaction.
 
-- [ ] **Step 1: Write failing empty-scope unit test**
+- [x] **Step 1: Write failing empty-scope unit test**
 
 ```python
 def test_empty_metadata_scope_does_not_acquire_connection(settings) -> None:
@@ -407,7 +407,7 @@ def test_empty_metadata_scope_does_not_acquire_connection(settings) -> None:
     connector._pool.connection.assert_not_called()
 ```
 
-- [ ] **Step 2: Write failing transaction/query unit test**
+- [x] **Step 2: Write failing transaction/query unit test**
 
 Use a narrow fake connection/cursor that mirrors psycopg row behavior. Assert:
 
@@ -417,7 +417,7 @@ Use a narrow fake connection/cursor that mirrors psycopg row behavior. Assert:
 - table and column rows become a `TableMetadata` with columns in `attnum` order;
 - raw cursor/connection objects never appear in the snapshot.
 
-- [ ] **Step 3: Write the first live Pagila metadata test**
+- [x] **Step 3: Write the first live Pagila metadata test**
 
 ```python
 @pytest.mark.integration
@@ -447,7 +447,7 @@ def test_reads_authorized_film_columns(
 Before implementation, both unit and integration tests must fail because
 `read_metadata()` is missing.
 
-- [ ] **Step 4: Implement the public method and empty boundary**
+- [x] **Step 4: Implement the public method and empty boundary**
 
 Add:
 
@@ -467,7 +467,7 @@ The public method retries `_read_metadata_once(scope)` only for normalized
 class `08` errors, using `connection_retry_count`. Every retry receives the same
 immutable `MetadataScope`.
 
-- [ ] **Step 5: Implement one metadata transaction**
+- [x] **Step 5: Implement one metadata transaction**
 
 Inside `_read_metadata_once()`:
 
@@ -488,7 +488,7 @@ with self._pool.connection(timeout=self._settings.pool_timeout_seconds) as conne
 
 Wrap errors through `normalize_database_error()` exactly as Stage 1 does.
 
-- [ ] **Step 6: Map table and column rows**
+- [x] **Step 6: Map table and column rows**
 
 Group by `(schema_name, table_name)`. Construct `ColumnMetadata` from literal
 column positions/aliases returned by the query. Reject duplicate ordinal
@@ -497,7 +497,7 @@ positions within one table with a public-safe `SCHEMA_ERROR`.
 Return a provisional assembled snapshot after Task 4 adds relationships; until
 then pass empty relationship tuples to `build_schema_snapshot()`.
 
-- [ ] **Step 7: Run focused unit and live tests**
+- [x] **Step 7: Run focused unit and live tests**
 
 Run:
 
@@ -529,7 +529,7 @@ git commit -m "feat: read authorized PostgreSQL table metadata"
 - Consumes: catalog rows from Task 3.
 - Produces: complete `SchemaSnapshot` assembly and class-08 whole-snapshot retry.
 
-- [ ] **Step 1: Write failing relationship assembly tests**
+- [x] **Step 1: Write failing relationship assembly tests**
 
 Use shuffled literal rows for:
 
@@ -542,7 +542,7 @@ Use shuffled literal rows for:
 
 Assert exact tuple order in every model.
 
-- [ ] **Step 2: Write failing authorization and malformed-row tests**
+- [x] **Step 2: Write failing authorization and malformed-row tests**
 
 Prove:
 
@@ -552,7 +552,7 @@ Prove:
   `PostgreSQLConnectorError` with `SCHEMA_ERROR`, `retryable=False`, and no object name
   in its public message.
 
-- [ ] **Step 3: Write failing retry tests**
+- [x] **Step 3: Write failing retry tests**
 
 Patch `_read_metadata_once` with:
 
@@ -569,7 +569,7 @@ assert connector._read_metadata_once.call_args_list == [call(scope), call(scope)
 Parameterize retry counts 0, 1, and 3. Assert permission, timeout, Schema,
 resource, pool-timeout, and unknown errors call once.
 
-- [ ] **Step 4: Implement key grouping**
+- [x] **Step 4: Implement key grouping**
 
 Group PK/unique constraint rows by
 `(kind, schema_name, table_name, constraint_name)`, sort columns by the returned
@@ -580,13 +580,13 @@ Group FK rows by
 Sort by pair position and append source/target columns together so pairing cannot
 drift.
 
-- [ ] **Step 5: Implement independent unique-index mapping**
+- [x] **Step 5: Implement independent unique-index mapping**
 
 For each query row, convert the PostgreSQL `text[]` column list to a tuple,
 preserve the complete `definition`, and preserve nullable `predicate`. Reject
 an empty column list as `SCHEMA_ERROR`.
 
-- [ ] **Step 6: Validate model references before fingerprinting**
+- [x] **Step 6: Validate model references before fingerprinting**
 
 Build authorized sets of table identities and column triplets. Every PK,
 unique constraint/index, and both sides of every FK must resolve. Raise:
@@ -605,13 +605,13 @@ PostgreSQLConnectorError(
 
 Do not expose the missing identifier.
 
-- [ ] **Step 7: Complete whole-call retry**
+- [x] **Step 7: Complete whole-call retry**
 
 Reuse the same loop shape as `execute()` without sharing mutable counters or
 creating SQL attempts. Preserve already normalized errors and retry only when
 `details.retryable` is true.
 
-- [ ] **Step 8: Run all metadata unit tests**
+- [x] **Step 8: Run all metadata unit tests**
 
 Run:
 
@@ -641,7 +641,7 @@ git commit -m "feat: assemble PostgreSQL metadata relationships"
 - Consumes: complete Stage 2 Connector interface.
 - Produces: evidence for the Pagila portion of the Connector Metadata Contract.
 
-- [ ] **Step 1: Add failing PK and FK tests**
+- [x] **Step 1: Add failing PK and FK tests**
 
 Read the exact scopes required by each assertion:
 
@@ -660,7 +660,7 @@ Assert:
 - `film_language_id_fkey.target_columns == ("language_id",)`;
 - source is `public.film`, target is `public.language`.
 
-- [ ] **Step 2: Add failing unique-index tests**
+- [x] **Step 2: Add failing unique-index tests**
 
 For scope `public.store`, assert:
 
@@ -674,7 +674,7 @@ For scope `public.rental`, assert the index
 `idx_unq_rental_rental_date_inventory_id_customer_id` has columns
 `("rental_date", "inventory_id", "customer_id")`.
 
-- [ ] **Step 3: Add failing authorization tests**
+- [x] **Step 3: Add failing authorization tests**
 
 Read only `public.film` and assert:
 
@@ -684,13 +684,13 @@ Read only `public.film` and assert:
 - unknown `public.not_a_table` produces an empty snapshot without revealing whether
   another hidden table exists.
 
-- [ ] **Step 4: Add fingerprint stability test**
+- [x] **Step 4: Add fingerprint stability test**
 
 Read the same authorized scope twice using one open Connector and assert identical
 snapshots and identical `schema_version`. Assert the value matches the lowercase
 hex pattern, not a hard-coded digest tied to an implementation serialization.
 
-- [ ] **Step 5: Run Stage 2 live tests and fix only observed defects**
+- [x] **Step 5: Run Stage 2 live tests and fix only observed defects**
 
 Run:
 
@@ -701,7 +701,7 @@ Run:
 Expected: all live Pagila metadata tests pass. Any correction must remain within
 metadata row mapping, query constants, or snapshot assembly.
 
-- [ ] **Step 6: Run Stage 1 regression suites**
+- [x] **Step 6: Run Stage 1 regression suites**
 
 Run:
 
@@ -712,7 +712,7 @@ Run:
 
 Expected: every Stage 1 and Stage 2 test passes.
 
-- [ ] **Step 7: Review checkpoint**
+- [x] **Step 7: Review checkpoint**
 
 Run a credential/object leakage scan:
 
@@ -745,7 +745,7 @@ git commit -m "test: prove Pagila metadata connector contract"
 - Consumes: verified implementation and test output from Tasks 1–5.
 - Produces: reproducible Stage 2 usage, catalog/fingerprint decisions, and explicit Stage 3 exclusions.
 
-- [ ] **Step 1: Write the decision record**
+- [x] **Step 1: Write the decision record**
 
 Record:
 
@@ -760,7 +760,7 @@ Record:
 - test counts;
 - Stage 3 SQLGlot safety-validation exclusion.
 
-- [ ] **Step 2: Update README usage**
+- [x] **Step 2: Update README usage**
 
 Add a Stage 2 example:
 
@@ -775,7 +775,7 @@ with PostgreSQLConnector(settings) as connector:
 Explain that callers must provide server-derived authorization scope and must not
 use user question text to expand it.
 
-- [ ] **Step 3: Run deterministic verification**
+- [x] **Step 3: Run deterministic verification**
 
 Run:
 
@@ -788,7 +788,7 @@ docker compose -f infrastructure/pagila/compose.yaml config --quiet
 
 Expected: all commands exit 0.
 
-- [ ] **Step 4: Verify protected files**
+- [x] **Step 4: Verify protected files**
 
 Before implementation, record SHA-256 for:
 
@@ -801,7 +801,7 @@ shasum -a 256 \
 
 Run the same command at completion and require byte-for-byte identical values.
 
-- [ ] **Step 5: Audit Stage 2 scope**
+- [x] **Step 5: Audit Stage 2 scope**
 
 Run:
 
@@ -813,7 +813,7 @@ rg -n 'BM25|top_k|sqlglot|GenerateSQL|LangGraph|FastAPI' app
 Expected: only Stage 1 Connector/config files and Stage 2 metadata files exist;
 the scope scan finds no later-stage implementation.
 
-- [ ] **Step 6: Stop PostgreSQL without deleting data**
+- [x] **Step 6: Stop PostgreSQL without deleting data**
 
 Run:
 
@@ -823,7 +823,7 @@ docker compose -f infrastructure/pagila/compose.yaml down
 
 Expected: the container and network stop while the named Pagila volume remains.
 
-- [ ] **Step 7: Final review checkpoint**
+- [x] **Step 7: Final review checkpoint**
 
 Produce a Stage 2 report containing:
 

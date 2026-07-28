@@ -14,7 +14,17 @@ Text-to-SQL 闭环。
 - SQLSTATE 错误归一化、脱敏和有限连接重试；
 - 单元测试与真实 PostgreSQL 集成测试。
 
-Schema introspection 和版本指纹属于第二阶段，尚未实现。
+第二开发阶段已实现：
+
+- 授权范围内的 Schema、表、字段、类型、nullable 和注释读取；
+- 复合 PK/FK、unique constraint 和独立 unique index 读取；
+- 固定参数化 `pg_catalog` 查询和只读一致性快照；
+- 与 psycopg 解耦的不可变元数据模型；
+- 规范 JSON 的确定性 `schema_version` SHA-256 指纹；
+- 查询与组装两层授权过滤、公开安全错误和连接类有限重试；
+- 单元测试与真实 Pagila Metadata Contract 集成测试。
+
+SQLGlot AST 与安全校验属于第三阶段，尚未实现。
 
 ## 本地准备
 
@@ -61,6 +71,25 @@ docker compose -f infrastructure/pagila/compose.yaml up -d --wait
 ```
 
 数据库首次创建时会导入锁定 Pagila 数据，并创建只读应用角色。
+
+## 读取授权元数据
+
+```python
+from app.config import load_database_settings
+from app.connectors.postgresql import PostgreSQLConnector
+
+
+settings = load_database_settings()
+with PostgreSQLConnector(settings) as connector:
+    snapshot = connector.read_metadata(
+        ("public",),
+        ("public.film", "public.language"),
+    )
+```
+
+`allowed_schemas` 和 `allowed_tables` 必须来自服务端可信授权结果。不得根据
+用户问题文本扩大范围。表名必须使用 `schema.table` 形式；任一授权范围为空时
+返回确定性的空快照，不扫描数据库中其他可见对象。
 
 ## 运行测试
 
