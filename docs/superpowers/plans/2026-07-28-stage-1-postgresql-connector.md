@@ -21,7 +21,7 @@
 - Only SQLSTATE class `08` connection failures retry the same Connector call. Authentication, permission, pool timeout, SQL, resource, and query timeout failures do not retry.
 - Schema introspection belongs to Stage 2 and must not be added here.
 - Do not modify `docs/Text-to-SQL项目复现规格.md`, `docs/Text-to-SQL测试与验收规格.md`, or `evaluation/cases/pagila_mvp.jsonl`.
-- Execute this plan on an isolated `codex/` branch in the existing Git repository. Use each task's suggested commit only after its verification checkpoint passes.
+- This plan is complete and its implementation is on `main`. Follow the repository's single-branch workflow in `AGENTS.md`; do not create a worktree, `codex/*` branch, or Pull Request unless the user explicitly requests one.
 
 ---
 

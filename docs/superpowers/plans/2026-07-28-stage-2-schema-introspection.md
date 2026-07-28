@@ -21,6 +21,7 @@
 - Business aliases have no approved source. Model `aliases` as an empty tuple and do not infer business meaning.
 - Do not implement Schema Linking, BM25, Top-K, JOIN path search, SQLGlot, generation, Workflow, API, Trace, or caching.
 - Execute this plan only after the user explicitly authorizes Stage 2 coding. The current request authorizes this document, not its implementation.
+- When authorized, execute directly on `main` under the single-branch workflow in `AGENTS.md`; do not create a worktree, `codex/*` branch, or Pull Request unless the user explicitly requests one.
 
 ---
 

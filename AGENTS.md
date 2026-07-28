@@ -20,4 +20,13 @@
 6. 如果代码实现与主规格或测试规格冲突，应以主规格和测试规格为准，
    并在修改代码前指出冲突。
 7. 不需要每次全文阅读所有文档，只需读取 MVP 编码入口和当前任务相关章节。
-8. 注意⚠️：后续提交代码推仓时，不可推Text-to-SQL原项目参考信息.md
+8. 注意⚠️：后续提交代码推仓时，不可推
+   `docs/Text-to-SQL原项目参考信息.md`。
+
+## Git 单分支工作流
+
+1. 本仓库只使用 `main` 分支，开发结果直接提交到本地 `main`。
+2. 除非用户明确要求，不得创建额外 worktree、`codex/*` 分支或 Pull Request。
+3. 完成相关验证后，直接执行 `git push origin main`。
+4. `origin` 必须保持为
+   `https://github.com/lingyunjie321/text-to-sql-lite.git`。
