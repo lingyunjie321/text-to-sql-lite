@@ -92,7 +92,22 @@ Text-to-SQL 闭环。
   SQL repair count；
 - Stub Provider + 真实 Pagila 的首次成功和 Schema 修复集成测试。
 
-FastAPI 接口属于第九阶段，尚未实现。
+第九开发阶段已实现：
+
+- 固定 FastAPI 0.139.2 和同步 `POST /api/v1/text-to-sql`；
+- 严格 `QueryRequest`/`QueryResponse`、全部终态互斥和失败隐藏 SQL；
+- 递归 JSON 结果类型和非 JSON 值 fail-closed，OpenAPI 不使用任意对象；
+- 独立 request/trace UUID、固定可信身份和未授权 debug 的前置 403；
+- 启动时强制加载数据库/模型配置、打开 Connector，关闭时安全回收；
+- 启动前锁定 `pagila` datasource、`public` Schema 和 MVP 所需 13 张表的
+  服务端 allowlist；
+- 未知 datasource、Schema 扩权和依赖注入零 Provider/Connector 调用；
+- 422 不回显非法输入；403、500 和公开错误脱敏，未知异常不返回堆栈、DSN
+  或 Prompt；
+- TestClient → Workflow → 真实 Pagila 的首次成功、合法空结果、一次修复和危险
+  SQL 零执行集成测试。
+
+Trace、Comparator 和 Pagila 离线评测属于第十阶段，尚未实现。
 
 ## 本地准备
 
@@ -273,6 +288,33 @@ result = run_workflow(
 `WorkflowContext` 中的数据源和授权范围必须来自服务端可信配置。客户端请求只能
 缩小 Schema 范围，不能扩大表权限。Workflow 中每个生成或修复 SQL 都会重新
 经过 Stage 3 校验和 Stage 6 执行边界；不要直接调用 Connector 执行模型输出。
+
+## FastAPI 接口
+
+标准 ASGI 应用目标为：
+
+```text
+app.main:app
+```
+
+ASGI server 启动 lifespan 时会读取 `.env.example` 所列的数据库和 LLM 环境
+变量；缺少 DSN、模型或 API Key 时启动失败，不会进入 Stub 或宽松模式。部署
+服务器不属于本 MVP 代码依赖，应由运行环境选择。
+
+请求示例：
+
+```json
+{
+  "question": "列出前 10 部影片标题",
+  "datasource_id": "pagila",
+  "schemas": ["public"],
+  "debug": false
+}
+```
+
+业务成功、澄清和拒绝均返回唯一 `status`。只有成功返回 SQL 和结果；所有失败
+不返回当前或历史 SQL。普通固定身份的 `debug=true` 返回 403，任意 Header 都
+不能提升 debug 权限。
 
 ## 运行测试
 

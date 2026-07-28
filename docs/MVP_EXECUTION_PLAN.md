@@ -29,8 +29,8 @@
 | Stage 5 SQL 生成 | completed | `docs/superpowers/specs/2026-07-28-stage-5-sql-generation-design.md` | `docs/superpowers/plans/2026-07-28-stage-5-sql-generation.md` | `6630de3` | Stage 6 |
 | Stage 6 真实执行 | completed | `docs/superpowers/specs/2026-07-28-stage-6-real-execution-design.md` | `docs/superpowers/plans/2026-07-28-stage-6-real-execution.md` | `1a301aa` | Stage 7 |
 | Stage 7 反思修复 | completed | `docs/superpowers/specs/2026-07-28-stage-7-reflection-repair-design.md` | `docs/superpowers/plans/2026-07-28-stage-7-reflection-repair.md` | `0d4c6b8` | Stage 8 |
-| Stage 8 LangGraph Workflow | completed | `docs/superpowers/specs/2026-07-28-stage-8-langgraph-workflow-design.md` | `docs/superpowers/plans/2026-07-28-stage-8-langgraph-workflow.md` | 待 Stage 9 入口回填 | Stage 9 |
-| Stage 9 FastAPI | not_started | 进入阶段后创建 | 进入阶段后创建 | 未产生 | Stage 10 |
+| Stage 8 LangGraph Workflow | completed | `docs/superpowers/specs/2026-07-28-stage-8-langgraph-workflow-design.md` | `docs/superpowers/plans/2026-07-28-stage-8-langgraph-workflow.md` | `22f3a91` | Stage 9 |
+| Stage 9 FastAPI | completed | `docs/superpowers/specs/2026-07-28-stage-9-fastapi-design.md` | `docs/superpowers/plans/2026-07-28-stage-9-fastapi.md` | 待 Stage 10 入口回填 | Stage 10 |
 | Stage 10 评测与安全回归 | not_started | 进入阶段后创建 | 进入阶段后创建 | 未产生 | 最终验收 |
 
 ## 当前阶段
@@ -472,7 +472,83 @@
     权限、安全、连接、超时、资源、重复和 UNKNOWN 均未被扩入 Reflect。
   - 最终独立复审：定向无缓存 `81 passed`；
     `blocking=0`、`high=0`、`medium=0`、`low=0`，Approved。
-- 阶段提交 SHA：尚未产生
+- 阶段提交 SHA：`22f3a91`
 - 遗留问题：Stage 6 已记录的 public-only 未限定表名边界仍存在；未新增 Stage 8
   问题。
 - 下一阶段：Stage 9 FastAPI
+
+### Stage 9：FastAPI 同步接口与可信启动
+
+- 阶段状态：`completed`
+- 上一阶段：Stage 8 LangGraph Workflow，提交 `22f3a91`
+- 设计文档：
+  `docs/superpowers/specs/2026-07-28-stage-9-fastapi-design.md`
+- 实施计划：
+  `docs/superpowers/plans/2026-07-28-stage-9-fastapi.md`
+- 计划修改范围：
+  - `pyproject.toml`
+  - `app/api/`
+  - `app/main.py`
+  - `tests/unit/test_api_*.py`
+  - `tests/security/test_api_*.py`
+  - `tests/integration/test_api_pagila.py`
+  - `docs/decisions/0009-fastapi-boundary.md`
+  - `README.md`
+  - 本设计、实施计划和执行台账
+- 验证命令：
+  - `.venv/bin/python -m pytest tests/unit -q`
+  - `.venv/bin/python -m pytest tests/security -q`
+  - `.venv/bin/python -m pytest tests/integration -q -m integration`
+  - `.venv/bin/python -m compileall -q app tools tests`
+  - `.venv/bin/python -m pip check`
+  - `docker compose -f infrastructure/pagila/compose.yaml config --quiet`
+  - `git diff --check`
+- 实际修改范围：
+  - `pyproject.toml`
+  - `app/api/`
+  - `app/main.py`
+  - `tests/unit/test_api_application.py`
+  - `tests/unit/test_api_models.py`
+  - `tests/unit/test_api_response_mapping.py`
+  - `tests/security/test_api_permissions.py`
+  - `tests/integration/test_api_pagila.py`
+  - `docs/decisions/0009-fastapi-boundary.md`
+  - `README.md`
+  - 本设计、实施计划和执行台账
+- TDD 失败证据：
+  - `app.api` 缺失导致请求/响应模型契约测试收集失败；
+  - `build_query_response` 缺失导致终态映射测试收集失败；
+  - `ApplicationServices` 和 `create_app` 缺失导致应用与权限测试收集失败；
+  - 首次响应模型把 `FAILED_INTERNAL` 与已定义的权限、重复、超时、连接、
+    资源及已耗尽可修复错误错误组合放行；增加非法组合红灯后收紧终态不变量。
+  - 独立审查红灯证明任意 Python 对象可进入 `rows`，OpenAPI 行值 Schema 为空，
+    且序列化失败会逃逸为纯文本 500；改用 PEP 695 递归 JSON 类型并扩大统一
+    异常边界后通过。
+  - ID factory 异常最初绕过固定 500；增加 fallback UUID 和结构化错误测试后
+    通过。
+  - 默认 422 最初回显完整非法输入；增加敏感超长问题红灯后，改为固定脱敏
+    validation handler。
+  - 可配置非 Pagila datasource 最初会启动成功；增加连接前拒绝测试后
+    fail-closed。
+- 测试结果：
+  - Stage 1–9 单元测试：`411 passed`
+  - Stage 1–9 安全测试：`75 passed`
+  - Stage 1–9 Pagila/协议/工作流/API 集成测试：`68 passed`
+  - Stage 9 真实 Pagila HTTP Case：首次成功、合法空结果、一次 Schema 修复和
+    危险模型 SQL 零执行全部通过
+  - `python -m compileall`：通过
+  - `pip check`：通过
+  - Docker Compose 配置检查：通过
+  - `git diff --check`：通过
+  - 三份受保护文件 SHA-256：与基线一致
+- 代码审查结果：
+  - 初审发现 1 个 high：`rows` 允许非 JSON 对象，OpenAPI 为空约束且序列化
+    失败绕过脱敏 500；已按失败测试修复。
+  - 初审的 3 个 medium（422 回显、datasource 未锁定、终态/HTTP timeout
+    覆盖）和 2 个 low（owned close 测试、计划路径）均已修复。
+  - 最终独立复审：`blocking=0`、`high=0`、`medium=0`、`low=0`，
+    Approved。
+- 阶段提交 SHA：待 Stage 10 入口回填
+- 遗留问题：Stage 6 已记录的 public-only 未限定表名边界仍存在；未新增
+  Stage 9 问题。
+- 下一阶段：Stage 10 评测与安全回归
