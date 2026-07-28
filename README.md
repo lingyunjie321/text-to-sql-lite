@@ -24,7 +24,18 @@ Text-to-SQL 闭环。
 - 查询与组装两层授权过滤、公开安全错误和连接类有限重试；
 - 单元测试与真实 Pagila Metadata Contract 集成测试。
 
-SQLGlot AST 与安全校验属于第三阶段，尚未实现。
+第三开发阶段已实现：
+
+- 锁定 SQLGlot 30.13.0，并只使用 PostgreSQL 方言解析和序列化；
+- 单 statement、只读 `SELECT`/受控 CTE 和危险 AST 默认拒绝；
+- `SELECT *` 拒绝，`COUNT(*)` 作为明确聚合特例允许；
+- 授权 Schema/表、快照对象和字段存在性校验；
+- 别名、CTE、派生表和相关子查询作用域解析；
+- 主规格 `mvp-v1` 函数白名单，未知函数和 UDF 默认拒绝；
+- 结构化、可路由且不泄露 SQL 或对象名的校验结果；
+- 完整 P0 安全矩阵和真实 Pagila Gold SQL 校验回归。
+
+Schema Linking 属于第四阶段，尚未实现。
 
 ## 本地准备
 
@@ -91,6 +102,26 @@ with PostgreSQLConnector(settings) as connector:
 用户问题文本扩大范围。表名必须使用 `schema.table` 形式；任一授权范围为空时
 返回确定性的空快照，不扫描数据库中其他可见对象。
 
+## 校验 SQL
+
+```python
+from app.validation import validate_sql
+
+
+result = validate_sql(
+    "SELECT film_id, title FROM film",
+    allowed_schemas=("public",),
+    allowed_tables=("public.film",),
+    snapshot=snapshot,
+)
+if result.is_valid:
+    execution = connector.execute(result.normalized_sql)
+```
+
+`allowed_schemas`、`allowed_tables` 和 `snapshot` 必须来自同一份服务端可信授权
+上下文。`is_valid` 为 false 时不得执行；失败结果不会返回部分 SQL、对象引用或
+SQLGlot 原始错误。
+
 ## 运行测试
 
 单元测试不需要数据库：
@@ -127,5 +158,6 @@ docker compose -f infrastructure/pagila/compose.yaml down
 ## 安全说明
 
 - 不要把真实 DSN 或密码写进 `.env.example`、源码、提交或日志；
-- Connector 不负责 SQL 安全解析，SQLGlot AST 安全门属于后续阶段；
+- Connector 不负责 SQL 安全解析；所有模型 SQL 必须先经过
+  `app.validation.validate_sql()`；
 - 第一阶段的只读账号和只读事务是数据库侧第二道防线，不替代上层校验。
