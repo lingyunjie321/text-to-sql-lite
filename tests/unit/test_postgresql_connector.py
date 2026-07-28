@@ -170,4 +170,3 @@ def test_execute_does_not_retry_non_transient_errors(
         connector.execute("SELECT 1")
 
     connector._execute_once.assert_called_once_with("SELECT 1")
-

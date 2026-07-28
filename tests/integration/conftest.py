@@ -23,4 +23,3 @@ def connector(
 ) -> Iterator[PostgreSQLConnector]:
     with PostgreSQLConnector(database_settings) as active:
         yield active
-

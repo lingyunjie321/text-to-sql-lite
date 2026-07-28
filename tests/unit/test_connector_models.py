@@ -76,4 +76,3 @@ def test_execution_result_is_driver_independent() -> None:
 
     assert result.columns[0].name == "amount"
     assert result.rows == [["10.20"]]
-
