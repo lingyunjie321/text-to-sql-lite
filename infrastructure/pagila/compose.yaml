@@ -1,0 +1,28 @@
+name: text-to-sql-pagila
+
+services:
+  postgres:
+    image: postgres:16.14-bookworm@sha256:92620daddcd947f8d5ab5ba66e848702fe443d87fed30c4cea8e389fd78dfc55
+    container_name: text-to-sql-pagila-postgres
+    environment:
+      POSTGRES_DB: pagila
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${PAGILA_POSTGRES_PASSWORD:?PAGILA_POSTGRES_PASSWORD is required}
+      PAGILA_APP_USER: ${PAGILA_APP_USER:?PAGILA_APP_USER is required}
+      PAGILA_APP_PASSWORD: ${PAGILA_APP_PASSWORD:?PAGILA_APP_PASSWORD is required}
+    ports:
+      - "${PAGILA_HOST_PORT:-55432}:5432"
+    volumes:
+      - pagila-data:/var/lib/postgresql/data
+      - ../../tests/fixtures/pagila/upstream/pagila-schema.sql:/docker-entrypoint-initdb.d/01-pagila-schema.sql:ro
+      - ../../tests/fixtures/pagila/upstream/pagila-data.sql:/docker-entrypoint-initdb.d/02-pagila-data.sql:ro
+      - ./init/03-create-readonly-role.sh:/docker-entrypoint-initdb.d/03-create-readonly-role.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
+volumes:
+  pagila-data:

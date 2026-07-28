@@ -1,0 +1,17 @@
+{
+  "source": "https://github.com/devrimgunduz/pagila",
+  "tag": "pagila-v3.1.0",
+  "commit": "fef9675714cfba1756df4719b5e36075a7ddf90e",
+  "archive_url": "https://github.com/devrimgunduz/pagila/archive/fef9675714cfba1756df4719b5e36075a7ddf90e.tar.gz",
+  "archive_sha256": "6d0cf172e5d1896b5a279452060fb4cf9b2ca820366c712156fa1e656af4df88",
+  "files": {
+    "pagila-schema.sql": {
+      "member": "pagila-fef9675714cfba1756df4719b5e36075a7ddf90e/pagila-schema.sql",
+      "sha256": "8ce358e4c8014087b85296694a0893887bd7a4190e3ce407f2721b86b98e5707"
+    },
+    "pagila-data.sql": {
+      "member": "pagila-fef9675714cfba1756df4719b5e36075a7ddf90e/pagila-data.sql",
+      "sha256": "fb81bec377687c83e11d2a24916ae28656d85550bf0ada798305bf7e2af9823b"
+    }
+  }
+}

@@ -1,5 +1,14 @@
 .DS_Store
 .idea/
+.venv/
+.env
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+tests/fixtures/pagila/upstream/
 
 # Local-only historical reference; never publish it to GitHub.
 docs/Text-to-SQL原项目参考信息.md

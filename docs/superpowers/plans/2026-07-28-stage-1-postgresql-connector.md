@@ -21,7 +21,7 @@
 - Only SQLSTATE class `08` connection failures retry the same Connector call. Authentication, permission, pool timeout, SQL, resource, and query timeout failures do not retry.
 - Schema introspection belongs to Stage 2 and must not be added here.
 - Do not modify `docs/Text-to-SQL项目复现规格.md`, `docs/Text-to-SQL测试与验收规格.md`, or `evaluation/cases/pagila_mvp.jsonl`.
-- The current workspace is not a Git repository. Do not run `git init` without user authorization. Each task lists a suggested commit for use only after the workspace is attached to a repository.
+- Execute this plan on an isolated `codex/` branch in the existing Git repository. Use each task's suggested commit only after its verification checkpoint passes.
 
 ---
 
@@ -67,7 +67,7 @@
 - Consumes: environment variables with prefix `TEXT_TO_SQL_DATABASE_`.
 - Produces: `DatabaseSettings`, `DatabaseSettings.dsn_value`, and `load_database_settings(env_file: Path | None = None) -> DatabaseSettings`.
 
-- [ ] **Step 1: Add the minimal package and dependency configuration**
+- [x] **Step 1: Add the minimal package and dependency configuration**
 
 Use this dependency set in `pyproject.toml`:
 
@@ -100,7 +100,7 @@ Create `app/__init__.py`. Ignore `.venv/`, `.env`, Python caches, pytest caches,
 coverage output, and `tests/fixtures/pagila/upstream/`. Do not ignore the three
 protected specification files.
 
-- [ ] **Step 2: Write failing configuration tests**
+- [x] **Step 2: Write failing configuration tests**
 
 Create tests for a valid DSN, a missing DSN, malformed PostgreSQL conninfo, non-positive pool settings, `min_pool_size > max_pool_size`, and secret-safe `repr`.
 
@@ -132,7 +132,7 @@ def test_database_settings_reject_inverted_pool_bounds() -> None:
         )
 ```
 
-- [ ] **Step 3: Run the test and verify the expected failure**
+- [x] **Step 3: Run the test and verify the expected failure**
 
 Run:
 
@@ -145,7 +145,7 @@ python3.12 -m venv .venv
 
 Expected before implementation: collection fails with `ModuleNotFoundError: No module named 'app.config'`.
 
-- [ ] **Step 4: Implement strict settings**
+- [x] **Step 4: Implement strict settings**
 
 Implement the following shape in `app/config.py`:
 
@@ -213,7 +213,7 @@ TEXT_TO_SQL_DATABASE_MAX_RESULT_ROWS=1000
 TEXT_TO_SQL_DATABASE_CONNECTION_RETRY_COUNT=1
 ```
 
-- [ ] **Step 5: Run the focused tests**
+- [x] **Step 5: Run the focused tests**
 
 Run:
 
@@ -223,7 +223,7 @@ Run:
 
 Expected: all settings tests pass and no assertion output contains a password.
 
-- [ ] **Step 6: Review checkpoint**
+- [x] **Step 6: Review checkpoint**
 
 Check:
 
@@ -233,7 +233,7 @@ rg -n "secret@|password *= *['\"]|api[_-]?key" app pyproject.toml .env.example
 
 Expected: only test fixtures use the literal word `secret`; no usable credential is committed.
 
-Suggested commit after a repository exists:
+Suggested commit after this task's verification passes:
 
 ```bash
 git add pyproject.toml .gitignore .env.example app/__init__.py app/config.py tests/unit/test_config.py
@@ -255,7 +255,7 @@ git commit -m "chore: bootstrap validated database configuration"
 - Consumes: psycopg exceptions, pool exceptions, PostgreSQL values and cursor metadata.
 - Produces: `ResultColumn`, `ExecutionResult`, `normalize_value(value)`, `ErrorType`, `DatabaseError`, `PostgreSQLConnectorError`, and `normalize_database_error(error)`.
 
-- [ ] **Step 1: Write failing result normalization tests**
+- [x] **Step 1: Write failing result normalization tests**
 
 Cover `None`, booleans, integers, floats, strings, `Decimal`, `date`, `time`,
 naive and aware `datetime`, UUID, enum values, dictionaries, arrays, and nested combinations.
@@ -284,7 +284,7 @@ def test_normalize_value_preserves_json_precision_and_timezone() -> None:
     }
 ```
 
-- [ ] **Step 2: Write failing SQLSTATE mapping and redaction tests**
+- [x] **Step 2: Write failing SQLSTATE mapping and redaction tests**
 
 Parameterize the required mapping:
 
@@ -317,7 +317,7 @@ def test_classify_sqlstate(sqlstate: str, expected: ErrorType) -> None:
 Build one fake exception with a `sqlstate` attribute and a message containing a DSN/password.
 Assert the normalized public message and `repr` contain neither sensitive substring.
 
-- [ ] **Step 3: Run tests and verify they fail**
+- [x] **Step 3: Run tests and verify they fail**
 
 Run:
 
@@ -327,7 +327,7 @@ Run:
 
 Expected before implementation: collection fails because `app.connectors` does not exist.
 
-- [ ] **Step 4: Implement result models and recursive normalization**
+- [x] **Step 4: Implement result models and recursive normalization**
 
 Use immutable column metadata and a mutable list-of-lists response compatible with the future API:
 
@@ -365,7 +365,7 @@ and enum instances through their `.value`. Preserve already valid JSON primitive
 Raise `TypeError("unsupported PostgreSQL result type: <type name>")` for unsupported
 objects without including the value.
 
-- [ ] **Step 5: Implement stable errors**
+- [x] **Step 5: Implement stable errors**
 
 Define every `ErrorType` value from main specification section 6. Use this public-safe shape:
 
@@ -401,7 +401,7 @@ Only SQLSTATE class `08` and a psycopg `OperationalError` without SQLSTATE are
 retryable. `PoolTimeout`, `28P01`, `42501`, `25006`, `57014`, and class `53`
 are never retryable.
 
-- [ ] **Step 6: Run the focused tests**
+- [x] **Step 6: Run the focused tests**
 
 Run:
 
@@ -411,7 +411,7 @@ Run:
 
 Expected: all normalization, mapping, retryability, and redaction tests pass.
 
-- [ ] **Step 7: Review checkpoint**
+- [x] **Step 7: Review checkpoint**
 
 Run:
 
@@ -421,7 +421,7 @@ Run:
 
 Expected: exit code 0.
 
-Suggested commit after a repository exists:
+Suggested commit after this task's verification passes:
 
 ```bash
 git add app/connectors tests/unit/test_connector_models.py tests/unit/test_connector_errors.py
@@ -443,7 +443,7 @@ git commit -m "feat: add connector result and error contracts"
 - Consumes: a locked GitHub archive URL and SHA-256 manifest.
 - Produces: `load_manifest(path)`, `extract_verified_archive(archive_path, target_dir, manifest)`, `fetch_pagila(manifest_path, target_dir)`, and verified local files under `tests/fixtures/pagila/upstream/`.
 
-- [ ] **Step 1: Write offline failing tests for the fixture tool**
+- [x] **Step 1: Write offline failing tests for the fixture tool**
 
 Build a small tar.gz inside pytest's `tmp_path` with two members using the exact
 archive member naming convention. Test:
@@ -465,7 +465,7 @@ assert outputs.data.read_bytes() == data_bytes
 assert not list(output_dir.glob("*.tmp"))
 ```
 
-- [ ] **Step 2: Run the fixture tests and verify failure**
+- [x] **Step 2: Run the fixture tests and verify failure**
 
 Run:
 
@@ -475,7 +475,7 @@ Run:
 
 Expected before implementation: import fails for `tools.fetch_pagila`.
 
-- [ ] **Step 3: Add the exact machine-readable manifest**
+- [x] **Step 3: Add the exact machine-readable manifest**
 
 Use:
 
@@ -499,7 +499,7 @@ Use:
 }
 ```
 
-- [ ] **Step 4: Implement safe download and extraction**
+- [x] **Step 4: Implement safe download and extraction**
 
 The tool must:
 
@@ -529,7 +529,7 @@ CLI behavior:
   --output tests/fixtures/pagila/upstream
 ```
 
-- [ ] **Step 5: Run offline unit tests**
+- [x] **Step 5: Run offline unit tests**
 
 Run:
 
@@ -539,7 +539,7 @@ Run:
 
 Expected: all tests pass without network access.
 
-- [ ] **Step 6: Fetch the real locked fixture and verify hashes**
+- [x] **Step 6: Fetch the real locked fixture and verify hashes**
 
 Run the CLI command from Step 4, then:
 
@@ -556,7 +556,7 @@ Expected:
 fb81bec377687c83e11d2a24916ae28656d85550bf0ada798305bf7e2af9823b  tests/fixtures/pagila/upstream/pagila-data.sql
 ```
 
-- [ ] **Step 7: Review checkpoint**
+- [x] **Step 7: Review checkpoint**
 
 Run:
 
@@ -566,7 +566,7 @@ find tests/fixtures/pagila/upstream -maxdepth 1 -type f -print
 
 Expected: only the two ignored SQL files are present.
 
-Suggested commit after a repository exists:
+Suggested commit after this task's verification passes:
 
 ```bash
 git add .gitignore infrastructure/pagila/manifest.json tools/__init__.py tools/fetch_pagila.py tests/unit/test_pagila_fixture.py
@@ -585,7 +585,7 @@ git commit -m "build: lock and verify Pagila fixture"
 - Consumes: verified fixture files and `PAGILA_POSTGRES_PASSWORD`, `PAGILA_APP_USER`, `PAGILA_APP_PASSWORD`, `PAGILA_HOST_PORT`.
 - Produces: a healthy `pagila-postgres` service with the Pagila schema/data and a login role whose default transactions are read-only.
 
-- [ ] **Step 1: Establish the failing infrastructure checks**
+- [x] **Step 1: Establish the failing infrastructure checks**
 
 Run:
 
@@ -595,7 +595,7 @@ docker compose -f infrastructure/pagila/compose.yaml config
 
 Expected before implementation: failure because the Compose file does not exist.
 
-- [ ] **Step 2: Add pinned Compose configuration**
+- [x] **Step 2: Add pinned Compose configuration**
 
 The database service must use:
 
@@ -630,7 +630,7 @@ volumes:
   pagila-data:
 ```
 
-- [ ] **Step 3: Add the idempotent role initialization script**
+- [x] **Step 3: Add the idempotent role initialization script**
 
 The executable shell script must run `psql --set ON_ERROR_STOP=1`, pass both role
 values through psql variables, use `format('%I', ...)` for identifiers and
@@ -654,7 +654,7 @@ not fail. Run:
 chmod +x infrastructure/pagila/init/03-create-readonly-role.sh
 ```
 
-- [ ] **Step 4: Render Compose with ephemeral local-only secrets**
+- [x] **Step 4: Render Compose with ephemeral local-only secrets**
 
 Keep the following environment variables in the same terminal session:
 
@@ -674,7 +674,7 @@ docker compose -f infrastructure/pagila/compose.yaml config --quiet
 
 Expected: exit code 0 and no environment value printed.
 
-- [ ] **Step 5: Initialize PostgreSQL and Pagila**
+- [x] **Step 5: Initialize PostgreSQL and Pagila**
 
 Run:
 
@@ -684,7 +684,7 @@ docker compose -f infrastructure/pagila/compose.yaml up -d --wait
 
 Expected: service becomes healthy without changing the pinned image or Pagila files.
 
-- [ ] **Step 6: Prove the fixed versions, dataset, and role**
+- [x] **Step 6: Prove the fixed versions, dataset, and role**
 
 Run:
 
@@ -703,7 +703,7 @@ Expected:
 - the application role reports `on`;
 - the application role can read `film`.
 
-- [ ] **Step 7: Prove database-side write rejection**
+- [x] **Step 7: Prove database-side write rejection**
 
 Run:
 
@@ -715,19 +715,20 @@ docker compose -f infrastructure/pagila/compose.yaml exec -T postgres \
 
 Expected: non-zero exit with insufficient privilege or read-only transaction; the actor count does not change.
 
-- [ ] **Step 8: Review checkpoint**
+- [x] **Step 8: Review checkpoint**
 
 Run:
 
 ```bash
 docker compose -f infrastructure/pagila/compose.yaml ps
-docker inspect text-to-sql-pagila-postgres \
+docker image inspect \
+  'postgres:16.14-bookworm@sha256:92620daddcd947f8d5ab5ba66e848702fe443d87fed30c4cea8e389fd78dfc55' \
   --format '{{index .RepoDigests 0}}'
 ```
 
 Expected: the service is healthy and the digest is the locked PostgreSQL image digest.
 
-Suggested commit after a repository exists:
+Suggested commit after this task's verification passes:
 
 ```bash
 git add infrastructure/pagila/compose.yaml infrastructure/pagila/init/03-create-readonly-role.sh
@@ -748,7 +749,7 @@ git commit -m "build: add pinned Pagila PostgreSQL environment"
 - Consumes: `DatabaseSettings`, psycopg `ConnectionPool`, SQL text.
 - Produces: `PostgreSQLConnector.open()`, `.close()`, `.check_connection()`, `.execute(sql: str) -> ExecutionResult`, and context-manager support.
 
-- [ ] **Step 1: Write failing unit tests for lifecycle and the exact SQL retry boundary**
+- [x] **Step 1: Write failing unit tests for lifecycle and the exact SQL retry boundary**
 
 Use a test double pool to assert:
 
@@ -773,7 +774,7 @@ assert connector.execute(sql) is expected_result
 assert connector._execute_once.call_args_list == [call(sql), call(sql)]
 ```
 
-- [ ] **Step 2: Write the first live integration tests**
+- [x] **Step 2: Write the first live integration tests**
 
 `tests/integration/conftest.py` must fail with a clear message if
 `TEXT_TO_SQL_DATABASE_DSN` is absent; live tests must not silently skip.
@@ -799,7 +800,7 @@ def test_pagila_select(connector: PostgreSQLConnector) -> None:
 
 Also add CTE, aggregation, and empty-result tests.
 
-- [ ] **Step 3: Run tests and verify failure**
+- [x] **Step 3: Run tests and verify failure**
 
 Run:
 
@@ -810,7 +811,7 @@ Run:
 
 Expected before implementation: import fails for `app.connectors.postgresql`.
 
-- [ ] **Step 4: Implement lazy pool lifecycle and connection test**
+- [x] **Step 4: Implement lazy pool lifecycle and connection test**
 
 Use a synchronous `psycopg_pool.ConnectionPool` with `open=False`, the exact
 settings bounds, and `kwargs={"autocommit": False}`. `check_connection()` must
@@ -832,7 +833,7 @@ def check_connection(self) -> None:
 `open()` calls `check_connection()`, opens the pool, and waits up to
 `pool_timeout_seconds`. Convert pool startup errors through the same normalizer.
 
-- [ ] **Step 5: Implement one bounded read-only execution**
+- [x] **Step 5: Implement one bounded read-only execution**
 
 `_execute_once(sql)` must:
 
@@ -856,7 +857,7 @@ Build columns from `description.name` and `description.type_code`, set
 `truncated = len(raw_rows) > max_result_rows`, slice before normalization,
 and calculate `execution_time_ms` using `time.perf_counter()`.
 
-- [ ] **Step 6: Implement the public retry loop**
+- [x] **Step 6: Implement the public retry loop**
 
 `execute(sql)` calls `_execute_once(sql)`, normalizes any driver/pool exception,
 and retries only when `details.retryable` is true and fewer than
@@ -865,7 +866,7 @@ and retries only when `details.retryable` is true and fewer than
 If `_execute_once()` already raised `PostgreSQLConnectorError`, preserve its
 details rather than normalizing it again.
 
-- [ ] **Step 7: Run focused unit and live tests**
+- [x] **Step 7: Run focused unit and live tests**
 
 Run:
 
@@ -877,7 +878,7 @@ Run:
 
 Expected: all selected tests pass.
 
-- [ ] **Step 8: Review checkpoint**
+- [x] **Step 8: Review checkpoint**
 
 Run:
 
@@ -887,7 +888,7 @@ Run:
 
 Expected: exit code 0.
 
-Suggested commit after a repository exists:
+Suggested commit after this task's verification passes:
 
 ```bash
 git add app/connectors/postgresql.py tests/unit/test_postgresql_connector.py tests/integration
@@ -908,7 +909,7 @@ git commit -m "feat: execute bounded read-only PostgreSQL queries"
 - Consumes: the Task 5 Connector interface.
 - Produces: complete Stage 1 execution behavior for timeout, connection safety, pool exhaustion, type normalization, and error routing.
 
-- [ ] **Step 1: Add failing truncation and type integration tests**
+- [x] **Step 1: Add failing truncation and type integration tests**
 
 Add:
 
@@ -928,7 +929,7 @@ def test_result_limit_reads_one_extra_row(
 Use one PostgreSQL query containing `NULL`, `numeric`, `date`, `time`,
 `timestamptz`, `jsonb`, UUID, and an array. Assert the exact normalized JSON values.
 
-- [ ] **Step 2: Add failing timeout and connection reuse integration tests**
+- [x] **Step 2: Add failing timeout and connection reuse integration tests**
 
 Create settings identical to the session settings except
 `statement_timeout_seconds=1`, then:
@@ -949,7 +950,7 @@ connection after transaction rollback. If the recovery query fails because the
 driver cannot restore the connection, assert through a pool counter that the
 old connection was discarded and a new connection was created.
 
-- [ ] **Step 3: Add failing write, authentication, refusal, and pool timeout tests**
+- [x] **Step 3: Add failing write, authentication, refusal, and pool timeout tests**
 
 Required assertions:
 
@@ -959,7 +960,7 @@ Required assertions:
 - exhausting a one-connection pool returns `CONNECTION_ERROR` with `retryable=False`;
 - actor count is unchanged after the write test.
 
-- [ ] **Step 4: Add deterministic unit tests for retry counts**
+- [x] **Step 4: Add deterministic unit tests for retry counts**
 
 Parameterize zero, one, and three configured retries. Assert:
 
@@ -969,7 +970,7 @@ Parameterize zero, one, and three configured retries. Assert:
   pool timeout errors call `_execute_once()` exactly once;
 - every retry receives the exact original SQL string.
 
-- [ ] **Step 5: Run the new tests and observe precise failures**
+- [x] **Step 5: Run the new tests and observe precise failures**
 
 Run:
 
@@ -982,7 +983,7 @@ Run:
 Expected: new tests fail only where Connector behavior is still missing; existing
 Task 5 tests remain green.
 
-- [ ] **Step 6: Make the smallest Connector corrections**
+- [x] **Step 6: Make the smallest Connector corrections**
 
 Keep changes inside `postgresql.py` and `errors.py`:
 
@@ -996,7 +997,7 @@ Keep changes inside `postgresql.py` and `errors.py`:
 Do not add client-side HTTP timeout behavior, SQL rewriting, schema validation, or
 workflow counters.
 
-- [ ] **Step 7: Run the full Stage 1 test suites**
+- [x] **Step 7: Run the full Stage 1 test suites**
 
 Run:
 
@@ -1008,19 +1009,19 @@ Run:
 Expected: both commands pass. Timeout tests finish in a few seconds by overriding
 the validated setting to one second; production default remains 30 seconds.
 
-- [ ] **Step 8: Review checkpoint**
+- [x] **Step 8: Review checkpoint**
 
 Run:
 
 ```bash
 docker compose -f infrastructure/pagila/compose.yaml exec -T postgres \
   psql -U postgres -d pagila -Atc \
-  "SELECT COUNT(*) FROM pg_stat_activity WHERE datname = 'pagila' AND state = 'active' AND query LIKE '%pg_sleep%';"
+  "SELECT COUNT(*) FROM pg_stat_activity WHERE datname = 'pagila' AND state = 'active' AND pid <> pg_backend_pid() AND query LIKE '%pg_sleep%';"
 ```
 
 Expected: `0`.
 
-Suggested commit after a repository exists:
+Suggested commit after this task's verification passes:
 
 ```bash
 git add app/connectors tests/unit/test_postgresql_connector.py tests/integration/test_postgresql_connector.py
@@ -1039,7 +1040,7 @@ git commit -m "test: complete stage one connector contract"
 - Consumes: verified implementation and test outputs from Tasks 1–6.
 - Produces: reproducible developer instructions and an explicit statement of Stage 1 completion versus Stage 2 exclusions.
 
-- [ ] **Step 1: Write the baseline decision record**
+- [x] **Step 1: Write the baseline decision record**
 
 Record:
 
@@ -1052,7 +1053,7 @@ Record:
 - successful PostgreSQL version and `film` count evidence;
 - that Schema introspection and the remaining Connector Contract metadata tests are Stage 2.
 
-- [ ] **Step 2: Write runnable README instructions**
+- [x] **Step 2: Write runnable README instructions**
 
 Document this order:
 
@@ -1068,7 +1069,7 @@ Document this order:
 
 Do not document a destructive volume deletion as part of the normal teardown command.
 
-- [ ] **Step 3: Run all deterministic checks**
+- [x] **Step 3: Run all deterministic checks**
 
 Run:
 
@@ -1081,7 +1082,7 @@ docker compose -f infrastructure/pagila/compose.yaml config --quiet
 
 Expected: every command exits 0.
 
-- [ ] **Step 4: Verify protected files are byte-for-byte unchanged**
+- [x] **Step 4: Verify protected files are byte-for-byte unchanged**
 
 Run:
 
@@ -1100,7 +1101,7 @@ Expected:
 049e048b821e949936c1793d441f7adcda4660f10f8d0acf63e4f766a9726c22  evaluation/cases/pagila_mvp.jsonl
 ```
 
-- [ ] **Step 5: Audit scope and secret safety**
+- [x] **Step 5: Audit scope and secret safety**
 
 Run:
 
@@ -1117,7 +1118,7 @@ Expected:
 - `app/` contains only configuration and connector files;
 - no Schema Linking, SQL generation, validation, workflow, or API module exists.
 
-- [ ] **Step 6: Stop the service without deleting the named volume**
+- [x] **Step 6: Stop the service without deleting the named volume**
 
 Run:
 
@@ -1127,7 +1128,7 @@ docker compose -f infrastructure/pagila/compose.yaml down
 
 Expected: containers and network stop; the named Pagila data volume remains recoverable.
 
-- [ ] **Step 7: Final review checkpoint**
+- [x] **Step 7: Final review checkpoint**
 
 Produce a Stage 1 report with:
 
@@ -1140,7 +1141,7 @@ Produce a Stage 1 report with:
 - explicit Stage 2 metadata exclusions;
 - any environment-specific limitation.
 
-Suggested commit after a repository exists:
+Suggested commit after this task's verification passes:
 
 ```bash
 git add README.md docs/decisions/0001-pagila-postgresql-baseline.md
