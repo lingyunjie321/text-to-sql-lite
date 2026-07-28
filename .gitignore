@@ -17,3 +17,4 @@ frontend/.vite/
 frontend/*.tsbuildinfo
 *.egg-info/
 .workbuddy
+private_context/

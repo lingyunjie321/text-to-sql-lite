@@ -1,179 +1,129 @@
-# 项目使命
+## AGENTS.md 同步修改要求
 
-Text-to-SQL Agent 项目。
+本次 Demo 清退必须同步更新根目录 AGENTS.md，不能只修改 README、代码和文件名。
 
-本项目必须体现：
+### 新的项目使命
 
-1. 可配置的多阶段工作流编排。
-2. 基于状态的节点间通信。
-3. 节点注册表、工厂和生命周期管理。
-4. Schema / Reference SQL / 文档知识 / Metric / Semantic Model 的 Top-K 检索。
-5. SQL 生成、校验、执行、反思和修复。
-6. 最多三次尝试的修复循环，并且必须有明确终止条件。
-7. 基于查询复杂度的模型路由。
-8. 只使用相关 Schema、示例、文档片段、指标和语义模型。
-9. SQL 方言校验，以及可选的 SQL 方言转换。
-10. 可观测的执行 Trace。
+将项目定位更新为：
 
+“构建一个 API-first、可配置、可执行、可测试、可评测的轻量 Text-to-SQL Engine。”
 
-# 技术栈
+本项目不再以面试展示、前端演示或功能数量为主要目标，优先保证：
 
-- Python 3.11+
-- FastAPI
-- Pydantic
-- SQLAlchemy
-- SQLGlot
-- pytest
-- ruff
-- SQLite 作为默认可执行数据库
-- PostgreSQL 支持可以作为可选能力
-- 可选 LanceDB / FastEmbed / PyArrow
-- LLM 访问必须隐藏在不绑定具体供应商的接口之后
+* 核心调用链真实可运行；
+* 数据库查询安全且可验证；
+* 节点输入输出清晰；
+* 错误能够分类、定位和有限修复；
+* 实现能够通过测试和评测复现；
+* 代码便于本人阅读、调试和持续维护。
 
-# 架构规则
+### 实现事实规则
 
-- 核心工作流引擎不要使用 LangGraph 或 LangChain。
-- 工作流流转必须可配置，不要硬编码在 API 处理函数中。
-- 默认核心链路可以按 Begin -> Selection -> Schema -> Context Retrieval -> GenSQL -> Execute 组织，但 LLM models 层仍必须保留 provider 无关接口和模型 alias。
-- 节点必须实现统一的 BaseNode 接口。
-- 节点必须通过 NodeRegistry 和 NodeFactory 创建。
-- 节点实现不得导入 WorkflowEngine。
-- 工作流状态必须使用带类型的 Pydantic 模型。
-- 节点执行必须产生 Trace 信息。
-- SQL 修复循环绝不能无限运行。
-- LLM 客户端必须能在测试中替换为确定性的 Mock。
-- 不要在业务代码中硬编码模型名称。模型别名必须从配置中读取。
-- 不要把 Prompt 直接写在 API 路由处理函数里。
-- 不要在代码中暴露数据库凭据。
-- 业务目标数据库的 SQL 执行必须默认只读；项目自身 metadata store、运行记录、知识库、收藏 SQL 等内部表允许写入。
+增加以下强制规则：
 
-# 工作流扩展规则
+1. 当前仓库代码、测试和可复现实验是“已实现能力”的唯一证据。
+2. 简历、知识库和面试材料只能作为历史设计参考和后续需求来源。
+3. 不得依据资料描述直接声称仓库已经实现某项能力。
+4. 不得为了对齐简历而补写虚假代码、测试、文档或指标。
+5. README 中出现的指标必须有仓库内数据集、评测命令和实际输出支撑。
+6. 尚未实现的内容必须标记为 backlog、proposal 或 future work。
 
-- WorkflowEngine 不得导入具体业务节点类。
-- NodeFactory 不得使用 if/elif 或 match/case 来分发具体节点类型。
-- 具体节点必须通过 NodeRegistry 解析。
-- 新增节点时，不应要求修改 WorkflowEngine 或 NodeFactory。
-- 共享服务必须通过通用依赖容器注入。
-- 工作流分支必须基于 NodeResult.outcome 和配置来决定。
+### Workflow 规则调整
 
-# 范围规则
+保留当前自研 WorkflowEngine 作为默认实现。
 
-- 不要引入分布式基础设施。
-- 存储/知识库对齐 datus 时允许引入可选向量检索后端；默认仍可使用 SQLite/YAML fallback。
-- 第一阶段不做复杂认证、多租户和权限系统；如需区分运营用户和数据团队，只允许加入轻量角色字段或状态字段，不实现完整权限平台。
-- 不要编造或宣称性能指标。
-- 避免无关重构。
-- 优先选择小而易审查的改动。
+未经单独方案设计和用户明确确认：
 
-# 产品边界范围
+* 不得将现有 WorkflowEngine 整体迁移到 LangGraph；
+* 不得删除现有节点注册、节点工厂和配置边机制；
+* 不得为了引入框架重写所有节点和 State。
 
-- 本项目产品化目标是轻量业务交付版：面向运营/分析师自然语言查数，由数据团队维护可信上下文。
-- 允许新增 datasource、schema_catalog、business_metric、reference_sql、business_knowledge、saved_query、query_run、trace_event、feedback 等轻量模块；
-- 禁止一次性引入 CLI/TUI、Gateway、MCP 工具体系、多 Agent 工作台、BI dashboard、scheduler、复杂 OAuth、多租户和强依赖向量库。
-- 参考 datus 时，只参考知识分层、datasource 管理、prompt/version、trace/trajectory、成功 SQL 沉淀等思想；不得直接搬运其 CLI/TUI、Gateway、MCP、多 Agent、scheduler、BI 平台等重型模块。
+未来允许在共享 Node Contract 和 State Contract 的基础上，增加可选 LangGraphWorkflowEngine，但必须作为独立任务设计和评估。
 
-# 质量要求
+### Demo、Fixture 与正式代码边界
 
-- 所有公共函数和类都必须有类型注解。
-- 重要架构类必须有简洁的文档字符串。
-- 编写代码时加入必要的注释信息，减少后续阅读和维护阻碍。后续新增或修改的代码注释、docstring、说明性文本优先使用中文；除技术术语、库名、类名、函数名、协议名等专有名词外，不要新增整段英文注释。
-- 编写文档时不要通篇使用全英文，正文优先使用中文说明；技术术语、库名、协议名、架构名等专有名词可以保留英文。
-- 每个新增核心模块都要添加单元测试。
-- 为成功路径、修复路径和终止路径添加集成测试。
-- 测试不得依赖真实的付费 LLM API。
-- 在声明任务完成前，运行 ruff 和 pytest。
+增加以下规则：
 
-# 日志与异常约束
+1. Mock LLM、样例数据库、示例配置和测试数据属于测试或开发 Fixture。
+2. Fixture 应放在 tests、examples 或 devtools 中，不得混入核心业务逻辑。
+3. 正式 API 运行时不得在数据库缺失时自动创建销售演示数据库。
+4. Mock Provider 不得作为正式环境默认 Provider。
+5. 核心 Schema Linking 不得硬编码 orders、customers、products 等示例业务对象。
+6. 示例领域的表描述、字段描述和同义词应放入示例配置或测试 Fixture。
+7. 删除前端 Demo 不代表删除 Mock、测试数据和成功/修复/终止路径测试。
 
-- 后端主链路新增或修改代码时，优先使用项目自定义异常，不要新增散乱的 `ValueError` 作为运行时错误边界。
-- 不要在底层函数里到处 `logger.error(...); raise ...`。底层应抛出明确异常，API、service、workflow、provider 等边界统一记录结构化日志。
-- 失败日志必须带可定位上下文，例如 `request_id`、`node_name`、`event`、`error_type`，以及异常源文件和行号。
-- 日志不得输出 API key、Authorization、数据库密码、完整数据库 URL、完整 prompt、完整 SQL 或完整结果集。
-- SQL 默认只允许记录长度和 hash；debug 明确开启时才允许记录有限 preview。
-- Text-to-SQL 可恢复失败（例如 SQL 校验失败后进入修复）优先使用 `WARNING`，系统配置、凭据、外部 provider、数据库连接等不可恢复问题使用 `ERROR`。
+### 当前产品范围
 
-# 任务完成报告
+当前阶段重点建设：
 
-每个任务完成后，报告：
+* API；
+* 可配置 Workflow；
+* Typed State 的渐进迁移；
+* Schema introspection 和 Schema Linking；
+* SQL 生成、校验、只读执行；
+* 错误分类、反思和有限修复；
+* Trace、日志和 Metadata；
+* PostgreSQL 开发环境；
+* 可复现离线评测。
 
-1. 新增或修改的文件。
-2. 主要设计决策。
-3. 执行过的命令。
-4. 测试结果。
-5. 剩余限制或后续工作。
+当前阶段不做：
 
-# Codex 工作规范（强制执行）
+* Web 前端；
+* BI Dashboard；
+* 完整 OAuth；
+* 多租户管理平台；
+* MCP 工作台；
+* Scheduler；
+* 分布式执行基础设施；
+* 与核心 Text-to-SQL 无关的产品功能。
 
-## 1. 开发流程必须分两步
+CLI 可以用于数据库初始化、配置检查和离线评测，但不得扩展为复杂 TUI 或管理平台。
 
-所有任务必须遵守：
+### 渐进式修改规则
 
-### Step 1 - 方案设计（Plan Mode）
+所有重构必须按小步骤推进。
 
-在未得到用户明确允许前，只允许做以下事情：
+禁止在同一任务中同时进行：
 
-- 分析需求
-- 指出需要修改的文件
-- 列出修改点（精确到函数 / 类 / 模块）
-- 给出修改方案（但不能改代码）
-- 给出风险说明
+* Demo 清退；
+* Workflow 框架迁移；
+* 全量 State 重写；
+* 混合检索接入；
+* 数据库架构替换；
+* API 大规模重构。
 
-❗禁止：
-- 修改任何代码
-- 创建新文件
-- 运行测试
-- 提交 commit
+每个任务必须：
 
----
+1. 有单一主要目标；
+2. 明确修改文件、类和函数；
+3. 保持对外接口稳定，除非任务明确要求修改；
+4. 补充或更新测试；
+5. 给出回滚风险；
+6. 在执行前等待用户确认。
 
-### Step 2 - 执行修改（Execute Mode）
+### 私有资料安全
 
-只有在用户回复：
+增加以下规则：
 
-> "可以开始修改"
+1. private_context/、个人简历、面试知识库和其他私有资料不得提交到 Git。
+2. 不得把其中的手机号、邮箱、公司内部资料、未公开指标或项目描述复制到公开仓库。
+3. 私有资料不得进入 README、docs、代码注释、示例配置、测试数据或日志。
+4. 如果发现私有文件未被 .gitignore 忽略，先报告风险并给出修复方案。
+5. 不得删除或修改私有资料，除非用户单独明确要求。
 
-或类似明确指令后，才能：
+### 保留的现有工程规则
 
-- 修改代码
-- 添加文件
-- 重构模块
-- 运行测试
-- 新增顶层目录或移动入口文件时，需要同步更新项目结构与模块职责文档中的文件树、README 的文档导航和相关启动命令。
----
+以下现有规则继续保留：
 
-## 2. 修改必须可追踪
-
-每次修改必须说明：
-
-- 修改文件列表
-- 修改函数/类
-- 修改原因
-- 是否影响 workflow / node / state
-
----
-
-## 3. commit 规范（必须简化）
-
-禁止使用复杂英文 commit message。
-
-统一格式：
-
-### 格式：
-
-[模块] + 中文说明
-
-### 示例：
-
-- [workflow] 修复节点注册失败问题
-- [sql] 优化SQL执行错误处理
-- [frontend] 调整页面布局结构
-- [node] 增加SQL反思修复逻辑
-
----
-
-## 4. 禁止行为
-
-- 不允许一次性大规模重构多个模块
-- 不允许在未确认方案前改代码
-- 不允许修改无关文件
-- 不允许生成过度设计的架构
+* Workflow 流转不能硬编码在 API Handler；
+* 节点统一实现 BaseNode；
+* 节点通过 NodeRegistry 和 NodeFactory 创建；
+* 节点不得依赖 WorkflowEngine；
+* 修复循环必须有最大次数和终止条件；
+* LLM 访问隐藏在 Provider 无关接口后；
+* 数据库凭据不得写入代码；
+* 业务目标数据库默认只读；
+* 测试不得依赖真实付费 LLM；
+* 修改前必须先进入 Plan Mode；
+* 未经用户明确确认不得修改代码；
+* 每次任务必须报告文件、设计、命令、测试和剩余限制。

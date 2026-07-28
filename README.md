@@ -118,6 +118,13 @@ npm run dev
 ```
 
 Vite 已把 `/api` 代理到 `http://127.0.0.1:8000`，所以前端和后端需要同时运行。
+如果 `8000` 端口已被其他服务占用，可以把后端启动到其他端口，并在 `frontend/.env.local` 写入前端代理目标：
+
+```bash
+VITE_API_PROXY_TARGET=http://127.0.0.1:8010
+```
+
+部署或不使用 Vite 代理时，也可以通过 `VITE_API_BASE_URL` 指定完整 API 基础地址；未设置时前端默认使用相对路径 `/api`。
 
 ## Demo 场景
 
