@@ -27,8 +27,8 @@
 | Stage 3 SQL 安全校验 | completed | `docs/superpowers/specs/2026-07-28-stage-3-sqlglot-validation-design.md` | `docs/superpowers/plans/2026-07-28-stage-3-sqlglot-validation.md` | `a1dba99` | Stage 4 |
 | Stage 4 Schema Linking | completed | `docs/superpowers/specs/2026-07-28-stage-4-schema-linking-design.md` | `docs/superpowers/plans/2026-07-28-stage-4-schema-linking.md` | `12574b5` | Stage 5 |
 | Stage 5 SQL 生成 | completed | `docs/superpowers/specs/2026-07-28-stage-5-sql-generation-design.md` | `docs/superpowers/plans/2026-07-28-stage-5-sql-generation.md` | `6630de3` | Stage 6 |
-| Stage 6 真实执行 | completed | `docs/superpowers/specs/2026-07-28-stage-6-real-execution-design.md` | `docs/superpowers/plans/2026-07-28-stage-6-real-execution.md` | Stage 7 入口回填 | Stage 7 |
-| Stage 7 反思修复 | not_started | 进入阶段后创建 | 进入阶段后创建 | 未产生 | Stage 8 |
+| Stage 6 真实执行 | completed | `docs/superpowers/specs/2026-07-28-stage-6-real-execution-design.md` | `docs/superpowers/plans/2026-07-28-stage-6-real-execution.md` | `1a301aa` | Stage 7 |
+| Stage 7 反思修复 | completed | `docs/superpowers/specs/2026-07-28-stage-7-reflection-repair-design.md` | `docs/superpowers/plans/2026-07-28-stage-7-reflection-repair.md` | Stage 8 入口回填 | Stage 8 |
 | Stage 8 LangGraph Workflow | not_started | 进入阶段后创建 | 进入阶段后创建 | 未产生 | Stage 9 |
 | Stage 9 FastAPI | not_started | 进入阶段后创建 | 进入阶段后创建 | 未产生 | Stage 10 |
 | Stage 10 评测与安全回归 | not_started | 进入阶段后创建 | 进入阶段后创建 | 未产生 | 最终验收 |
@@ -322,3 +322,75 @@
 后续每个阶段完成后，在此追加实际修改范围、失败测试证据、单元/集成/安全/
 回归测试结果、独立审查结论、提交 SHA、遗留限制和下一阶段入口。任何用户定义
 的阻塞条件成立时，当前阶段改为 `blocked`，并停止后续阶段。
+
+### Stage 7：反思修复、SQL 指纹与循环终止
+
+- 阶段状态：`completed`
+- 上一阶段：Stage 6 真实执行，提交 `1a301aa`
+- 设计文档：
+  `docs/superpowers/specs/2026-07-28-stage-7-reflection-repair-design.md`
+- 实施计划：
+  `docs/superpowers/plans/2026-07-28-stage-7-reflection-repair.md`
+- 计划修改范围：
+  - `app/reflection/`
+  - `tests/unit/test_sql_fingerprint.py`
+  - `tests/unit/test_attempt_history.py`
+  - `tests/unit/test_reflection_routing.py`
+  - `tests/security/test_reflection_safety.py`
+  - `tests/integration/test_reflection_repair_pipeline.py`
+  - `docs/decisions/0007-reflection-repair.md`
+  - `README.md`
+  - 本设计、实施计划和执行台账
+- 验证命令：
+  - `.venv/bin/python -m pytest tests/unit -q`
+  - `.venv/bin/python -m pytest tests/security -q`
+  - `.venv/bin/python -m pytest tests/integration -q -m integration`
+  - `.venv/bin/python -m compileall -q app tools tests`
+  - `.venv/bin/python -m pip check`
+  - `docker compose -f infrastructure/pagila/compose.yaml config --quiet`
+  - `git diff --check`
+- 实际修改范围：
+  - `app/reflection/`
+  - `tests/unit/test_sql_fingerprint.py`
+  - `tests/unit/test_attempt_history.py`
+  - `tests/unit/test_reflection_routing.py`
+  - `tests/security/test_reflection_safety.py`
+  - `tests/integration/test_reflection_repair_pipeline.py`
+  - `docs/decisions/0007-reflection-repair.md`
+  - `README.md`
+  - 本设计、实施计划和执行台账
+- TDD 失败证据：
+  - `app.reflection` 不存在，三个单元测试和一个安全测试均在收集阶段以
+    `ModuleNotFoundError` 失败；
+  - 最小指纹、历史、预算和路由实现后聚焦测试转绿；
+  - 新增未加引号标识符大小写等价红灯，首次证明指纹不同；指纹序列化前按
+    PostgreSQL 规则规范标识符后转绿，同时保留加引号大小写差异；
+  - 独立审查红灯证明 TokenError 会逃逸、注释可绕过指纹、History 可变容器会
+    破坏不变量、成功校验可与当前 attempt SQL 错配；分别补齐词法失败原文 hash、
+    `comments=False`、tuple/frozenset 强校验和当前 SQL 指纹绑定；
+  - 复审 Low 的非法修复状态和“硬错误 + 修复策略”可直接构造，新增 2 项红灯
+    后补齐状态类型与 error/route/strategy/code 语义绑定；
+  - PG-MVP-018 真实修复管线和 A→B→A 集成测试通过。
+- 测试结果：
+  - Stage 7 聚焦单元/安全测试：`52 passed`
+  - Stage 7 真实 Pagila 修复集成测试：`2 passed`
+  - Stage 1–7 单元测试：`335 passed`
+  - Stage 1–7 安全测试：`57 passed`
+  - Stage 1–7 Pagila/本地协议集成测试：`62 passed`
+  - `python -m compileall`：通过
+  - `pip check`：通过
+  - Docker Compose 配置检查：通过
+  - `git diff --check`：通过
+  - 受保护文件 SHA-256：与基线一致
+  - 作用域 Secret 扫描：未发现真实凭据；README 仅有环境变量占位 DSN
+- 代码审查结果：
+  - 初审：`blocking=0`、`high=4`。四项为 TokenError 未归一化、注释绕过去重、
+    可变 History 容器破坏不变量、校验结果未绑定当前 attempt；均以失败测试
+    复现并修复。
+  - 初次复审确认四项 High 全部关闭，仅余文档计数 medium 和两个模型构造
+    low；计数已刷新，两个 low 均已以红灯加固。
+  - 最终独立复审：`blocking=0`、`high=0`、`medium=0`、`low=0`，
+    Approved。
+- 阶段提交 SHA：待 Stage 8 入口回填
+- 遗留问题：无
+- 下一阶段：Stage 8 LangGraph Workflow
