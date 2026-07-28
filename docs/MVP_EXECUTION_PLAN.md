@@ -24,8 +24,8 @@
 
 | 阶段 | 当前状态 | 设计文档 | 实施计划 | 阶段提交 SHA | 下一阶段 |
 |---|---|---|---|---|---|
-| Stage 3 SQL 安全校验 | ready_to_commit | `docs/superpowers/specs/2026-07-28-stage-3-sqlglot-validation-design.md` | `docs/superpowers/plans/2026-07-28-stage-3-sqlglot-validation.md` | 未产生 | Stage 4 |
-| Stage 4 Schema Linking | not_started | 进入阶段后创建 | 进入阶段后创建 | 未产生 | Stage 5 |
+| Stage 3 SQL 安全校验 | completed | `docs/superpowers/specs/2026-07-28-stage-3-sqlglot-validation-design.md` | `docs/superpowers/plans/2026-07-28-stage-3-sqlglot-validation.md` | `a1dba99` | Stage 4 |
+| Stage 4 Schema Linking | completed | `docs/superpowers/specs/2026-07-28-stage-4-schema-linking-design.md` | `docs/superpowers/plans/2026-07-28-stage-4-schema-linking.md` | Stage 5 入口回填 | Stage 5 |
 | Stage 5 SQL 生成 | not_started | 进入阶段后创建 | 进入阶段后创建 | 未产生 | Stage 6 |
 | Stage 6 真实执行 | not_started | 进入阶段后创建 | 进入阶段后创建 | 未产生 | Stage 7 |
 | Stage 7 反思修复 | not_started | 进入阶段后创建 | 进入阶段后创建 | 未产生 | Stage 8 |
@@ -37,7 +37,7 @@
 
 ### Stage 3：SQLGlot PostgreSQL AST 与安全校验
 
-- 阶段状态：`ready_to_commit`
+- 阶段状态：`completed`
 - 上一阶段：Stage 2 元数据读取，提交 `8424ae9`
 - 设计文档：
   `docs/superpowers/specs/2026-07-28-stage-3-sqlglot-validation-design.md`
@@ -92,9 +92,74 @@
   - 首次复审确认上述修复后，另发现 1 high：自定义 CAST 目标可调用类型输入
     函数。已增加显式内建目标 allowlist、参数数量/类型检查和两条安全回归。
   - 最终独立复审：通过；`blocking=0`，`high=0`
-- 阶段提交 SHA：尚未产生
+- 阶段提交 SHA：`a1dba99`
 - 遗留问题：无
 - 下一阶段：Stage 4 Schema Linking
+
+### Stage 4：确定性 Schema Linking
+
+- 阶段状态：`completed`
+- 上一阶段：Stage 3 SQL 安全校验，提交 `a1dba99`
+- 设计文档：
+  `docs/superpowers/specs/2026-07-28-stage-4-schema-linking-design.md`
+- 实施计划：
+  `docs/superpowers/plans/2026-07-28-stage-4-schema-linking.md`
+- 计划修改范围：
+  - `app/schema_linking/`
+  - `tests/unit/test_schema_linking_models.py`
+  - `tests/unit/test_schema_linker_*.py`
+  - `tests/security/test_schema_linker_permissions.py`
+  - `tests/integration/test_pagila_schema_linking.py`
+  - `docs/decisions/0004-deterministic-schema-linking.md`
+  - `README.md`
+  - `docs/MVP_EXECUTION_PLAN.md`
+- 验证命令：
+  - `.venv/bin/python -m pytest tests/unit -q`
+  - `.venv/bin/python -m pytest tests/security -q`
+  - `.venv/bin/python -m pytest tests/integration -q -m integration`
+  - `.venv/bin/python -m compileall -q app tools tests`
+  - `.venv/bin/python -m pip check`
+  - `docker compose -f infrastructure/pagila/compose.yaml config --quiet`
+  - `git diff --check`
+- 实际修改范围：
+  - `app/schema_linking/`
+  - `tests/unit/test_schema_linking_models.py`
+  - `tests/unit/test_schema_linker_*.py`
+  - `tests/security/test_schema_linker_permissions.py`
+  - `tests/integration/test_pagila_schema_linking.py`
+  - `docs/decisions/0004-deterministic-schema-linking.md`
+  - `README.md`
+  - 本设计、实施计划和执行台账
+- TDD 失败证据：
+  - `app.schema_linking` 缺失导致契约测试收集失败；
+  - `link_schema` 缺失导致授权和安全测试收集失败；
+  - `_tokenize` 缺失导致评分测试收集失败；
+  - 普通 Top-K 首次把所需 FK 中间表排除，路径测试失败；加入授权图 BFS 后
+    通过。
+- 测试结果：
+  - Stage 1–4 单元测试：`220 passed`
+  - Stage 1–4 安全测试：`32 passed`
+  - Stage 1–4 Pagila 集成测试：`49 passed`
+  - Stage 4 Pagila Schema Linking Case：`15 passed`
+    （PG-MVP-001～014、018）
+  - 表字段召回：15/15 Case 全部覆盖，未授权对象命中数 0
+  - 授权快照中真实存在的 Gold JOIN 边全部由返回路径覆盖
+  - `compileall`、`pip check`、Docker Compose 配置和
+    `git diff --check`：通过
+  - 三份受保护文件 SHA-256：与基线一致
+- 代码审查结果：
+  - 初审：`blocking=0`、`high=1`。high 为 FK 连通表可能在关系排序参与前被
+    零分噪声占满 Top-K；新增宽范围红灯后，以正命中为种子按最短 FK 距离提升
+    关联零分表，修复通过。
+  - 初次复审：high 已修复，另有 3 个 medium：带 FK 的无命中 fallback 顺序、
+    Pagila Gold JOIN 边真空断言、缺失字段后重新 Linking 测试缺口。
+  - 三项 medium 均已修复；最终独立复审：
+    `blocking=0`、`high=0`、`medium=0`，Approved。
+- 阶段提交 SHA：提交后在 Stage 5 入口回填
+- 遗留问题：Pagila 3.1.0 的 `payment` 分区父表不携带
+  `customer_id → customer.customer_id` 物理 FK，Stage 4 不伪造该路径；
+  其余真实 Gold JOIN 边均已覆盖。
+- 下一阶段：Stage 5 SQL 生成
 
 ## 阶段记录
 

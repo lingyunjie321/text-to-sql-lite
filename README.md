@@ -35,7 +35,18 @@ Text-to-SQL 闭环。
 - 结构化、可路由且不泄露 SQL 或对象名的校验结果；
 - 完整 P0 安全矩阵和真实 Pagila Gold SQL 校验回归。
 
-Schema Linking 属于第四阶段，尚未实现。
+第四开发阶段已实现：
+
+- Unicode NFKC、snake_case/camelCase 分词和确定性 BM25；
+- 表名、字段名、显式 aliases 和 comments 检索；
+- 字段命中向表聚合，固定 `Top-K=10`；
+- 授权过滤先于索引统计、评分、FK 建图和版本计算；
+- 授权 FK 图的确定性最短路径和必要中间表扩展；
+- 不可变候选表、候选字段和 JOIN Path 契约；
+- 无命中窄授权 fallback 和授权视图 `schema_version`；
+- 真实 Pagila Gold Case 的表字段召回集成测试。
+
+SQL 生成属于第五阶段，尚未实现。
 
 ## 本地准备
 
@@ -122,6 +133,25 @@ if result.is_valid:
 上下文。`is_valid` 为 false 时不得执行；失败结果不会返回部分 SQL、对象引用或
 SQLGlot 原始错误。
 
+## 关联 Schema
+
+```python
+from app.schema_linking import link_schema
+
+
+linking = link_schema(
+    "列出影片标题和语言名称",
+    allowed_schemas=("public",),
+    allowed_tables=("public.film", "public.language"),
+    snapshot=snapshot,
+)
+```
+
+Linker 只使用传入的可信授权快照，不查询数据库，也不会根据问题扩大权限。
+`candidate_tables` 最多包含 10 张表，`candidate_fields` 提供这些表的完整字段
+上下文，`join_paths` 只包含授权快照中的真实 FK。调用方不得把不同
+`schema_version` 的候选和快照混用。
+
 ## 运行测试
 
 单元测试不需要数据库：
@@ -160,4 +190,6 @@ docker compose -f infrastructure/pagila/compose.yaml down
 - 不要把真实 DSN 或密码写进 `.env.example`、源码、提交或日志；
 - Connector 不负责 SQL 安全解析；所有模型 SQL 必须先经过
   `app.validation.validate_sql()`；
+- Schema Linking 的候选不是新的授权结果；后续 SQL 校验仍必须使用原始可信
+  `allowed_schemas`、`allowed_tables` 和同版本快照；
 - 第一阶段的只读账号和只读事务是数据库侧第二道防线，不替代上层校验。
