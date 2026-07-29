@@ -2,7 +2,9 @@
 
 ## 状态
 
-Accepted
+Accepted for MVP Stage 8。节点数量和固定边集合于 2026-07-29 被
+ADR 0011 部分 supersede；其余 State、Runtime Context、安全、预算和错误路由
+决策继续有效。
 
 ## 决策
 

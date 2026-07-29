@@ -1,6 +1,9 @@
 # MVP 编码入口
 
-> 后续 Codex 开发优先读取本页，再按需进入详细章节。MVP 目标是完成 PostgreSQL + Pagila 上安全、真实、可评测的 Text-to-SQL 最小闭环。
+> 后续 Codex 开发优先读取本页，再按需进入详细章节。MVP 基线是
+> PostgreSQL + Pagila 上安全、真实、可评测的 Text-to-SQL 最小闭环；
+> “补充实现”中的增强版与生产版能力同样属于最终交付必做范围，但必须按
+> 阶段 0～5 形成可独立验收的纵向闭环。
 
 ## 必须实现
 
@@ -15,46 +18,72 @@
 - FastAPI `POST /api/v1/text-to-sql`。
 - Trace、Token、节点耗时和 Pagila 离线评测。
 
-## 暂不实现
+## 补充实现（最终交付必做）
 
 - 复杂度路由、动态 Top-K、多模型路由。
 - Embedding、RRF、Rerank、动态 Few-shot 和业务 RAG。
 - 多轮 Session、Checkpoint 恢复和长期 Memory。
 - MySQL、StarRocks、多方言和跨数据源查询。
-- 多租户、列级/行级权限、Gateway、MCP、Celery。
 - 缓存、导出、完整生产监控和容量治理。
 
-## Workflow
+阶段顺序固定为：
+
+0. 规格和验收基线；
+1. 检索与路由增强；
+2. 业务知识与动态 Few-shot；
+3. Session、Checkpoint 与 Memory；
+4. 多数据库、多方言与跨数据源；
+5. 缓存、导出和生产治理。
+
+安全、授权、版本隔离、Trace、指标和测试从每个阶段同步实现，不留到阶段 5
+补做。每项能力分别记录 `functional_complete`、`integration_complete` 和
+`real_environment_validated`；确定性替身通过不能冒充真实环境验证。
+
+## 暂不实现
+
+- 多租户、列级/行级权限、Gateway、MCP、Celery。
+
+阶段 5 的租户级运营配额只使用可信身份注入的 `tenant_id` 作为限流和审计键，
+不等价于完整多租户数据模型、租户自助管理或列级/行级 RBAC。
+
+## 当前 Workflow 目标
 
 ```text
 RequestPreprocess
 → PermissionResolve
-→ SchemaLinking
+→ SchemaLinking（授权内探测，K=20）
+→ ComplexityRoute
+→ SchemaLinking（同版本物化，K=5/10/20）
 → GenerateSQL
 → ValidateSQL
 → ExecuteSQL
 → Finalize
 
-可修复 SQL 错误 → ReflectSQL → SchemaLinking 或 GenerateSQL
+Schema 错误       → ReflectSQL → SchemaLinking（重新探测与决策）
+语法/方言错误     → ReflectSQL → GenerateSQL
 语义不唯一       → Clarification → Finalize
 权限/安全/超时   → Finalize
 ```
 
-MVP 只有九个节点：
+MVP Stage 8 的历史基线只有九个节点。增强阶段 1 增加显式
+`ComplexityRouteNode`，当前目标共有十种业务节点；同一个
+`SchemaLinkingNode` 在正常检索周期内执行“探测”和“物化”两次：
 
 1. `RequestPreprocessNode`
 2. `PermissionResolveNode`
 3. `SchemaLinkingNode`
-4. `GenerateSQLNode`
-5. `ValidateSQLNode`
-6. `ExecuteSQLNode`
-7. `ReflectSQLNode`
-8. `ClarificationNode`
-9. `FinalizeNode`
+4. `ComplexityRouteNode`
+5. `GenerateSQLNode`
+6. `ValidateSQLNode`
+7. `ExecuteSQLNode`
+8. `ReflectSQLNode`
+9. `ClarificationNode`
+10. `FinalizeNode`
 
 ## 核心数据结构
 
-`SQLTaskState` 只保存请求、授权范围、Schema 候选、SQL attempt、校验/执行结果、错误、修复计数和观测数据。完整字段见第 4 节。
+`SQLTaskState` 只保存请求、授权范围、Schema 候选、版本化复杂度决策、
+SQL attempt、校验/执行结果、错误、修复计数和观测数据。完整字段见第 4 节。
 
 ## 安全硬约束
 
@@ -89,7 +118,9 @@ MVP 只有九个节点：
 
 # Text-to-SQL 项目复现规格
 
-本文是 MVP 编码依据。原项目历史指标和扩展能力只保存在《Text-to-SQL原项目参考信息》，不构成新项目验收线。本文中的默认值均为新项目决策。
+本文是 MVP 基线以及增强版、生产版分阶段交付的编码依据。原项目历史指标只保存在
+《Text-to-SQL原项目参考信息》，不构成新项目验收线，也不能直接新增功能。
+本文中的默认值均为新项目决策。
 
 ## 1. 项目目标与非目标
 
@@ -102,7 +133,7 @@ MVP 只有九个节点：
 - 写入、DDL、存储过程或事务编排。
 - 复刻原项目成绩、Prompt、模型和半导体业务知识。
 - BI 可视化或自然语言分析报告。
-- “暂不实现”列表中的增强版与生产化能力。
+- “暂不实现”列表中的完整多租户、列级/行级权限、Gateway、MCP 和 Celery。
 
 成功仅表示 SQL 通过安全门并执行成功；业务语义正确性由离线 Gold Result 判断。
 
@@ -121,6 +152,20 @@ MVP 只有九个节点：
 | API | 同步 `POST /api/v1/text-to-sql`，总超时 120 秒 |
 | 观测 | Trace、attempt、错误、Token、节点耗时 |
 | 评测 | 固定 Pagila、Gold Schema/Fields/SQL/Result、独立安全集 |
+
+### 2.1 最终交付阶段
+
+| 阶段 | 输入 | 主要输出 | 失败与安全边界 |
+|---|---|---|---|
+| 0 规格与验收 | 本规格、测试规格、现有代码与正式报告 | 无冲突行为契约、ADR、三层完成门禁 | 未冻结的行为和参数不得编码 |
+| 1 检索与路由 | 授权 Schema、问题、版本化模型配置 | 复杂度、动态 K、双路召回、RRF、Rerank、模型路由、裁剪上下文 | 任一通道都先授权过滤；旧索引拒绝；所有 SQL 仍重新校验 |
+| 2 业务知识 | 已批准术语、指标、参考 SQL | 动态 Few-shot、业务 RAG、知识版本与撤销 | 未执行、未对账或未批准 SQL 不得写入长期知识 |
+| 3 会话与记忆 | 可信身份、Session、当前权限和版本 | Checkpoint、恢复、Compaction、三级 Memory | 恢复必须重新校验身份、数据源、Schema 和知识版本 |
+| 4 多源与方言 | Connector/Dialect Profile、数据源注册 | MySQL、StarRocks、跨源 QueryPlan 和受限合并 | 每个子查询重新授权和 AST 校验；真实数据库契约是门禁 |
+| 5 生产治理 | 可信身份、版本键、结果存储、遥测 | 安全缓存、分页导出、限流熔断、容量、部署与保留 | 缓存/导出不得跨权限或版本；升级回滚和删除须可验证 |
+
+每阶段只有同时满足明确契约、真实实现、单元和必要集成/E2E、超时取消降级、
+配置和观测、权限隔离、迁移说明、实际测试通过及文档一致，才可标记完成。
 
 ## 3. 系统架构与请求链路
 
@@ -143,13 +188,18 @@ Trace / Evaluation
 1. API 校验长度和数据源，生成 `request_id`、`trace_id`，注入可信身份。
 2. 预处理问题和时间表达式。
 3. 权限节点得到允许的 Schema/表。
-4. Schema Linking 在授权范围内返回候选表、字段和 JOIN Path。
-5. 不能唯一确定业务对象时直接澄清，不生成 SQL。
-6. 生成节点返回 PostgreSQL SQL。
-7. 校验节点执行 AST、只读、对象和函数检查。
-8. 真实数据库只读执行并规范化结果。
-9. 语法、Schema 或方言错误进入有限修复；其他错误按路由终止。
-10. Finalize 形成唯一 `FinalStatus` 和响应。
+4. Schema Linking 在授权范围内以最大候选预算 20 生成探测候选。
+5. ComplexityRoute 根据问题结构、正分候选、JOIN Path 和修复历史生成
+   `simple/medium/complex`、5/10/20 与理由码。
+6. Schema Linking 在同一授权 `schema_version` 上按决策预算物化最终候选；
+   不再次读取数据库元数据。
+7. 不能唯一确定业务对象时直接澄清，不生成 SQL。
+8. 模型路由选择服务端批准的生成配置，生成节点返回目标方言 SQL。
+9. 校验节点执行 AST、只读、对象和函数检查。
+10. 真实数据库只读执行并规范化结果。
+11. Schema 错误重新探测、决策和 Linking；语法/方言错误直接有限重生成；
+    其他错误按路由终止。
+12. Finalize 形成唯一 `FinalStatus` 和响应。
 
 ## 4. AgentState 核心字段
 
@@ -174,6 +224,7 @@ class SQLTaskState(BaseModel):
     candidate_fields: list[CandidateField] = Field(default_factory=list)
     join_paths: list[JoinPath] = Field(default_factory=list)
     schema_version: str | None = None
+    complexity_decision: ComplexityDecision | None = None
 
     current_sql: str | None = None
     sql_attempts: list[SQLAttempt] = Field(default_factory=list)
@@ -199,7 +250,8 @@ class SQLTaskState(BaseModel):
 |---|---|---|---:|
 | 请求与数据源 | API、Preprocess | 全部节点 | 是 |
 | 授权范围 | Permission | Linking、Generate、Validate | 记录版本与数量 |
-| Schema 候选 | Linking | Generate、Reflect | 记录对象 ID 和分数 |
+| Schema 候选 | Linking | Generate、Reflect | 只记录版本、数量和脱敏分数摘要 |
+| 复杂度决策 | ComplexityRoute | Linking、模型路由、上下文裁剪 | 等级、K、理由码和策略版本 |
 | SQL attempts | Generate、Validate、Execute | Reflect、Finalize | 是，结果脱敏 |
 | 错误与计数 | 失败节点、Reflect、Connector wrapper | Router、Finalize | 是 |
 | 终态与观测 | Finalize、通用 wrapper | API、评测 | 是 |
@@ -209,6 +261,10 @@ class SQLTaskState(BaseModel):
 - `GenerateSQLNode` 创建 attempt；Validate/Execute 只更新当前 attempt。
 - `repair_count` 仅在接受一个新的修复 SQL 后增加。
 - 基础设施重试只增加 `infrastructure_retry_count`。
+- 探测 Linking 固定使用 20；最终 Linking 必须使用
+  `complexity_decision.schema_top_k`，且两次结果使用同一授权快照版本。
+- `ComplexityRouteNode` 不读取数据库、不调用 LLM，也不使用 Pagila
+  `difficulty`、Gold SQL、Gold fields 或 Gold Result。
 - Trace 追加写；凭据、完整 Prompt 和未脱敏结果不进入 State。
 
 ## 5. Workflow 节点契约
@@ -236,9 +292,27 @@ class SQLTaskState(BaseModel):
 - **职责**：找到回答问题所需的表、字段和 JOIN Path。
 - **核心输入**：`normalized_question`、授权范围、Schema 元数据。
 - **核心输出**：候选表、字段、JOIN Path、`schema_version`。
-- **主要处理**：词法/BM25 召回，字段命中聚合到表，按 FK 图补中间表，截断 Top-K=10。
+- **主要处理**：首次从 Connector 读取授权快照并以 K=20 探测；复杂度决策后
+  复用同一快照，以 K=5/10/20 重新物化候选。双路召回实现后，两次处理均复用
+  同版本检索语料和索引。
 - **失败路由**：无候选或候选互斥 → Clarification；修复时仍无对象 → Finalize。
-- **下一节点**：GenerateSQL。
+- **下一节点**：探测完成 → ComplexityRoute；物化完成 → GenerateSQL。
+
+### ComplexityRouteNode
+
+- **职责**：显式、确定性地决定复杂度和 Schema Top-K，并为后续服务端模型
+  路由及上下文预算选择提供封闭等级。
+- **核心输入**：`normalized_question`、探测候选、JOIN Path、
+  `has_repair_history`、版本化本地策略。该布尔值由已有 attempt、
+  `repair_strategy` 和 `repair_count` 派生，不改变现有修复计数语义。
+- **核心输出**：`ComplexityDecision`，至少包含 `level`、
+  `schema_top_k`、`reason_codes` 和 `policy_version`。
+- **主要处理**：结合聚合、窗口、子查询、时间、正分多表、相关 JOIN Path 和
+  修复历史；相同输入与版本必须产生相同结果。
+- **硬边界**：不调用 Connector、Embedding、Reranker 或 LLM；不扩大授权；
+  不读取评测 `difficulty` 或任何 Gold 预期。
+- **失败路由**：无效或不一致证据 → Finalize/`FAILED_INTERNAL`。
+- **下一节点**：SchemaLinking（同版本物化）。
 
 ### GenerateSQLNode
 
@@ -369,6 +443,27 @@ FinalStatus =
 
 修复时可重新检索，但仍受 Top-K 和权限约束。Embedding、RRF、Rerank、动态 Top-K、Few-shot 和业务指标知识库均不进入 MVP。
 
+### 增强阶段 1 算法
+
+1. 授权过滤必须发生在分词、BM25 文档统计、Embedding、融合和 Rerank 之前。
+2. 探测候选固定上限 20；显式 `ComplexityRouteNode` 决定最终
+   `simple=5`、`medium=10`、`complex=20`。
+3. BM25 与 Embedding 各自产生稳定 rank；不得直接混合两路原始分值。
+4. 使用 `RRF k=60` 融合，保存每路 rank 和贡献，使用规范对象 ID 稳定
+   tie-break。
+5. Rerank 使用可解释白名单特征：字段覆盖、已批准 alias、PK/FK 连通、
+   中间表、JOIN path 成本、表粒度和断开惩罚；不得使用 Gold 特征。
+6. 最终物化只保留决策预算内候选；上下文裁剪优先保留命中字段、PK/FK、
+   JOIN、过滤、聚合、时间和粒度字段。
+7. 索引键至少绑定 datasource、授权范围摘要、Schema 版本、语义版本、
+   Embedding 模型、文档构建器和融合/Rerank 策略版本。
+8. Embedding 或 Rerank 故障只允许按预定义矩阵降级到同版本安全路径；不得使用
+   陈旧索引、扩大权限或隐藏降级。
+
+阶段 1 调参只使用独立非 Gold development/calibration 数据。18 条 Pagila
+Gold 只用于冻结后的最终验收，不进入检索语料、Few-shot、训练、权重选择或
+重复抽样择优。
+
 ## 8. SQL 生成
 
 ### 上下文
@@ -389,7 +484,11 @@ class GeneratedSQL(BaseModel):
 
 二者必须且只能出现一个。Prompt 负责约束输出格式和优先使用提供的对象；权限、安全和对象真实性由确定性校验负责。
 
-每个 attempt 保存序号、SQL、指纹、校验结果、执行结果和错误。MVP 不启用 Few-shot 和业务 RAG，避免在 Gold Case 尚未冻结时发生测试泄漏。
+每个 attempt 保存序号、SQL、指纹、校验结果、执行结果和错误。MVP 不启用
+Few-shot 和业务 RAG。增强阶段 1 的模型路由只能从服务端版本化路由表选择；
+请求不能指定模型，基础设施回退最多一次且必须保持相同数据边界。阶段 2
+Few-shot 和业务 RAG 上线前必须完成参考 SQL 的验证、对账、批准、版本和撤销
+闭环。
 
 ## 9. AST 与安全校验
 
@@ -511,7 +610,14 @@ workflow:
   max_workflow_steps: 32
 
 schema_linking:
-  top_k: 10
+  probe_top_k: 20
+  simple_top_k: 5
+  medium_top_k: 10
+  complex_top_k: 20
+  rrf_k: 60
+
+complexity_routing:
+  policy_version: complexity-v1
 
 llm:
   provider: ${MODEL_PROVIDER}
@@ -539,8 +645,12 @@ time:
 - SQL 指纹、`ErrorType`、稳定错误码、修复策略。
 - 输入/输出 Token、节点耗时、数据库耗时、返回行数、是否截断。
 - Prompt 版本、模型配置 ID、Schema 版本。
+- 复杂度等级、实际 Top-K、理由码和策略版本。
+- BM25/Embedding 版本与候选数、RRF 配置摘要、Rerank 理由码、
+  上下文裁剪前后计数、模型路由和降级状态。
 
-不得记录数据库凭据、完整 Prompt、未脱敏样例值和完整敏感结果。Trace sink 失败只记录降级事件，不改变已完成的业务结果。
+不得记录问题原文、SQL 原文、表/字段原名、数据库凭据、完整 Prompt、未脱敏
+样例值和完整敏感结果。Trace sink 失败只记录降级事件，不改变已完成的业务结果。
 
 ## 15. 项目目录
 
@@ -584,7 +694,8 @@ docs/
 - [ ] 实现 SQLGlot AST、安全和函数策略。
 - [ ] 实现结构化 SQL 生成。
 - [ ] 实现真实只读执行、超时、截断和取消。
-- [ ] 实现九个 Workflow 节点和路由。
+- [ ] 保留 MVP 九节点基线，并在增强阶段 1 增加显式
+      `ComplexityRouteNode`，形成十种节点。
 - [ ] 实现修复预算、SQL 指纹和循环终止。
 - [ ] 实现 FastAPI Request/Response。
 - [ ] 实现 Trace、Comparator 和 JSONL Case runner。

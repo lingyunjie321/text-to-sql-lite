@@ -7,8 +7,10 @@ Accepted / Release qualification pending
 ## 决策
 
 Stage 10 使用“先生成脱敏证据报告，再逐 Case 审核，最后逐 Case 更新状态”的
-三段式验收。Runner 不自动修改 Gold Case，也不把测试问题、Gold SQL、Gold
-字段或期望结果加入模型消息。
+三段式验收。Runner 不自动修改 Gold Case。Gold question 只作为当前被测请求
+的 user payload 进入 Workflow；不得进入 system prompt、静态 Few-shot、
+RAG/检索索引、训练或调参集。Gold SQL、Gold 字段、期望结果、评测标签和失败
+原因不得加入模型消息或任何运行时知识。
 
 评测固定：
 
@@ -81,6 +83,8 @@ manifest SHA-256 校验清单，再构造 `FrozenSemanticConnector`。请求期�
 `run_workflow`、`WorkflowContext` 或 `ApplicationServices` 的公共接口。
 Trace 只记录 request/trace ID、终态、公开错误、节点路由与耗时、SQL 指纹、
 校验/执行布尔值、Token、模型配置摘要、版本、修复/重试计数和数据库计数。
+增强阶段还可记录复杂度等级、动态 K、封闭理由码、检索/融合/Rerank/裁剪和
+模型路由的版本化安全摘要；不得因此加入问题或对象原文。
 
 Trace 不保存问题、SQL、Prompt、Schema 样例值、结果行、DSN、API Key 或原始
 异常。Sink 失败只写固定降级日志，不改写已完成业务结果。
