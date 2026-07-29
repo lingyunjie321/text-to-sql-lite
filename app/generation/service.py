@@ -2,6 +2,7 @@ from app.generation.models import (
     GenerationContext,
     GenerationResult,
 )
+from app.generation.normalization import normalize_generation_result
 from app.generation.prompt import build_generation_messages
 from app.generation.provider import LLMProvider
 
@@ -12,4 +13,7 @@ def generate_sql(
     provider: LLMProvider,
 ) -> GenerationResult:
     messages = build_generation_messages(context)
-    return provider.generate(messages)
+    return normalize_generation_result(
+        provider.generate(messages),
+        snapshot=context.snapshot,
+    )

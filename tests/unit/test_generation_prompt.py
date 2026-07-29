@@ -25,6 +25,7 @@ def _table(
     table_name: str,
     *columns: str,
     comment: str | None = None,
+    aliases: dict[str, tuple[str, ...]] | None = None,
 ) -> TableMetadata:
     return TableMetadata(
         schema_name="public",
@@ -43,6 +44,11 @@ def _table(
                 ),
                 nullable=False,
                 comment=None,
+                aliases=(
+                    aliases.get(column_name, ())
+                    if aliases is not None
+                    else ()
+                ),
             )
             for position, column_name in enumerate(columns, start=1)
         ),
@@ -173,6 +179,9 @@ def test_prompt_serializes_only_candidate_schema_context() -> None:
     payload = json.loads(messages[1].content)
 
     assert payload["question"] == "列出影片标题和语言名称"
+    assert payload["prompt_version"] == (
+        "mvp-v1-projection-alias-view-semantics-v1"
+    )
     assert payload["normalized_time"] == "2026-07-28T00:00:00+08:00"
     assert payload["dialect"] == "postgres"
     assert payload["schema_version"] == SNAPSHOT.schema_version
@@ -249,6 +258,53 @@ def test_prompt_sources_descriptive_metadata_from_snapshot() -> None:
     assert film_table["relation_kind"] == "table"
     assert film_table["comment"] is None
     assert film_id["comment"] is None
+
+
+def test_prompt_sources_field_aliases_only_from_snapshot() -> None:
+    context = _context()
+    film_with_alias = _table(
+        "film",
+        "film_id",
+        "title",
+        "language_id",
+        aliases={"title": ("catalog_name",)},
+    )
+    snapshot = build_schema_snapshot(
+        tables=(film_with_alias, LANGUAGE, UNSELECTED),
+        primary_keys=SNAPSHOT.primary_keys,
+        foreign_keys=SNAPSHOT.foreign_keys,
+        unique_constraints=(),
+        unique_indexes=(),
+    )
+    linking = replace(
+        context.schema_linking,
+        schema_version=snapshot.schema_version,
+    )
+
+    payload = json.loads(
+        build_generation_messages(
+            replace(
+                context,
+                schema_linking=linking,
+                snapshot=snapshot,
+            )
+        )[1].content
+    )
+    title = next(
+        field
+        for field in payload["candidate_fields"]
+        if field["object_id"] == "public.film.title"
+    )
+    unaliased = next(
+        field
+        for field in payload["candidate_fields"]
+        if field["object_id"] == "public.film.film_id"
+    )
+
+    assert title["aliases"] == ["catalog_name"]
+    assert unaliased["aliases"] == []
+    assert "source_definition_sha256" not in payload
+    assert "polarity" not in payload
 
 
 def test_prompt_rejects_more_than_fixed_top_k_tables() -> None:

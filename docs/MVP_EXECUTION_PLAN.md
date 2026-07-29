@@ -30,8 +30,8 @@
 | Stage 6 真实执行 | completed | `docs/superpowers/specs/2026-07-28-stage-6-real-execution-design.md` | `docs/superpowers/plans/2026-07-28-stage-6-real-execution.md` | `1a301aa` | Stage 7 |
 | Stage 7 反思修复 | completed | `docs/superpowers/specs/2026-07-28-stage-7-reflection-repair-design.md` | `docs/superpowers/plans/2026-07-28-stage-7-reflection-repair.md` | `0d4c6b8` | Stage 8 |
 | Stage 8 LangGraph Workflow | completed | `docs/superpowers/specs/2026-07-28-stage-8-langgraph-workflow-design.md` | `docs/superpowers/plans/2026-07-28-stage-8-langgraph-workflow.md` | `22f3a91` | Stage 9 |
-| Stage 9 FastAPI | completed | `docs/superpowers/specs/2026-07-28-stage-9-fastapi-design.md` | `docs/superpowers/plans/2026-07-28-stage-9-fastapi.md` | 待 Stage 10 入口回填 | Stage 10 |
-| Stage 10 评测与安全回归 | not_started | 进入阶段后创建 | 进入阶段后创建 | 未产生 | 最终验收 |
+| Stage 9 FastAPI | completed | `docs/superpowers/specs/2026-07-28-stage-9-fastapi-design.md` | `docs/superpowers/plans/2026-07-28-stage-9-fastapi.md` | `8120c73` | Stage 10 |
+| Stage 10 评测与安全回归 | implementation completed；qualification `not_passed` | `docs/superpowers/specs/2026-07-29-stage-10-evaluation-security-design.md` | `docs/superpowers/plans/2026-07-29-stage-10-evaluation-security.md` | 本阶段终局提交 | 等待用户决定是否合并 |
 
 ## 当前阶段
 
@@ -548,7 +548,216 @@
     覆盖）和 2 个 low（owned close 测试、计划路径）均已修复。
   - 最终独立复审：`blocking=0`、`high=0`、`medium=0`、`low=0`，
     Approved。
-- 阶段提交 SHA：待 Stage 10 入口回填
+- 阶段提交 SHA：`8120c73`
 - 遗留问题：Stage 6 已记录的 public-only 未限定表名边界仍存在；未新增
   Stage 9 问题。
 - 下一阶段：Stage 10 评测与安全回归
+
+### Stage 10：评测与安全回归
+
+- 阶段状态：工程实现 `completed`；MVP release qualification
+  `not_passed`
+- 上一阶段：Stage 9 FastAPI，提交 `8120c73`
+- 设计文档：
+  `docs/superpowers/specs/2026-07-29-stage-10-evaluation-security-design.md`
+- 实施计划：
+  `docs/superpowers/plans/2026-07-29-stage-10-evaluation-security.md`
+- 修改文件范围：
+  - `app/observability/`
+  - `app/api/bootstrap.py`
+  - `app/connectors/postgresql.py`
+  - `app/connectors/view_semantics.py`
+  - `app/connectors/view_semantics_lock.py`
+  - `app/generation/normalization.py`
+  - `app/generation/prompt.py`
+  - `app/generation/service.py`
+  - `app/workflow/nodes.py`
+  - `evaluation/`
+  - `infrastructure/pagila/view_semantic_*.json`
+  - `infrastructure/pagila/view_semantics.json`
+  - `tools/freeze_view_semantics.py`
+  - `tools/run_pagila_evaluation.py`
+  - `tests/` 中 Stage 10 单元、集成、安全测试及测试包标记
+  - `docs/decisions/0010-evaluation-trace-security.md`
+  - `evaluation/reports/pagila_mvp_stage10.md`
+  - `README.md`
+  - 本设计、实施计划和执行台账
+- 已完成的入口检查：
+  - 当前分支与 `origin/codex/mvp-stages-3-10` 同步；
+  - Stage 9 工作区干净；
+  - Stage 9 最终基线：单元 `411 passed`、安全 `75 passed`、集成
+    `68 passed`；
+  - 三份受保护文件 SHA-256 与基线一致；
+  - 2026-07-29 仅检查 `.env` 配置存在性：
+    `LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL` 均已配置，未读取或输出值；
+    真实模型凭据不再构成阻塞；
+  - 2026-07-29 用户授权仅对通过真实执行、比较和审核的 Case 修改
+    `status`，原 Gold 阻塞已解除；
+  - Pagila commit：
+    `fef9675714cfba1756df4719b5e36075a7ddf90e`；
+  - PostgreSQL：`16.14 (Debian 16.14-1.pgdg12+1)`；
+  - 运行时 data-only dump 在将随机 `restrict/unrestrict` nonce
+    规范化为固定 `TOKEN` 后，两次连续 SHA-256 均为：
+    `e584f0beb3817d1a6f3e35518192ba66cc8b14c50df08c34527d5b15e77bd567`；
+  - 运行时 schema-only dump SHA-256：
+    `74de0ad271945ff3ce8e21d9065d1c0178f01994a8f25c613afebcebed5933b2`；
+  - Stage 10 入口回归：单元 `411 passed`、安全 `75 passed`、集成
+    `68 passed`；
+  - `compileall`、`pip check`、Compose 和 `git diff --check`：通过。
+- TDD 与实现结果：
+  - 严格 Case loader、Comparator、安全 Trace、真实评测 Runner、报告、
+    两级审核摘要和单 Case 原子状态门均已实现；
+  - 正式评测 CLI 在加载凭据前验证静态 fixture 与运行时数据库基线；
+  - Gold 与预测在同一 `REPEATABLE READ READ ONLY` 事务和 Schema snapshot
+    中运行；
+  - 最终 SQL 必须与 Linker 同时命中 Gold 必需表字段；
+  - Comparator 已覆盖非有限数、1000 重复行、逻辑时间键和列名对齐；
+  - 实际数据库执行计数按每个 attempt 记录；
+  - 与 Gold 无关的确定性投影别名规范化仅处理直接列、`COUNT(普通列)`、
+    `SUM(普通列)` 和 `DATE_TRUNC(普通列, unit)`，跳过歧义并且不改值语义；
+  - 一次性收集全部测试曾暴露单元/集成同名模块冲突；增加测试包标记后，
+    全套可在单个 pytest 进程中收集和运行。
+#### 已作废的首次候选历史
+
+- Pagila 真实评测与逐条审核：
+  - 最新候选自动通过 `17/18`；
+  - PG-MVP-003 为 `EVALUATION_FIELD_RECALL_FAILED`，预测 584 行而 Gold
+    为 599 行；
+  - 审核通过 `0/18`，审核拒绝 `18/18`，verified `0/18`；
+  - 权限/危险 SQL `3/3` 安全拒绝，数据库执行与修复均为 0；
+  - 当前 Gold 文件 SHA-256：
+    `049e048b821e949936c1793d441f7adcda4660f10f8d0acf63e4f766a9726c22`；
+  - status-neutral SHA-256 保持：
+    `a00a8ec7496fc4e1533b2773e0267d555357a80be435a02dd70981d76ddb40d7`；
+  - Gold 已逐字节恢复到原始全 `draft` 状态；
+  - 结构化候选报告记录的 `initial_status=verified` 来自先前已作废的状态更新
+    尝试，故该报告只保留为 rejected 证据，不能作为合规验收证明。
+- 测试结果：
+  - 最终 blocked 快照单元：`502 passed`
+  - 最终 blocked 快照安全：`88 passed`
+  - 最终 blocked 快照真实 Pagila 集成：`73 passed`
+  - 最终 blocked 快照单进程全量回归：`663 passed`
+  - `compileall`：通过
+  - `pip check`：通过
+  - Docker Compose 配置检查：通过
+  - `git diff --check`：通过
+  - 当前 Gold 与 `HEAD` 逐字节一致，18 条状态均为 `draft`
+- 代码审查结果：
+  - 独立初审：`blocking=0`、`high=4`、`medium=4`、`low=1`；
+  - 4 个 high（CLI 基线自证、共享事务快照、最终 SQL 表字段门、Comparator
+    递归）均以失败测试修复；
+  - 4 个 medium（非有限数、逻辑时间键、修复执行计数、证据/审核摘要）均已
+    修复；
+  - low 为 PG-MVP-011 分区父表 FK 元数据缺口；保留诊断，并由最终 JOIN
+    字段命中和 599 行 Gold 完全比较补足验收证据；
+  - 最终独立复审发现两个 High：观察 PG-MVP-003 后增加 boolean 偏好属于
+    事后评测 coaching；`bpchar → TRIM(...)` 会改变值语义并造成范围漂移；
+  - 两项调整均未作为验收修复，值改写代码已移除；旧目标当时按阻塞规则停止。
+- 阶段提交 SHA：未产生
+- 历史遗留问题：
+  - 外部数据审查不允许再次经 FastAPI 把 Case 问题和 Schema 上下文发送到
+    未明示模型目的地；真实 Provider 已在 18 Case Workflow 评测验证，
+    FastAPI 闭环由固定 Stub + 同一真实 Pagila 集成测试验证；
+  - 真实模型 `temperature=0` 仍不保证跨运行字节级确定性；
+  - Stage 6 已记录的 public-only 未限定表名边界仍存在。
+  - 第二次只读阻塞审计确认：锁定 Pagila 的 `customer_list` 视图使用
+    `customer.activebool` 表示文本 `active`，但两个候选状态字段均无数据库
+    注释，当前元数据/Prompt 契约也不暴露视图定义；将该表达式临时合成为别名
+    会新增已见 Gold 驱动的生产语义；该事项随后已获用户明确授权，并由以下
+    恢复执行记录取代。
+
+#### 2026-07-29 恢复执行
+
+- 用户已明确授权受控、通用、可审计的冻结视图语义能力，并要求旧 17/18
+  报告永久作废。
+- 合成 TDD 已证明：
+  - 直接投影和简单 boolean CASE 标签的通用提取；
+  - 仅解包字符串字面量的一层 `::text` 无损 cast；
+  - 函数、拼接、非文本 cast、`NOT`、多字段、未授权依赖、歧义 lineage、
+    CTE/子查询和敏感标签 fail-closed；
+  - 普通请求不扫描视图，权限过滤早于语义派生；
+  - manifest 外部锚、请求 scope 过滤和 Prompt/Trace 泄漏防护。
+- 锁定 Pagila 候选账本包含 10 条逐来源证据。独立审核逐条批准 10/10；
+  runtime manifest 按语义聚合为 6 条，并保留候选/审核集合摘要。
+- 新 baseline 合同已绑定：
+  - 代码根、`pyproject.toml`、Python 实现/版本和 21 个行为相关实际依赖版本；
+  - 不含密码的数据库目标、连接池、超时、行数上限和重试配置；
+  - Prompt、Provider、Comparator、Evidence、Report 版本；
+  - 模型非秘密配置摘要；
+  - 原始/增强 Schema 版本、视图定义、scope、候选/审核和 manifest 摘要；
+  - Pagila/PostgreSQL/data/schema 与全 `draft` Gold 精确摘要；
+  - 自校验 `evaluation_baseline_id`。
+- Case evidence 已绑定 baseline ID；旧报告改为 invalidated version 并移入
+  `evaluation/reports/invalidated/`。
+- 恢复期红灯与修复：
+  - 字符串 `::text` 标签最初未抽取；
+  - 重复权威来源最初产生冗余 runtime entries；
+  - production 最初在 manifest 校验前加载模型凭据；
+  - code freeze 最初未覆盖 `pyproject.toml`/`tools/__init__.py`；
+  - evaluate 最初未强制精确全 `draft` 起点；
+  - Case evidence 最初可跨 baseline 重放；
+  - candidate/review 账本漂移最初未被静态冻结校验发现；
+  - 损坏 UTF-8 baseline/report 最初暴露解码错误。
+  上述项目均先以非 Gold 测试复现，再修复转绿。
+- 唯一一次完整独立初审已结束：
+  - `blocking=1`：测试用 baseline 与最新代码根不一致；
+  - `high=5`：旧报告跨 baseline 重放、不完整证据伪造通过、manifest 未精确
+    绑定审核聚合、依赖/数据库执行配置未冻结、投影 alias 碰撞；
+  - `medium=1`：报告派生指标和 verified 状态缺少完整一致性门；
+  - `low=2`：source digest 文档歧义和 fixture contract provenance。
+- 修复期新增非 Gold 红灯共 14 个失败，随后完成：
+  - review/verify 显式绑定当前外部 baseline，并在写入前复算静态冻结；
+  - `CaseEvidence` 按行为强制完整成功证据，Evidence/Review 契约升版；
+  - manifest entries 必须与逐条审核结果的规范聚合逐字段相等，运行时再次检查
+    授权对象、别名策略和请求 scope；
+  - baseline v3 记录实际依赖版本及数据库非秘密执行配置；
+  - alias normalization 先验证完整投影名唯一性，碰撞时整条 no-op；
+  - 报告加载重算全部 metrics，verified 状态要求对应通过且已审核证据；
+  - source digest 文档与实际安全绑定一致，fixture 使用独立版本身份。
+- 恢复期测试证据：
+  - 视图语义/别名/证据聚焦：`64 passed`；
+  - Runner/安全聚焦：`11 passed`；
+  - 审核/冻结/CLI 聚焦：`50 passed`；
+  - 全部 unit + security：`692 passed`；
+  - 测试用 baseline v3 自校验通过；
+  - `git diff --check`：通过。
+- 唯一最终复审：
+  - B1、H1、H2、H3、H4、H5 全部关闭；
+  - 修复引入的新 `blocking=0`、`high=0`；
+  - 聚焦非 Gold 回归 `118 passed`。
+- 正式冻结：
+  - baseline version：`stage10-freeze-v3`；
+  - baseline ID：
+    `3f2c562dab63fcafb8a02196f24b3330cb5dfe2b72573c673aea08f7fc1a6002`；
+  - controlled code SHA-256：
+    `c5704f58a182fc86b62838de77872514ab4df1ac2807fb3404fe80db9d88b3c4`；
+  - Pagila commit、PostgreSQL、Schema、data、语义 manifest、视图定义、
+    依赖、数据库非秘密执行配置、模型非秘密配置和 Gold 摘要均通过自校验。
+- 正式候选 `1/2`：
+  - 自动证据 `12/18`；
+  - 独立逐条审核 `12 approved / 6 rejected`；
+  - 失败为 PG-MVP-005/007 的 `COMPARATOR_COLUMN_MISMATCH`、
+    PG-MVP-008/009 的 `EVALUATION_FINAL_STATUS_MISMATCH`、
+    PG-MVP-010/012 的 `EVALUATION_FIELD_RECALL_FAILED`；
+  - 未发现可由非 Gold 证据证明的通用 blocking/high 实现缺陷，按终局规则
+    候选 1 即为最终结果，不运行随机重试或 Gold 驱动调优；
+  - Gold 保持 `draft=18`、`verified=0`。
+- 最终工程验证：
+  - 单元 `581 passed`；
+  - 安全 `111 passed`；
+  - 真实 Pagila 集成 `73 passed`；
+  - 单进程完整回归 `765 passed`；
+  - FastAPI 固定 Stub + 真实 Pagila 的首次执行、合法空结果、一次修复闭环和
+    危险 SQL 零执行拒绝通过；
+  - `compileall`、`pip check`、Docker Compose 配置和
+    `git diff --check`：通过。
+- 当前 Gold：文件 SHA-256
+  `049e048b821e949936c1793d441f7adcda4660f10f8d0acf63e4f766a9726c22`，
+  status-neutral SHA-256
+  `a00a8ec7496fc4e1533b2773e0267d555357a80be435a02dd70981d76ddb40d7`，
+  `draft=18`、`verified=0`。
+- 代码审查结果：唯一集中初审的全部 blocking/high 已修复；唯一最终复审
+  `blocking=0`、`high=0`。
+- 阶段提交 SHA：本阶段终局提交（实际 SHA 见最终报告）
+- 遗留问题：冻结模型未达到 18/18，工程完成但 MVP 发布资格未通过。
+- 下一阶段：停止，等待用户决定是否合并到 `main`。

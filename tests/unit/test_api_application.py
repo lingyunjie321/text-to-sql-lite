@@ -319,6 +319,52 @@ def test_production_services_reject_non_pagila_datasource_before_open(
     connector_class.assert_not_called()
 
 
+def test_production_manifest_drift_fails_before_llm_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = DatabaseSettings(
+        dsn=(
+            "postgresql://text_to_sql_reader:secret"
+            "@127.0.0.1:55432/pagila"
+        ),
+    )
+    connector = Mock()
+    connector.read_metadata.return_value = empty_schema_snapshot()
+    llm_loads = 0
+
+    def load_llm() -> None:
+        nonlocal llm_loads
+        llm_loads += 1
+        raise AssertionError("LLM settings loaded too early")
+
+    monkeypatch.setattr(
+        api_bootstrap,
+        "load_database_settings",
+        lambda: settings,
+    )
+    monkeypatch.setattr(
+        api_bootstrap,
+        "PostgreSQLConnector",
+        Mock(return_value=connector),
+    )
+    monkeypatch.setattr(api_bootstrap, "load_llm_settings", load_llm)
+    monkeypatch.setattr(
+        api_bootstrap,
+        "load_view_semantic_manifest",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            ValueError("view semantic manifest is invalid")
+        ),
+        raising=False,
+    )
+
+    with pytest.raises(ValueError, match="manifest"):
+        api_bootstrap.build_production_services()
+
+    assert llm_loads == 0
+    connector.open.assert_called_once_with()
+    connector.close.assert_called_once_with()
+
+
 def test_production_lifespan_fails_closed_without_credentials(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

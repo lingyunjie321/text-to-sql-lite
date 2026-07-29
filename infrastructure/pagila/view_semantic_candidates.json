@@ -1,0 +1,92 @@
+{
+  "ledger_version": "view-semantic-candidates-v1",
+  "extractor_version": "view-semantic-extractor-v2",
+  "policy_version": "view-semantic-policy-v1",
+  "database_schema_sha256": "74de0ad271945ff3ce8e21d9065d1c0178f01994a8f25c613afebcebed5933b2",
+  "base_schema_version": "f91888f9aa5651c1f0935771fbeb98a3391f0d83a3698cd3d9846d28ac443f90",
+  "allowed_scope_sha256": "9fda00b7c20b0eab3918db473aac7adbd9d1f1456c583cce3db44849caed9244",
+  "view_definitions_sha256": "ecfa595e24b8f6d1103487fca39226bbfef183c0558a25d266fa9f2e2e501b57",
+  "candidates": [
+    {
+      "object_id": "public.category.name",
+      "alias": "category",
+      "rule": "direct_projection_alias_v1",
+      "polarity": "none",
+      "source_definition_sha256": "12364516939bf85bca336f7c17e7c265ead7d6038aeeabf8fda14e4cbbfac1c3",
+      "evidence_sha256": "226d804a91bd82532fcc743fded7a7a48ee8f7039e5dd77a22f9f2feb376c7a8"
+    },
+    {
+      "object_id": "public.category.name",
+      "alias": "category",
+      "rule": "direct_projection_alias_v1",
+      "polarity": "none",
+      "source_definition_sha256": "64980671af19bd6518c7912829453d0e9eb1ac0b81a3d7f3747cc21a0a62a849",
+      "evidence_sha256": "9f0a0b3036b0c28457fd0f93d8817f102b820b8ac7b2f0cd25a36f38771f5a55"
+    },
+    {
+      "object_id": "public.category.name",
+      "alias": "category",
+      "rule": "direct_projection_alias_v1",
+      "polarity": "none",
+      "source_definition_sha256": "7ec66d8adb328a09a178dc712507a4e1c304b27b8b87c8719b1d3e31a16bb3a3",
+      "evidence_sha256": "b1392fbffc4cb1575240c3a8e2bfc26eb41d34ca6f6e06fa7abb1cb6af96e0fc"
+    },
+    {
+      "object_id": "public.customer.activebool",
+      "alias": "active",
+      "rule": "simple_boolean_case_label_v1",
+      "polarity": "true",
+      "source_definition_sha256": "1cb4a8d6b3e31e7890739bddee2d40c723e5d0bbe03e1a43b37764e7ef714256",
+      "evidence_sha256": "6485cc968328aad99f4f31035a9f7df8b480c085edbb7e68db980d043f898cc9"
+    },
+    {
+      "object_id": "public.customer.customer_id",
+      "alias": "id",
+      "rule": "direct_projection_alias_v1",
+      "polarity": "none",
+      "source_definition_sha256": "1cb4a8d6b3e31e7890739bddee2d40c723e5d0bbe03e1a43b37764e7ef714256",
+      "evidence_sha256": "738250ad02944a69238abd1c71368482aeca311d25727b949a8e4b71312d4971"
+    },
+    {
+      "object_id": "public.customer.store_id",
+      "alias": "sid",
+      "rule": "direct_projection_alias_v1",
+      "polarity": "none",
+      "source_definition_sha256": "1cb4a8d6b3e31e7890739bddee2d40c723e5d0bbe03e1a43b37764e7ef714256",
+      "evidence_sha256": "0f6b52a68d57edb9c5be4af82264e748d1af47cd2bacf25d0889d5bb82d6dccc"
+    },
+    {
+      "object_id": "public.film.film_id",
+      "alias": "fid",
+      "rule": "direct_projection_alias_v1",
+      "polarity": "none",
+      "source_definition_sha256": "12364516939bf85bca336f7c17e7c265ead7d6038aeeabf8fda14e4cbbfac1c3",
+      "evidence_sha256": "c83683cfdd5981c2d8550595e50c8b9f6a735fce45c01a792c8caf4b134bf936"
+    },
+    {
+      "object_id": "public.film.film_id",
+      "alias": "fid",
+      "rule": "direct_projection_alias_v1",
+      "polarity": "none",
+      "source_definition_sha256": "7ec66d8adb328a09a178dc712507a4e1c304b27b8b87c8719b1d3e31a16bb3a3",
+      "evidence_sha256": "622ef268b0a3f520acade5586614a83b86b6a3cfa44089db820014e91e0a10e4"
+    },
+    {
+      "object_id": "public.film.rental_rate",
+      "alias": "price",
+      "rule": "direct_projection_alias_v1",
+      "polarity": "none",
+      "source_definition_sha256": "12364516939bf85bca336f7c17e7c265ead7d6038aeeabf8fda14e4cbbfac1c3",
+      "evidence_sha256": "e0edca97c7fc72a3947d174f73cde56713e2d2eb7c2337fd4d58e6abded2398e"
+    },
+    {
+      "object_id": "public.film.rental_rate",
+      "alias": "price",
+      "rule": "direct_projection_alias_v1",
+      "polarity": "none",
+      "source_definition_sha256": "7ec66d8adb328a09a178dc712507a4e1c304b27b8b87c8719b1d3e31a16bb3a3",
+      "evidence_sha256": "ccef7a41659889d2a929886149ccaeca22dfcbe741e5a45f0c6f03a16886b7be"
+    }
+  ],
+  "ledger_sha256": "73a1a14ae32dc954e91c6f56db04f34e1fc5620ccdcd747c462f295d0931a1bc"
+}

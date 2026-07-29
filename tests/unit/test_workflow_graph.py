@@ -288,6 +288,27 @@ def test_first_pass_success_runs_the_full_safe_path() -> None:
     ]
 
 
+def test_generation_canonicalizes_count_column_alias_before_validation() -> None:
+    context, _, connector = _context(
+        [
+            _generation(
+                sql=(
+                    "SELECT COUNT(film_id) AS rating_count "
+                    "FROM film"
+                )
+            )
+        ]
+    )
+
+    result = run_workflow(_state(), context=context)
+
+    expected_sql = (
+        "SELECT COUNT(film_id) AS film_count FROM film"
+    )
+    assert result.current_sql == expected_sql
+    assert connector.execute_calls == [expected_sql]
+
+
 def test_model_clarification_never_executes_sql() -> None:
     context, provider, connector = _context(
         [_generation(clarification="Which film range?")]

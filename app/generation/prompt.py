@@ -211,6 +211,9 @@ def build_generation_messages(
                     field.object_id
                 ].nullable,
                 "comment": snapshot_columns[field.object_id].comment,
+                "aliases": list(
+                    snapshot_columns[field.object_id].aliases
+                ),
                 "score": field.score,
                 "matched_tokens": list(field.matched_tokens),
             }

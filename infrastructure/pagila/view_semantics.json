@@ -1,0 +1,69 @@
+{
+  "manifest_version": "view-semantics-v2",
+  "extractor_version": "view-semantic-extractor-v2",
+  "policy_version": "view-semantic-policy-v1",
+  "datasource_id": "pagila",
+  "database_schema_sha256": "74de0ad271945ff3ce8e21d9065d1c0178f01994a8f25c613afebcebed5933b2",
+  "base_schema_version": "f91888f9aa5651c1f0935771fbeb98a3391f0d83a3698cd3d9846d28ac443f90",
+  "enriched_schema_version": "738588b193a776966a301f6f995883faa6e94ac2f909e3dddf45ddb112a35b0c",
+  "allowed_scope_sha256": "9fda00b7c20b0eab3918db473aac7adbd9d1f1456c583cce3db44849caed9244",
+  "view_definitions_sha256": "ecfa595e24b8f6d1103487fca39226bbfef183c0558a25d266fa9f2e2e501b57",
+  "candidate_ledger_sha256": "73a1a14ae32dc954e91c6f56db04f34e1fc5620ccdcd747c462f295d0931a1bc",
+  "review_file_sha256": "7378023921e8f78c152e41b6bb4eb047d6f9d2da0ae13009fa145ad4b2a3b1b6",
+  "entries": [
+    {
+      "object_id": "public.category.name",
+      "alias": "category",
+      "rule": "direct_projection_alias_v1",
+      "polarity": "none",
+      "source_definition_set_sha256": "2690273fab54909f4a18b9264fa50f50bfeab4d9a76309b94640cb98fd1bea99",
+      "approved_evidence_set_sha256": "125d7ee54da5df890ff8d109d43a05b2c259de57096602e0a3fa8b5fe6d8a501",
+      "approved_review_set_sha256": "0633aad816e9a03a43934e9276190c5da544617abe3e63a343d73493ac9c059a"
+    },
+    {
+      "object_id": "public.customer.activebool",
+      "alias": "active",
+      "rule": "simple_boolean_case_label_v1",
+      "polarity": "true",
+      "source_definition_set_sha256": "f276986beceee64064de06b9b632d88a225f6d3a5758b782b3eb9c0c4a3527c3",
+      "approved_evidence_set_sha256": "d5eec6e2931bb8db4f650199e8878c4125ea3cbbdc2e681bb49e8cd6bd2f559e",
+      "approved_review_set_sha256": "d4e8b2a152f7e6a6137c0632ca2f35ba4414553cf479ed87989daf515adc512d"
+    },
+    {
+      "object_id": "public.customer.customer_id",
+      "alias": "id",
+      "rule": "direct_projection_alias_v1",
+      "polarity": "none",
+      "source_definition_set_sha256": "f276986beceee64064de06b9b632d88a225f6d3a5758b782b3eb9c0c4a3527c3",
+      "approved_evidence_set_sha256": "5909f693998e0e826e193e50d3ee0bab725e3dbceeae60b56e86ab87c1ec0be2",
+      "approved_review_set_sha256": "7587fe4f58289a87027ea3485584e31dc291eb9f91039bae5f10e9fc8356ceee"
+    },
+    {
+      "object_id": "public.customer.store_id",
+      "alias": "sid",
+      "rule": "direct_projection_alias_v1",
+      "polarity": "none",
+      "source_definition_set_sha256": "f276986beceee64064de06b9b632d88a225f6d3a5758b782b3eb9c0c4a3527c3",
+      "approved_evidence_set_sha256": "5c707c0977239bd38005ab310890a0a9e9441fa270c92d37132d5021ab5df191",
+      "approved_review_set_sha256": "2984f40ec28d63eeb8cd406ea828b173f46505a6cdc504ff265da5205fdaa556"
+    },
+    {
+      "object_id": "public.film.film_id",
+      "alias": "fid",
+      "rule": "direct_projection_alias_v1",
+      "polarity": "none",
+      "source_definition_set_sha256": "7f14aadc3e3fa8639771b869174a0349ef7bb81b37ff880c46dbfb4e8a5a6d2f",
+      "approved_evidence_set_sha256": "dfa39c97e96cbc49cf03e5e55f384d01a9fa6aae7b73ea877983f2df189eeefc",
+      "approved_review_set_sha256": "ce912554e89c46aa9ce7b2ce8d92b93481a8120a4e58dc33176834aeca2b1620"
+    },
+    {
+      "object_id": "public.film.rental_rate",
+      "alias": "price",
+      "rule": "direct_projection_alias_v1",
+      "polarity": "none",
+      "source_definition_set_sha256": "7f14aadc3e3fa8639771b869174a0349ef7bb81b37ff880c46dbfb4e8a5a6d2f",
+      "approved_evidence_set_sha256": "40bad7519f92fc2229c5372987983f0296c0ce1c0ea7c3b1183aa9365e6673d9",
+      "approved_review_set_sha256": "981699a68623d0cdeda37aff612b21807e536d5e2852c295e8c52d815088a4fd"
+    }
+  ]
+}

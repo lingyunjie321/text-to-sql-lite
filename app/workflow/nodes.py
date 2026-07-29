@@ -19,6 +19,7 @@ from app.generation import (
     LLMProviderError,
     build_generation_messages,
 )
+from app.generation.normalization import normalize_generation_result
 from app.reflection import (
     AttemptHistory,
     ReflectionRoute,
@@ -302,8 +303,9 @@ def _generate_sql(
     context: WorkflowContext,
 ) -> NodeUpdate:
     try:
-        result = context.provider.generate(
-            _generation_messages(state)
+        result = normalize_generation_result(
+            context.provider.generate(_generation_messages(state)),
+            snapshot=state.schema_snapshot,
         )
     except LLMProviderError as error:
         return _failure_update(_public_model_error(error))

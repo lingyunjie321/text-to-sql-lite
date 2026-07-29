@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from contextvars import ContextVar
 from types import TracebackType
 
@@ -46,6 +48,12 @@ class PostgreSQLConnector:
         self._retry_count: ContextVar[int] = ContextVar(
             f"postgresql_connector_retry_count_{id(self)}",
             default=0,
+        )
+        self._snapshot_connection: ContextVar[
+            psycopg.Connection | None
+        ] = ContextVar(
+            f"postgresql_connector_snapshot_{id(self)}",
+            default=None,
         )
         self._pool = ConnectionPool(
             conninfo=settings.dsn_value,
@@ -94,6 +102,44 @@ class PostgreSQLConnector:
             ) as connection:
                 connection.execute("SELECT 1")
         except Exception as error:
+            raise normalize_database_error(error) from None
+
+    @contextmanager
+    def read_only_snapshot(
+        self,
+    ) -> Iterator[PostgreSQLConnector]:
+        if self._snapshot_connection.get() is not None:
+            raise ValueError("read-only snapshot is already active")
+        body_error: BaseException | None = None
+        try:
+            with self._pool.connection(
+                timeout=self._settings.pool_timeout_seconds
+            ) as connection:
+                with connection.transaction():
+                    connection.execute(
+                        "SET TRANSACTION ISOLATION LEVEL "
+                        "REPEATABLE READ READ ONLY"
+                    )
+                    connection.execute(
+                        "SELECT set_config('statement_timeout', %s, true)",
+                        (
+                            f"{self._settings.statement_timeout_seconds}s",
+                        ),
+                    )
+                    token = self._snapshot_connection.set(connection)
+                    try:
+                        try:
+                            yield self
+                        except BaseException as error:
+                            body_error = error
+                            raise
+                    finally:
+                        self._snapshot_connection.reset(token)
+        except BaseException as error:
+            if body_error is not None:
+                raise body_error
+            if not isinstance(error, Exception):
+                raise
             raise normalize_database_error(error) from None
 
     def execute(self, sql: str) -> ExecutionResult:
@@ -153,6 +199,12 @@ class PostgreSQLConnector:
         scope: MetadataScope,
     ) -> SchemaSnapshot:
         try:
+            snapshot_connection = self._snapshot_connection.get()
+            if snapshot_connection is not None:
+                return _read_metadata_from_connection(
+                    snapshot_connection,
+                    scope,
+                )
             with self._pool.connection(
                 timeout=self._settings.pool_timeout_seconds
             ) as connection:
@@ -164,78 +216,23 @@ class PostgreSQLConnector:
                             f"{self._settings.statement_timeout_seconds}s",
                         ),
                     )
-                    params = (
-                        scope.schema_parameters,
-                        scope.table_parameters,
-                    )
-                    table_rows = connection.execute(
-                        TABLE_COLUMNS_SQL, params
-                    ).fetchall()
-                    key_rows = connection.execute(
-                        KEY_CONSTRAINTS_SQL, params
-                    ).fetchall()
-                    foreign_key_rows = connection.execute(
-                        FOREIGN_KEYS_SQL, params
-                    ).fetchall()
-                    unique_index_rows = connection.execute(
-                        UNIQUE_INDEXES_SQL, params
-                    ).fetchall()
-                    authorized = set(scope.table_pairs)
-                    tables = _map_tables(
-                        [
-                            row
-                            for row in table_rows
-                            if (str(row[0]), str(row[1]))
-                            in authorized
-                        ]
-                    )
-                    primary_keys, unique_constraints = _map_keys(
-                        [
-                            row
-                            for row in key_rows
-                            if (str(row[2]), str(row[3]))
-                            in authorized
-                        ]
-                    )
-                    foreign_keys = _map_foreign_keys(
-                        [
-                            row
-                            for row in foreign_key_rows
-                            if (
-                                (str(row[1]), str(row[2]))
-                                in authorized
-                                and (str(row[4]), str(row[5]))
-                                in authorized
-                            )
-                        ]
-                    )
-                    unique_indexes = _map_unique_indexes(
-                        [
-                            row
-                            for row in unique_index_rows
-                            if (str(row[1]), str(row[2]))
-                            in authorized
-                        ]
-                    )
-                    _validate_metadata_references(
-                        tables=tables,
-                        primary_keys=primary_keys,
-                        foreign_keys=foreign_keys,
-                        unique_constraints=unique_constraints,
-                        unique_indexes=unique_indexes,
-                    )
-                    return build_schema_snapshot(
-                        tables=tables,
-                        primary_keys=primary_keys,
-                        foreign_keys=foreign_keys,
-                        unique_constraints=unique_constraints,
-                        unique_indexes=unique_indexes,
+                    return _read_metadata_from_connection(
+                        connection,
+                        scope,
                     )
         except Exception as error:
             raise normalize_database_error(error) from None
 
     def _execute_once(self, sql: str) -> ExecutionResult:
         try:
+            snapshot_connection = self._snapshot_connection.get()
+            if snapshot_connection is not None:
+                with snapshot_connection.transaction():
+                    return _execute_from_connection(
+                        snapshot_connection,
+                        sql,
+                        max_result_rows=self._settings.max_result_rows,
+                    )
             with self._pool.connection(
                 timeout=self._settings.pool_timeout_seconds
             ) as connection:
@@ -247,54 +244,124 @@ class PostgreSQLConnector:
                             f"{self._settings.statement_timeout_seconds}s",
                         ),
                     )
-                    started = time.perf_counter()
-                    cursor = connection.execute(sql)
-                    raw_rows = cursor.fetchmany(
-                        self._settings.max_result_rows + 1
-                    )
-                    elapsed_ms = (
-                        time.perf_counter() - started
-                    ) * 1000
-                    if cursor.description is None:
-                        raise PostgreSQLConnectorError(
-                            DatabaseError(
-                                sqlstate=None,
-                                error_type=ErrorType.UNKNOWN,
-                                code="DB_UNKNOWN",
-                                retryable=False,
-                                public_message=(
-                                    "The database operation failed."
-                                ),
-                            )
-                        )
-
-                    truncated = (
-                        len(raw_rows)
-                        > self._settings.max_result_rows
-                    )
-                    bounded_rows = raw_rows[
-                        : self._settings.max_result_rows
-                    ]
-                    columns = tuple(
-                        ResultColumn(
-                            name=column.name,
-                            type_oid=int(column.type_code),
-                        )
-                        for column in cursor.description
-                    )
-                    rows = [
-                        [normalize_value(value) for value in row]
-                        for row in bounded_rows
-                    ]
-                    return ExecutionResult(
-                        columns=columns,
-                        rows=rows,
-                        returned_row_count=len(rows),
-                        truncated=truncated,
-                        execution_time_ms=elapsed_ms,
+                    return _execute_from_connection(
+                        connection,
+                        sql,
+                        max_result_rows=self._settings.max_result_rows,
                     )
         except Exception as error:
             raise normalize_database_error(error) from None
+
+
+def _read_metadata_from_connection(
+    connection: psycopg.Connection,
+    scope: MetadataScope,
+) -> SchemaSnapshot:
+    params = (
+        scope.schema_parameters,
+        scope.table_parameters,
+    )
+    table_rows = connection.execute(
+        TABLE_COLUMNS_SQL, params
+    ).fetchall()
+    key_rows = connection.execute(
+        KEY_CONSTRAINTS_SQL, params
+    ).fetchall()
+    foreign_key_rows = connection.execute(
+        FOREIGN_KEYS_SQL, params
+    ).fetchall()
+    unique_index_rows = connection.execute(
+        UNIQUE_INDEXES_SQL, params
+    ).fetchall()
+    authorized = set(scope.table_pairs)
+    tables = _map_tables(
+        [
+            row
+            for row in table_rows
+            if (str(row[0]), str(row[1])) in authorized
+        ]
+    )
+    primary_keys, unique_constraints = _map_keys(
+        [
+            row
+            for row in key_rows
+            if (str(row[2]), str(row[3])) in authorized
+        ]
+    )
+    foreign_keys = _map_foreign_keys(
+        [
+            row
+            for row in foreign_key_rows
+            if (
+                (str(row[1]), str(row[2])) in authorized
+                and (str(row[4]), str(row[5])) in authorized
+            )
+        ]
+    )
+    unique_indexes = _map_unique_indexes(
+        [
+            row
+            for row in unique_index_rows
+            if (str(row[1]), str(row[2])) in authorized
+        ]
+    )
+    _validate_metadata_references(
+        tables=tables,
+        primary_keys=primary_keys,
+        foreign_keys=foreign_keys,
+        unique_constraints=unique_constraints,
+        unique_indexes=unique_indexes,
+    )
+    return build_schema_snapshot(
+        tables=tables,
+        primary_keys=primary_keys,
+        foreign_keys=foreign_keys,
+        unique_constraints=unique_constraints,
+        unique_indexes=unique_indexes,
+    )
+
+
+def _execute_from_connection(
+    connection: psycopg.Connection,
+    sql: str,
+    *,
+    max_result_rows: int,
+) -> ExecutionResult:
+    started = time.perf_counter()
+    cursor = connection.execute(sql)
+    raw_rows = cursor.fetchmany(max_result_rows + 1)
+    elapsed_ms = (time.perf_counter() - started) * 1000
+    if cursor.description is None:
+        raise PostgreSQLConnectorError(
+            DatabaseError(
+                sqlstate=None,
+                error_type=ErrorType.UNKNOWN,
+                code="DB_UNKNOWN",
+                retryable=False,
+                public_message="The database operation failed.",
+            )
+        )
+
+    truncated = len(raw_rows) > max_result_rows
+    bounded_rows = raw_rows[:max_result_rows]
+    columns = tuple(
+        ResultColumn(
+            name=column.name,
+            type_oid=int(column.type_code),
+        )
+        for column in cursor.description
+    )
+    rows = [
+        [normalize_value(value) for value in row]
+        for row in bounded_rows
+    ]
+    return ExecutionResult(
+        columns=columns,
+        rows=rows,
+        returned_row_count=len(rows),
+        truncated=truncated,
+        execution_time_ms=elapsed_ms,
+    )
 
 
 def _map_tables(

@@ -1,0 +1,88 @@
+{
+  "baseline_version": "stage10-freeze-v3",
+  "pagila": {
+    "source": "https://github.com/devrimgunduz/pagila",
+    "tag": "pagila-v3.1.0",
+    "commit": "fef9675714cfba1756df4719b5e36075a7ddf90e",
+    "archive_sha256": "6d0cf172e5d1896b5a279452060fb4cf9b2ca820366c712156fa1e656af4df88",
+    "schema_sha256": "8ce358e4c8014087b85296694a0893887bd7a4190e3ce407f2721b86b98e5707",
+    "data_sha256": "fb81bec377687c83e11d2a24916ae28656d85550bf0ada798305bf7e2af9823b"
+  },
+  "postgresql": {
+    "image": "postgres:16.14-bookworm@sha256:92620daddcd947f8d5ab5ba66e848702fe443d87fed30c4cea8e389fd78dfc55",
+    "server_version": "16.14 (Debian 16.14-1.pgdg12+1)"
+  },
+  "runtime_snapshot": {
+    "checksum_algorithm": "sha256(pg_dump --data-only --no-owner --no-privileges with random restrict/unrestrict nonce normalized to TOKEN)",
+    "database_dump_sha256": "e584f0beb3817d1a6f3e35518192ba66cc8b14c50df08c34527d5b15e77bd567",
+    "database_schema_sha256": "74de0ad271945ff3ce8e21d9065d1c0178f01994a8f25c613afebcebed5933b2",
+    "film_row_count": 1000
+  },
+  "gold_cases": {
+    "initial_file_sha256": "049e048b821e949936c1793d441f7adcda4660f10f8d0acf63e4f766a9726c22",
+    "status_neutral_sha256": "a00a8ec7496fc4e1533b2773e0267d555357a80be435a02dd70981d76ddb40d7"
+  },
+  "semantic": {
+    "manifest_sha256": "4f91262d600de09c42b38a0cbef7e0c7f9b6f724c9bd4b9c8fa27a625e61673f",
+    "manifest_version": "view-semantics-v2",
+    "extractor_version": "view-semantic-extractor-v2",
+    "policy_version": "view-semantic-policy-v1",
+    "database_schema_sha256": "74de0ad271945ff3ce8e21d9065d1c0178f01994a8f25c613afebcebed5933b2",
+    "base_schema_version": "f91888f9aa5651c1f0935771fbeb98a3391f0d83a3698cd3d9846d28ac443f90",
+    "enriched_schema_version": "738588b193a776966a301f6f995883faa6e94ac2f909e3dddf45ddb112a35b0c",
+    "allowed_scope_sha256": "9fda00b7c20b0eab3918db473aac7adbd9d1f1456c583cce3db44849caed9244",
+    "view_definitions_sha256": "ecfa595e24b8f6d1103487fca39226bbfef183c0558a25d266fa9f2e2e501b57",
+    "candidate_ledger_sha256": "73a1a14ae32dc954e91c6f56db04f34e1fc5620ccdcd747c462f295d0931a1bc",
+    "review_file_sha256": "7378023921e8f78c152e41b6bb4eb047d6f9d2da0ae13009fa145ad4b2a3b1b6"
+  },
+  "software": {
+    "controlled_code_sha256": "c5704f58a182fc86b62838de77872514ab4df1ac2807fb3404fe80db9d88b3c4",
+    "python_implementation": "CPython",
+    "python_version": "3.12.7",
+    "installed_distributions": [
+      "annotated-doc==0.0.5",
+      "annotated-types==0.8.0",
+      "anyio==4.14.2",
+      "fastapi==0.139.2",
+      "langchain-core==1.5.2",
+      "langgraph-checkpoint==4.1.1",
+      "langgraph-prebuilt==1.1.0",
+      "langgraph-sdk==0.4.2",
+      "langgraph==1.2.9",
+      "psycopg-binary==3.3.4",
+      "psycopg-pool==3.3.1",
+      "psycopg==3.3.4",
+      "pydantic-core==2.46.4",
+      "pydantic-settings==2.14.2",
+      "pydantic==2.13.4",
+      "python-dotenv==1.2.2",
+      "sqlglot==30.13.0",
+      "starlette==1.3.1",
+      "typing-extensions==4.16.0",
+      "typing-inspection==0.4.2",
+      "xxhash==3.8.1"
+    ],
+    "prompt_version": "mvp-v1-projection-alias-view-semantics-v1",
+    "provider_contract_version": "openai-compatible-json-v1",
+    "comparator_version": "stage10-comparator-v1",
+    "evidence_version": "stage10-evidence-v3",
+    "report_version": "stage10-report-v3"
+  },
+  "database_execution": {
+    "datasource_id": "pagila",
+    "host": "127.0.0.1",
+    "port": 55432,
+    "dbname": "pagila",
+    "user": "text_to_sql_reader",
+    "min_pool_size": 1,
+    "max_pool_size": 4,
+    "pool_timeout_seconds": 5.0,
+    "statement_timeout_seconds": 30,
+    "max_result_rows": 1000,
+    "connection_retry_count": 1
+  },
+  "model_configuration": {
+    "config_sha256": "6c9d3fc1ff91586bb319d4d47927776d0edf52d80c3c75287a0657f2b0d45fdb"
+  },
+  "evaluation_baseline_id": "3f2c562dab63fcafb8a02196f24b3330cb5dfe2b72573c673aea08f7fc1a6002"
+}

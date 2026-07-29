@@ -107,7 +107,26 @@ Text-to-SQL 闭环。
 - TestClient → Workflow → 真实 Pagila 的首次成功、合法空结果、一次修复和危险
   SQL 零执行集成测试。
 
-Trace、Comparator 和 Pagila 离线评测属于第十阶段，尚未实现。
+第十开发阶段的工程实现已完成；当前发布资格为 `not_passed`：
+
+- 不含问题、SQL、结果行、Prompt、DSN、API Key 或原始异常的安全 Trace；
+- exact、multiset 和 keyed Comparator，以及列名对齐、重复数、NULL、Decimal
+  容差、时区、JSON、grain 和截断结果检查；
+- 严格的 18 条 Pagila JSONL Case loader、基线哈希和脱敏证据报告；
+- Gold 与预测 SQL 使用同一 Validator、只读 Connector 和数据快照；
+- 逐 Case evidence SHA-256、独立审核和单 Case 原子状态更新门；
+- 冻结期从锁定视图定义提取、逐条审核并聚合的通用字段语义别名；
+- 请求期仅使用外部 SHA-256 锚定的只读语义 manifest，不扫描视图；
+- 代码、依赖、Python、Prompt、Provider、Comparator、Evidence、Report、
+  模型非秘密配置、Schema、数据、Gold 和语义 manifest 的统一 baseline ID；
+- 全 `draft` 精确 Gold 起点、Case 证据 baseline 绑定和跨基线重放拒绝。
+
+此前 17/18 的候选运行已永久作废并移入 `evaluation/reports/invalidated/`，
+不能用于状态更新。重新冻结后的正式候选完成真实模型、校验、只读执行、有限
+修复和逐条审核，自动证据为 `12/18`，审核为
+`12 approved / 6 rejected`。未发现可由非 Gold 证据证明的通用实现缺陷，
+因此按终局规则不运行随机重试；当前 18 条 Gold 全部保持 `draft`。完整脱敏
+证据见 `evaluation/reports/pagila_mvp_stage10.md`。
 
 ## 本地准备
 
@@ -254,7 +273,10 @@ generated = generate_sql(
 
 `snapshot` 必须是生成 `linking` 的同一授权快照。模型返回 SQL 时，调用方仍须
 使用原始可信权限和该快照调用 `validate_sql()`；只有校验成功的规范 SQL 才能
-进入 Connector。澄清结果不得执行。
+进入 Connector。澄清结果不得执行。工作流只对顶层
+直接列、`COUNT/SUM(普通列)` 和 `DATE_TRUNC` 的输出别名做确定性规范化，
+并同步无歧义的 `GROUP BY/ORDER BY` 别名引用。它不读取 Case/Gold，不修复
+不可解析 SQL、不改写 `COUNT(*)`，也不改变结果值。
 
 ## 运行 Workflow
 
@@ -316,6 +338,63 @@ ASGI server 启动 lifespan 时会读取 `.env.example` 所列的数据库和 LL
 不返回当前或历史 SQL。普通固定身份的 `debug=true` 返回 403，任意 Header 都
 不能提升 debug 权限。
 
+## Pagila MVP 评测
+
+锁定基线记录在 `evaluation/pagila_baseline.json`。旧 17/18 报告和明确的
+作废说明位于 `evaluation/reports/invalidated/`；当前正式候选的结构化报告
+和脱敏验收报告分别为 `evaluation/reports/pagila_mvp_stage10.json` 与
+`evaluation/reports/pagila_mvp_stage10.md`。最终结果是工程完成、发布资格
+`not_passed`：自动证据 `12/18`，独立审核
+`12 approved / 6 rejected`，Gold `verified=0`。
+基线同时锚定经逐条审核的
+`infrastructure/pagila/view_semantics.json`、候选/审核账本摘要、原始和增强
+`schema_version`、受控代码根、实际行为依赖版本、数据库非秘密执行参数、
+非秘密模型配置及各契约版本。运行时数据
+校验和来自
+`pg_dump --data-only --no-owner --no-privileges`；PostgreSQL 每次生成的
+`restrict/unrestrict` nonce 会先规范化为固定 `TOKEN`，其余内容不变。
+
+代码与语义审核完成后，先重新冻结基线：
+
+```bash
+.venv/bin/python -m tools.run_pagila_evaluation freeze-baseline \
+  --baseline evaluation/pagila_baseline.json \
+  --output evaluation/pagila_baseline.json \
+  --cases evaluation/cases/pagila_mvp.jsonl \
+  --env-file .env
+```
+
+随后生成新的证据报告；此操作不会自动修改 Gold：
+
+```bash
+.venv/bin/python -m tools.run_pagila_evaluation evaluate \
+  --cases evaluation/cases/pagila_mvp.jsonl \
+  --baseline evaluation/pagila_baseline.json \
+  --report evaluation/reports/pagila_mvp_stage10.json \
+  --env-file .env
+```
+
+审核和状态更新是两个独立的单 Case 门。`review-case` 只在证据摘要有效且自动
+结果通过时允许 `--approve`；`verify-case` 还会核对审核状态和 status-neutral
+Gold 哈希，并只原子替换目标行的一个 `status` token。两个命令都必须显式提供
+当前外部 baseline，且会先重算代码、语义和依赖冻结，旧报告不能跨 baseline
+重放：
+
+```bash
+.venv/bin/python -m tools.run_pagila_evaluation review-case \
+  --report evaluation/reports/pagila_mvp_stage10.json \
+  --baseline evaluation/pagila_baseline.json \
+  --case-id PG-MVP-001 --approve
+
+.venv/bin/python -m tools.run_pagila_evaluation verify-case \
+  --cases evaluation/cases/pagila_mvp.jsonl \
+  --report evaluation/reports/pagila_mvp_stage10.json \
+  --baseline evaluation/pagila_baseline.json \
+  --case-id PG-MVP-001
+```
+
+不得使用脚本预先批量标记未执行或未审核的 Case。
+
 ## 运行测试
 
 单元测试不需要数据库：
@@ -334,7 +413,7 @@ ASGI server 启动 lifespan 时会读取 `.env.example` 所列的数据库和 LL
 运行确定性检查：
 
 ```bash
-.venv/bin/python -m compileall -q app tools tests
+.venv/bin/python -m compileall -q app evaluation tools tests
 docker compose -f infrastructure/pagila/compose.yaml config --quiet
 ```
 
@@ -360,4 +439,9 @@ docker compose -f infrastructure/pagila/compose.yaml down
   `app.validation.validate_sql()`，Provider 错误不得记录完整请求或响应；
 - Workflow 的 Provider、Connector、DSN 和完整 Prompt 不进入 State；
   澄清和公开错误使用固定、脱敏内容；
+- Trace 和评测报告只保存白名单字段、稳定 code、计数和摘要，不保存问题、
+  SQL、Prompt、行值、凭据或原始异常；
+- Case 从 `draft` 更新为 `verified` 前必须同时通过真实执行/安全门、Gold
+  Comparator、证据摘要和逐条审核；Gold 的问题、SQL、字段与比较规则不可由
+  状态更新器修改；
 - 第一阶段的只读账号和只读事务是数据库侧第二道防线，不替代上层校验。

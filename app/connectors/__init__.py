@@ -14,10 +14,16 @@ from app.connectors.metadata import (
     normalize_metadata_scope,
 )
 from app.connectors.postgresql import PostgreSQLConnector
+from app.connectors.view_semantics import (
+    FrozenSemanticConnector,
+    ViewSemanticManifest,
+    load_view_semantic_manifest,
+)
 
 __all__ = [
     "ColumnMetadata",
     "ForeignKeyMetadata",
+    "FrozenSemanticConnector",
     "MetadataScope",
     "PostgreSQLConnector",
     "PrimaryKeyMetadata",
@@ -25,7 +31,9 @@ __all__ = [
     "TableMetadata",
     "UniqueConstraintMetadata",
     "UniqueIndexMetadata",
+    "ViewSemanticManifest",
     "build_schema_snapshot",
     "empty_schema_snapshot",
+    "load_view_semantic_manifest",
     "normalize_metadata_scope",
 ]

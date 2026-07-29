@@ -145,6 +145,38 @@ def test_write_is_rejected_and_data_is_unchanged(
     assert connector.execute("SELECT COUNT(*) FROM actor").rows == before
 
 
+@pytest.mark.integration
+def test_read_only_snapshot_reuses_one_repeatable_read_transaction(
+    connector: PostgreSQLConnector,
+) -> None:
+    with connector.read_only_snapshot() as snapshot:
+        first_transaction_id = snapshot.execute(
+            "SELECT txid_current()"
+        ).rows
+        second_transaction_id = snapshot.execute(
+            "SELECT txid_current()"
+        ).rows
+        settings = snapshot.execute(
+            "SELECT current_setting('transaction_isolation'), "
+            "current_setting('transaction_read_only')"
+        ).rows
+
+    assert first_transaction_id == second_transaction_id
+    assert settings == [["repeatable read", "on"]]
+
+
+@pytest.mark.integration
+def test_read_only_snapshot_preserves_application_exceptions(
+    connector: PostgreSQLConnector,
+) -> None:
+    class ApplicationFailure(RuntimeError):
+        pass
+
+    with pytest.raises(ApplicationFailure, match="application failed"):
+        with connector.read_only_snapshot():
+            raise ApplicationFailure("application failed")
+
+
 def _replace_password(dsn: str, password: str) -> str:
     parts = urlsplit(dsn)
     username = parts.username or ""

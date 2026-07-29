@@ -12,7 +12,7 @@ from app.connectors.metadata import SchemaSnapshot
 from app.connectors.errors import ErrorType
 from app.schema_linking import SchemaLinkingResult
 
-PROMPT_VERSION = "mvp-v1"
+PROMPT_VERSION = "mvp-v1-projection-alias-view-semantics-v1"
 
 
 class GeneratedSQL(BaseModel):

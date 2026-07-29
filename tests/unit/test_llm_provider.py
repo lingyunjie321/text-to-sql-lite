@@ -117,7 +117,9 @@ def test_provider_sends_openai_compatible_structured_request() -> None:
     assert result.input_tokens == 12
     assert result.output_tokens == 4
     assert result.model == "model-a"
-    assert result.prompt_version == "mvp-v1"
+    assert result.prompt_version == (
+        "mvp-v1-projection-alias-view-semantics-v1"
+    )
     assert len(transport.calls) == 1
     request, timeout = transport.calls[0]
     assert request.full_url == (

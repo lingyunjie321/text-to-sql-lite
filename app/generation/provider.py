@@ -24,6 +24,7 @@ from app.generation.models import (
 )
 
 MAX_RESPONSE_BYTES = 1024 * 1024
+PROVIDER_CONTRACT_VERSION = "openai-compatible-json-v1"
 
 
 class _HTTPResponse(Protocol):

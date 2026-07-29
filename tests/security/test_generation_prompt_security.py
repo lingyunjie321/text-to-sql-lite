@@ -33,6 +33,7 @@ FILM = TableMetadata(
             formatted_type="integer",
             nullable=False,
             comment=None,
+            aliases=("safe_catalog_id",),
         ),
     ),
 )
@@ -106,3 +107,6 @@ def test_untrusted_question_and_comment_stay_in_user_json_data() -> None:
     assert payload["candidate_tables"][0]["comment"] == MALICIOUS
     assert "LLM_API_KEY" not in malicious_messages[1].content
     assert "gold_sql" not in malicious_messages[1].content.lower()
+    assert json.loads(
+        malicious_messages[1].content
+    )["candidate_fields"][0]["aliases"] == ["safe_catalog_id"]

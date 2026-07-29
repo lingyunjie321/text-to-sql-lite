@@ -1,0 +1,57 @@
+{
+  "review_version": "view-semantic-review-v1",
+  "candidate_ledger_sha256": "73a1a14ae32dc954e91c6f56db04f34e1fc5620ccdcd747c462f295d0931a1bc",
+  "decisions": [
+    {
+      "evidence_sha256": "0f6b52a68d57edb9c5be4af82264e748d1af47cd2bacf25d0889d5bb82d6dccc",
+      "approved": true,
+      "review_sha256": "6cd98f02c82ef99150ffbc0069308a3d62c3ce80c2a69dfbc86e84dd4d60c48d"
+    },
+    {
+      "evidence_sha256": "226d804a91bd82532fcc743fded7a7a48ee8f7039e5dd77a22f9f2feb376c7a8",
+      "approved": true,
+      "review_sha256": "a7dfbdd911d82beaadc9a02a777d444be3f61a89997d98b4c16b3c235a94170e"
+    },
+    {
+      "evidence_sha256": "622ef268b0a3f520acade5586614a83b86b6a3cfa44089db820014e91e0a10e4",
+      "approved": true,
+      "review_sha256": "8b5218619c8784dade25dca9634d60d93b6c7d2022ebd5a0b78063df4e0ea560"
+    },
+    {
+      "evidence_sha256": "6485cc968328aad99f4f31035a9f7df8b480c085edbb7e68db980d043f898cc9",
+      "approved": true,
+      "review_sha256": "6d2d33a46401174d9521ad78c92acf307772c831d4dbe803dfa5fcea9c71629c"
+    },
+    {
+      "evidence_sha256": "738250ad02944a69238abd1c71368482aeca311d25727b949a8e4b71312d4971",
+      "approved": true,
+      "review_sha256": "2a90247bfda373d2d03f5899ad5e58607b1a1a42a74045fa5ca49343555420b1"
+    },
+    {
+      "evidence_sha256": "9f0a0b3036b0c28457fd0f93d8817f102b820b8ac7b2f0cd25a36f38771f5a55",
+      "approved": true,
+      "review_sha256": "665b5455b3ac1f8ace3ba5262626f5373882da311d3ad819662cc6e5991d2121"
+    },
+    {
+      "evidence_sha256": "b1392fbffc4cb1575240c3a8e2bfc26eb41d34ca6f6e06fa7abb1cb6af96e0fc",
+      "approved": true,
+      "review_sha256": "b9ed29a77fd7af786bff375cf2e7dec432a60bb197540a5f05f5b4f97872bfd0"
+    },
+    {
+      "evidence_sha256": "c83683cfdd5981c2d8550595e50c8b9f6a735fce45c01a792c8caf4b134bf936",
+      "approved": true,
+      "review_sha256": "0a64556845bd9a9aa2d67e1f73bc57c43517ff37594b5899999336c044b8e069"
+    },
+    {
+      "evidence_sha256": "ccef7a41659889d2a929886149ccaeca22dfcbe741e5a45f0c6f03a16886b7be",
+      "approved": true,
+      "review_sha256": "4ef87bef86722a4c32678a3e276059a8932ab7760a83f1e99549905f033aa35c"
+    },
+    {
+      "evidence_sha256": "e0edca97c7fc72a3947d174f73cde56713e2d2eb7c2337fd4d58e6abded2398e",
+      "approved": true,
+      "review_sha256": "e8f02f7a6b7c4330034aa52f45b530a1c641f1022b92004b0dda282f17ae5163"
+    }
+  ],
+  "review_file_sha256": "7378023921e8f78c152e41b6bb4eb047d6f9d2da0ae13009fa145ad4b2a3b1b6"
+}
