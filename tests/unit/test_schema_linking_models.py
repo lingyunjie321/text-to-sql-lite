@@ -3,7 +3,6 @@ from dataclasses import FrozenInstanceError
 import pytest
 
 from app.schema_linking import (
-    TOP_K,
     CandidateField,
     CandidateTable,
     JoinEdge,
@@ -49,12 +48,13 @@ def test_schema_linking_contracts_are_immutable_and_tuple_based() -> None:
         candidate_fields=(field,),
         join_paths=(path,),
         schema_version="snapshot-v1",
+        top_k=10,
     )
 
-    assert TOP_K == 10
     assert isinstance(result.candidate_tables, tuple)
     assert isinstance(result.candidate_fields, tuple)
     assert isinstance(result.join_paths, tuple)
+    assert result.top_k == 10
     assert table.object_id == "public.film"
     assert field.object_id == "public.film.title"
     assert path.edges == (edge,)
@@ -63,3 +63,20 @@ def test_schema_linking_contracts_are_immutable_and_tuple_based() -> None:
         table.score = 0.0  # type: ignore[misc]
     with pytest.raises(FrozenInstanceError):
         result.schema_version = "snapshot-v2"  # type: ignore[misc]
+
+
+@pytest.mark.parametrize("invalid", (True, 6, "20"))
+def test_schema_linking_result_rejects_non_closed_budget(
+    invalid: object,
+) -> None:
+    with pytest.raises(
+        ValueError,
+        match=r"^schema linking context is invalid$",
+    ):
+        SchemaLinkingResult(
+            candidate_tables=(),
+            candidate_fields=(),
+            join_paths=(),
+            schema_version="snapshot-v1",
+            top_k=invalid,  # type: ignore[arg-type]
+        )

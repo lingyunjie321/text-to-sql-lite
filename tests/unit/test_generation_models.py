@@ -51,6 +51,7 @@ def test_generation_contracts_are_frozen() -> None:
         candidate_fields=(),
         join_paths=(),
         schema_version=snapshot.schema_version,
+        top_k=10,
     )
     context = GenerationContext(
         question="List films",

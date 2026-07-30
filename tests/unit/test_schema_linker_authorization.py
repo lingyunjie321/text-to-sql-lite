@@ -61,6 +61,7 @@ def test_linking_filters_snapshot_before_building_candidates() -> None:
         allowed_schemas=("public",),
         allowed_tables=("public.film",),
         snapshot=SNAPSHOT,
+        top_k=10,
     )
 
     assert tuple(table.object_id for table in result.candidate_tables) == (
@@ -83,6 +84,7 @@ def test_empty_authorization_returns_empty_filtered_snapshot_result() -> None:
         allowed_schemas=("public",),
         allowed_tables=(),
         snapshot=SNAPSHOT,
+        top_k=10,
     )
 
     assert result.candidate_tables == ()
@@ -112,4 +114,5 @@ def test_malformed_scope_uses_one_public_error(
             allowed_schemas=allowed_schemas,
             allowed_tables=allowed_tables,
             snapshot=SNAPSHOT,
+            top_k=10,
         )

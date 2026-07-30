@@ -13,7 +13,11 @@ from app.api import (
 )
 from app.api import application as api_application
 from app.api import bootstrap as api_bootstrap
-from app.config import DatabaseSettings
+from app.config import (
+    DatabaseSettings,
+    LLMRouteSettings,
+    LLMSettings,
+)
 from app.connectors.errors import ErrorType
 from app.connectors.metadata import empty_schema_snapshot
 from app.connectors.models import ExecutionResult, ResultColumn
@@ -31,6 +35,7 @@ from app.workflow import (
     WorkflowContext,
     WorkflowPublicError,
 )
+from tests.routing_support import single_provider_test_routing
 
 
 def _success_state(state: SQLTaskState) -> SQLTaskState:
@@ -83,10 +88,13 @@ class Runner:
 
 
 def _services(runner: Runner) -> ApplicationServices:
+    provider = Mock()
     return ApplicationServices(
         context=WorkflowContext(
-            provider=Mock(),
             connector=Mock(),
+            model_routing=single_provider_test_routing(
+                provider
+            ),
             datasource_id="pagila",
             allowed_schemas=("public",),
             allowed_tables=("public.film",),
@@ -347,7 +355,11 @@ def test_production_manifest_drift_fails_before_llm_credentials(
         "PostgreSQLConnector",
         Mock(return_value=connector),
     )
-    monkeypatch.setattr(api_bootstrap, "load_llm_settings", load_llm)
+    monkeypatch.setattr(
+        api_bootstrap,
+        "load_llm_route_settings",
+        load_llm,
+    )
     monkeypatch.setattr(
         api_bootstrap,
         "load_view_semantic_manifest",
@@ -363,6 +375,127 @@ def test_production_manifest_drift_fails_before_llm_credentials(
     assert llm_loads == 0
     connector.open.assert_called_once_with()
     connector.close.assert_called_once_with()
+
+
+def test_production_services_inject_versioned_embedding_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = DatabaseSettings(
+        dsn=(
+            "postgresql://text_to_sql_reader:secret"
+            "@127.0.0.1:55432/pagila"
+        ),
+    )
+    connector = Mock()
+    connector.read_metadata.return_value = empty_schema_snapshot()
+    semantic_connector = Mock()
+    manifest = Mock(enriched_schema_version="a" * 64)
+    llm_settings = {
+        key: LLMSettings(
+            base_url="https://models.example.test/v1",
+            api_key="stage1-test-secret",
+            model=f"model-{key}",
+        )
+        for key in ("simple", "standard", "complex")
+    }
+    llm_route_settings = LLMRouteSettings(
+        simple=llm_settings["simple"],
+        standard=llm_settings["standard"],
+        complex=llm_settings["complex"],
+        fallback=None,
+        fallback_route_ids=(),
+        data_boundary_id="production-test-boundary-v1",
+    )
+    embedding_settings = object()
+    llm_providers = {
+        key: Mock(name=f"{key}_provider")
+        for key in llm_settings
+    }
+    llm_provider_factory = Mock(
+        side_effect=lambda settings: llm_providers[
+            settings.model.removeprefix("model-")
+        ]
+    )
+    embedding_provider = Mock(
+        model_id="deterministic-embedding",
+        dimension=1024,
+        provider_config_sha256="e" * 64,
+    )
+
+    monkeypatch.setattr(
+        api_bootstrap,
+        "load_database_settings",
+        lambda: settings,
+    )
+    monkeypatch.setattr(
+        api_bootstrap,
+        "PostgreSQLConnector",
+        Mock(return_value=connector),
+    )
+    monkeypatch.setattr(
+        api_bootstrap,
+        "load_view_semantic_manifest",
+        Mock(return_value=manifest),
+    )
+    monkeypatch.setattr(
+        api_bootstrap,
+        "FrozenSemanticConnector",
+        Mock(return_value=semantic_connector),
+    )
+    monkeypatch.setattr(
+        api_bootstrap,
+        "load_llm_route_settings",
+        Mock(return_value=llm_route_settings),
+    )
+    monkeypatch.setattr(
+        api_bootstrap,
+        "OpenAICompatibleLLMProvider",
+        llm_provider_factory,
+    )
+    monkeypatch.setattr(
+        api_bootstrap,
+        "load_embedding_settings",
+        Mock(return_value=embedding_settings),
+    )
+    monkeypatch.setattr(
+        api_bootstrap,
+        "OpenAICompatibleEmbeddingProvider",
+        Mock(return_value=embedding_provider),
+    )
+
+    services = api_bootstrap.build_production_services()
+
+    runtime = services.context.retrieval_runtime
+    assert runtime is not None
+    assert runtime.provider is embedding_provider
+    assert runtime.semantic_version == manifest.enriched_schema_version
+    assert runtime.registry.resident_version_ids == ()
+    model_routing = services.context.model_routing
+    assert model_routing is not None
+    assert (
+        model_routing.route_table.select(
+            "simple"
+        ).primary.max_input_tokens
+        == llm_settings["simple"].max_input_tokens
+    )
+    assert (
+        model_routing.route_table.select(
+            "medium"
+        ).primary.model_config_sha256
+        != model_routing.route_table.select(
+            "complex"
+        ).primary.model_config_sha256
+    )
+    assert (
+        model_routing.provider_registry.resolve(
+            "standard"
+        ).provider
+        is llm_providers["standard"]
+    )
+    assert llm_provider_factory.call_count == 3
+    connector.open.assert_called_once_with()
+    connector.close.assert_not_called()
+    assert services.close == connector.close
 
 
 def test_production_lifespan_fails_closed_without_credentials(

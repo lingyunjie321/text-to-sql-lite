@@ -92,6 +92,26 @@ def test_executes_normalized_sql_once_and_preserves_result() -> None:
     assert outcome.error is None
 
 
+def test_execution_timeout_is_forwarded_to_connector() -> None:
+    connector = Mock()
+    connector.execute.return_value = RESULT
+
+    outcome = execute_validated_sql(
+        VALIDATION,
+        allowed_schemas=("public",),
+        allowed_tables=("public.film",),
+        snapshot=SNAPSHOT,
+        connector=connector,
+        timeout_seconds=0.25,
+    )
+
+    connector.execute.assert_called_once_with(
+        "SELECT film_id FROM film",
+        timeout_seconds=0.25,
+    )
+    assert outcome.result is RESULT
+
+
 def test_connector_error_becomes_failure_outcome() -> None:
     connector = Mock()
     connector.execute.side_effect = PostgreSQLConnectorError(ERROR)

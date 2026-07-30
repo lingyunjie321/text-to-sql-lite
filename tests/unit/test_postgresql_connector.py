@@ -114,6 +114,28 @@ def test_execute_retries_identical_sql_for_operational_error() -> None:
     assert connector._execute_once.call_args_list == [call(sql), call(sql)]
 
 
+def test_execute_caps_database_call_to_remaining_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connector = PostgreSQLConnector(_settings())
+    connector._execute_once = Mock(return_value=_result())
+    monkeypatch.setattr(
+        "app.connectors.postgresql.time.monotonic",
+        lambda: 10.0,
+    )
+
+    result = connector.execute(
+        "SELECT 1",
+        timeout_seconds=0.05,
+    )
+
+    assert result == _result()
+    connector._execute_once.assert_called_once_with(
+        "SELECT 1",
+        timeout_seconds=0.05,
+    )
+
+
 @pytest.mark.parametrize("retry_count", [0, 1, 3])
 def test_execute_honors_connection_retry_budget(retry_count: int) -> None:
     connector = PostgreSQLConnector(

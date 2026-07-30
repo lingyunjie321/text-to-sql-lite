@@ -12,3 +12,6 @@ tests/fixtures/pagila/upstream/
 
 # Local-only historical reference; never publish it to GitHub.
 docs/Text-to-SQL原项目参考信息.md
+
+# Local continuation notes; intentionally excluded from public releases.
+/HANDOFF.local.md

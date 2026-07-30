@@ -9,6 +9,7 @@ from app.workflow.models import (
 )
 from app.workflow.nodes import (
     CLARIFICATION_NODE,
+    COMPLEXITY_ROUTE_NODE,
     EXECUTE_SQL_NODE,
     FINALIZE_NODE,
     GENERATE_SQL_NODE,
@@ -23,6 +24,7 @@ WORKFLOW_NODE_NAMES = (
     "request_preprocess",
     "permission_resolve",
     "schema_linking",
+    "complexity_route",
     "generate_sql",
     "validate_sql",
     "execute_sql",
@@ -68,7 +70,19 @@ def _schema_route(state: SQLTaskState) -> str:
             is ErrorType.BUSINESS_KNOWLEDGE_MISSING
             else "finalize"
         )
-    return "generate_sql"
+    return (
+        "complexity_route"
+        if state.complexity_decision is None
+        else "generate_sql"
+    )
+
+
+def _complexity_route(state: SQLTaskState) -> str:
+    return (
+        "finalize"
+        if state.public_error is not None
+        else "schema_linking"
+    )
 
 
 def _generation_route(state: SQLTaskState) -> str:
@@ -129,6 +143,10 @@ def build_workflow():
         PERMISSION_RESOLVE_NODE,
     )
     builder.add_node("schema_linking", SCHEMA_LINKING_NODE)
+    builder.add_node(
+        "complexity_route",
+        COMPLEXITY_ROUTE_NODE,
+    )
     builder.add_node("generate_sql", GENERATE_SQL_NODE)
     builder.add_node("validate_sql", VALIDATE_SQL_NODE)
     builder.add_node("execute_sql", EXECUTE_SQL_NODE)
@@ -154,7 +172,17 @@ def build_workflow():
     builder.add_conditional_edges(
         "schema_linking",
         _schema_route,
-        ["generate_sql", "clarification", "finalize"],
+        [
+            "complexity_route",
+            "generate_sql",
+            "clarification",
+            "finalize",
+        ],
+    )
+    builder.add_conditional_edges(
+        "complexity_route",
+        _complexity_route,
+        ["schema_linking", "finalize"],
     )
     builder.add_conditional_edges(
         "generate_sql",

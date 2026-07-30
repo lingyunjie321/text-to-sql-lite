@@ -1,149 +1,83 @@
 # Text-to-SQL Agent
 
-当前仓库正在按 MVP 规格重新实现 PostgreSQL + Pagila 的安全
-Text-to-SQL 闭环。
+一个以安全执行为核心的 Text-to-SQL 工程实现：接收自然语言问题，在服务端授权
+范围内检索 Schema，调用 OpenAI-compatible 模型生成 SQL，经 SQLGlot 校验后，
+只读执行 PostgreSQL 查询并返回结构化结果。
 
-第一开发阶段已实现：
+当前仓库面向本地开发、架构研究和评测复现。生产启动配置固定使用
+PostgreSQL 16.14、Pagila 3.1.0、`public` Schema 和 13 张授权表；它尚不是支持
+任意数据库即插即用的生产服务。当前成熟度、验证证据和后续路线图见
+[RELEASE.md](RELEASE.md)。
 
-- 固定 PostgreSQL 16.14 和 Pagila 3.1.0 快照；
-- 环境变量配置与启动校验；
-- psycopg 3 连接池；
-- 数据库强制只读执行；
-- 30 秒默认超时、1000 行返回上限和截断标记；
-- PostgreSQL 值的 JSON 稳定表示；
-- SQLSTATE 错误归一化、脱敏和有限连接重试；
-- 单元测试与真实 PostgreSQL 集成测试。
+## 主要能力
 
-第二开发阶段已实现：
+- **完整请求闭环**：自然语言问题 → 权限解析 → Schema Linking → SQL 生成 →
+  AST 校验 → 只读执行 → 有限修复 → 结构化响应。
+- **检索与路由**：确定性 BM25、OpenAI-compatible Embedding、RRF 融合、
+  可解释 Rerank，以及显式 `ComplexityRouteNode` 驱动的动态 Top-K
+  （5/10/20）。
+- **服务端模型路由**：按 `simple`、`standard`、`complex` 路由选择模型和
+  上下文预算，可为批准的数据边界配置受限 fallback；客户端不能指定模型、
+  复杂度或 Top-K。
+- **SQL 安全门**：只接受单条只读 `SELECT` 或受控 CTE；校验授权对象、字段、
+  函数、通配符和危险 AST；模型输出、修复 SQL 都必须重新校验。
+- **数据库执行边界**：PostgreSQL 只读账号和只读事务、最长 30 秒、最多
+  1000 行、连接类有限重试、公开错误脱敏。
+- **有限反思修复**：初始 SQL 后最多三次不同修复，使用 SQL 指纹阻止重复和
+  A→B→A 循环，权限和资源风险不会交给模型盲修。
+- **API 与可观测性**：同步 FastAPI 接口、请求/Trace ID、节点耗时、Token、
+  检索与路由摘要；Trace 不保存问题、SQL、Prompt、结果行或凭据。
+- **可复现评测**：锁定 Pagila 快照、18 条 MVP Case、结果 Comparator、基线
+  冻结、逐 Case 审核和 Gold 状态更新门。
 
-- 授权范围内的 Schema、表、字段、类型、nullable 和注释读取；
-- 复合 PK/FK、unique constraint 和独立 unique index 读取；
-- 固定参数化 `pg_catalog` 查询和只读一致性快照；
-- 与 psycopg 解耦的不可变元数据模型；
-- 规范 JSON 的确定性 `schema_version` SHA-256 指纹；
-- 查询与组装两层授权过滤、公开安全错误和连接类有限重试；
-- 单元测试与真实 Pagila Metadata Contract 集成测试。
+## 请求链路
 
-第三开发阶段已实现：
+```mermaid
+flowchart LR
+    A["POST /api/v1/text-to-sql"] --> B["RequestPreprocess"]
+    B --> C["PermissionResolve"]
+    C --> D["SchemaLinking<br/>probe K=20"]
+    D --> E["ComplexityRoute"]
+    E --> F["SchemaLinking<br/>materialize K=5/10/20"]
+    F --> G["GenerateSQL"]
+    G --> H["ValidateSQL"]
+    H --> I["ExecuteSQL"]
+    I --> J["Finalize"]
+    H -->|可修复错误| K["ReflectSQL"]
+    K -->|Schema 错误| D
+    K -->|语法/方言错误| G
+    B -->|语义不唯一| L["Clarification"]
+    L --> J
+```
 
-- 锁定 SQLGlot 30.13.0，并只使用 PostgreSQL 方言解析和序列化；
-- 单 statement、只读 `SELECT`/受控 CTE 和危险 AST 默认拒绝；
-- `SELECT *` 拒绝，`COUNT(*)` 作为明确聚合特例允许；
-- 授权 Schema/表、快照对象和字段存在性校验；
-- 别名、CTE、派生表和相关子查询作用域解析；
-- 主规格 `mvp-v1` 函数白名单，未知函数和 UDF 默认拒绝；
-- 结构化、可路由且不泄露 SQL 或对象名的校验结果；
-- 完整 P0 安全矩阵和真实 Pagila Gold SQL 校验回归。
+同一检索周期的探测和物化复用同一个授权快照。授权过滤发生在 BM25 统计、
+Embedding 文档构建、融合、Rerank 和 Prompt 之前；Schema、语义、Embedding
+配置或检索策略版本不匹配时，旧索引会被拒绝。
 
-第四开发阶段已实现：
+## 环境要求
 
-- Unicode NFKC、snake_case/camelCase 分词和确定性 BM25；
-- 表名、字段名、显式 aliases 和 comments 检索；
-- 字段命中向表聚合，固定 `Top-K=10`；
-- 授权过滤先于索引统计、评分、FK 建图和版本计算；
-- 授权 FK 图的确定性最短路径和必要中间表扩展；
-- 不可变候选表、候选字段和 JOIN Path 契约；
-- 无命中窄授权 fallback 和授权视图 `schema_version`；
-- 真实 Pagila Gold Case 的表字段召回集成测试。
+- Python `>=3.12,<3.15`
+- Docker Desktop 或兼容的 Docker Engine + Compose
+- 首次获取 Pagila fixture 时能够访问 GitHub
+- 一个 OpenAI-compatible Chat Completions 服务
+- 一个 OpenAI-compatible Embeddings 服务
+- 一个 ASGI server（例如 Uvicorn；本项目不把部署服务器固定为运行时依赖）
+- 完整仓库检出；当前 wheel 不包含 `evaluation/`、`infrastructure/` 和运行所需
+  的语义 manifest，不能脱离仓库独立部署
 
-第五开发阶段已实现：
+## 快速开始
 
-- 单模型 OpenAI-compatible `LLMProvider` 协议；
-- 无厂商 SDK 的标准库 `chat/completions` 实现；
-- `GeneratedSQL` 的 SQL/澄清严格二选一结构输出；
-- 同版本授权候选、字段、PK/FK 和 JOIN Path 的确定性 Prompt；
-- 固定 `temperature=0`、1～30 秒可配置（默认 30 秒）的超时和 1 MiB 响应上限；
-- 禁止 HTTP redirect、API key 控制字符和原始 Provider 错误泄漏；
-- Token usage、模型标识和 Prompt 版本统一结果；
-- 生成后串联 Stage 3 安全校验的 Stub/协议集成测试。
-
-第六开发阶段已实现：
-
-- 以同一可信授权快照重新运行 Stage 3，并要求校验结果完全一致的执行边界；
-- 只执行 `ValidationResult.normalized_sql`，避免校验与执行 SQL 不一致；
-- 无效、失败、旧策略或内部不一致结果零数据库调用；
-- 成功结果/脱敏数据库错误严格二选一；
-- 复用 Connector 的只读事务、30 秒超时、1000 行截断、取消和同 SQL 连接
-  重试，不增加第二套重试；
-- 普通查询、CTE/聚合、合法空结果、截断和运行时错误的真实 Pagila 集成测试。
-
-第七开发阶段已实现：
-
-- 可解析 SQL 的 SQLGlot PostgreSQL 稳定指纹和解析失败原文精确 SHA-256；
-- attempt 0 与最多 attempt 1、2、3 三个不同修复；
-- 重复 SQL 和 A→B→A 在重新校验/执行前终止；
-- 每个 attempt 的校验结果、执行结果或脱敏数据库错误记录；
-- 语法最小修复、Schema 重新 Linking、方言重生成和非修复错误的确定性路由；
-- PG-MVP-018 字段错误经重新 Linking、完整校验和真实 Pagila 执行的修复回归。
-
-第八开发阶段已实现：
-
-- 固定 LangGraph 1.2.9，显式注册主规格要求的九个业务节点；
-- Pydantic `SQLTaskState` 与 frozen `WorkflowContext` 分离业务状态和可信依赖；
-- 请求预处理、静态权限、Linking、生成、校验、执行、反思、澄清和 Finalize
-  完整闭环；
-- 首次成功、合法空结果、一次到三次不同修复、重复 SQL 和澄清的确定性路由；
-- 权限/危险 SQL 零执行，连接/超时/资源风险零 LLM 盲修；
-- 最多 32 个业务节点步骤、120 秒总请求预算和 LangGraph recursion limit
-  双重终止保护；
-- Token、模型/Prompt 版本、attempt、节点耗时和唯一 `FinalStatus` 进入严格
-  State；
-- Connector 内部同调用连接重试会累计到 `infrastructure_retry_count`，不增加
-  SQL repair count；
-- Stub Provider + 真实 Pagila 的首次成功和 Schema 修复集成测试。
-
-第九开发阶段已实现：
-
-- 固定 FastAPI 0.139.2 和同步 `POST /api/v1/text-to-sql`；
-- 严格 `QueryRequest`/`QueryResponse`、全部终态互斥和失败隐藏 SQL；
-- 递归 JSON 结果类型和非 JSON 值 fail-closed，OpenAPI 不使用任意对象；
-- 独立 request/trace UUID、固定可信身份和未授权 debug 的前置 403；
-- 启动时强制加载数据库/模型配置、打开 Connector，关闭时安全回收；
-- 启动前锁定 `pagila` datasource、`public` Schema 和 MVP 所需 13 张表的
-  服务端 allowlist；
-- 未知 datasource、Schema 扩权和依赖注入零 Provider/Connector 调用；
-- 422 不回显非法输入；403、500 和公开错误脱敏，未知异常不返回堆栈、DSN
-  或 Prompt；
-- TestClient → Workflow → 真实 Pagila 的首次成功、合法空结果、一次修复和危险
-  SQL 零执行集成测试。
-
-第十开发阶段的工程实现已完成；当前发布资格为 `not_passed`：
-
-- 不含问题、SQL、结果行、Prompt、DSN、API Key 或原始异常的安全 Trace；
-- exact、multiset 和 keyed Comparator，以及列名对齐、重复数、NULL、Decimal
-  容差、时区、JSON、grain 和截断结果检查；
-- 严格的 18 条 Pagila JSONL Case loader、基线哈希和脱敏证据报告；
-- Gold 与预测 SQL 使用同一 Validator、只读 Connector 和数据快照；
-- 逐 Case evidence SHA-256、独立审核和单 Case 原子状态更新门；
-- 冻结期从锁定视图定义提取、逐条审核并聚合的通用字段语义别名；
-- 请求期仅使用外部 SHA-256 锚定的只读语义 manifest，不扫描视图；
-- 代码、依赖、Python、Prompt、Provider、Comparator、Evidence、Report、
-  模型非秘密配置、Schema、数据、Gold 和语义 manifest 的统一 baseline ID；
-- 全 `draft` 精确 Gold 起点、Case 证据 baseline 绑定和跨基线重放拒绝。
-
-此前 17/18 的候选运行已永久作废并移入 `evaluation/reports/invalidated/`，
-不能用于状态更新。重新冻结后的正式候选完成真实模型、校验、只读执行、有限
-修复和逐条审核，自动证据为 `12/18`，审核为
-`12 approved / 6 rejected`。未发现可由非 Gold 证据证明的通用实现缺陷，
-因此按终局规则不运行随机重试；当前 18 条 Gold 全部保持 `draft`。完整脱敏
-证据见 `evaluation/reports/pagila_mvp_stage10.md`。
-
-## 本地准备
-
-需要：
-
-- Python 3.12；
-- Docker Desktop 和 Docker Compose 5；
-- 可访问 GitHub 以首次下载锁定 Pagila 快照。
-
-创建环境并安装依赖：
+### 1. 安装项目
 
 ```bash
+git clone https://github.com/lingyunjie321/text-to-sql-lite.git
+cd text-to-sql-lite
+
 python3.12 -m venv .venv
 .venv/bin/python -m pip install -e '.[test]'
 ```
 
-下载并校验 Pagila：
+### 2. 获取锁定的 Pagila 数据
 
 ```bash
 .venv/bin/python tools/fetch_pagila.py \
@@ -151,297 +85,232 @@ python3.12 -m venv .venv
   --output tests/fixtures/pagila/upstream
 ```
 
-下载的 SQL 文件属于可再生成的本地 fixture，已被 Git 忽略。
+下载工具会校验归档和 SQL 文件的 SHA-256。生成的 fixture 目录已被 Git 忽略。
 
-## 启动 PostgreSQL
+### 3. 配置本地环境
 
-在当前终端创建仅用于本地开发的临时凭据：
+复制模板，并只在本地 `.env` 中填写凭据：
 
 ```bash
-export PAGILA_POSTGRES_PASSWORD="$(openssl rand -hex 24)"
-export PAGILA_APP_USER="text_to_sql_reader"
-export PAGILA_APP_PASSWORD="$(openssl rand -hex 24)"
-export PAGILA_HOST_PORT="55432"
-export TEXT_TO_SQL_DATABASE_DSN="postgresql://${PAGILA_APP_USER}:${PAGILA_APP_PASSWORD}@127.0.0.1:${PAGILA_HOST_PORT}/pagila"
+cp .env.example .env
 ```
 
-启动并等待健康检查：
+最小配置如下。示例中的值都是占位符，不要把真实密码或 API Key 提交到仓库。
+
+```dotenv
+PAGILA_POSTGRES_PASSWORD=replace-with-local-admin-password
+PAGILA_APP_USER=text_to_sql_reader
+PAGILA_APP_PASSWORD=replace-with-local-reader-password
+PAGILA_HOST_PORT=55432
+
+TEXT_TO_SQL_DATABASE_DATASOURCE_ID=pagila
+TEXT_TO_SQL_DATABASE_DSN=postgresql://text_to_sql_reader:replace-with-local-reader-password@127.0.0.1:55432/pagila
+
+LLM_BASE_URL=https://your-provider.example/v1
+LLM_API_KEY=replace-with-llm-key
+LLM_MODEL=replace-with-chat-model
+
+EMBEDDING_BASE_URL=https://your-provider.example/v1
+EMBEDDING_API_KEY=replace-with-embedding-key
+EMBEDDING_MODEL=text-embedding-v4
+EMBEDDING_DIMENSION=1024
+```
+
+`LLM_BASE_URL` 和 `EMBEDDING_BASE_URL` 是 API 根地址；Provider 会分别追加
+`/chat/completions` 和 `/embeddings`。远程地址必须使用 HTTPS，回环测试地址
+可以使用 HTTP。
+
+默认情况下，三个复杂度路由都继承基础 `LLM_*` 配置。若要使用不同模型，在
+`.env.example` 所列的 `LLM_SIMPLE_*`、`LLM_STANDARD_*`、
+`LLM_COMPLEX_*` 中覆盖相应字段。Fallback 至少要覆盖一个使其区别于主模型的
+`LLM_FALLBACK_*` 字段，其余字段继承基础配置；override 和至少一个对应的
+`MODEL_ROUTING_*_FALLBACK_ENABLED` 开关必须同时存在，且启用路由的输入/输出
+预算必须一致，否则启动失败。
+
+### 4. 启动 Pagila
 
 ```bash
 docker compose -f infrastructure/pagila/compose.yaml config --quiet
 docker compose -f infrastructure/pagila/compose.yaml up -d --wait
 ```
 
-数据库首次创建时会导入锁定 Pagila 数据，并创建只读应用角色。
+首次创建数据卷时会导入 Pagila，并创建由 `.env` 指定的只读应用角色。
+初始化脚本只在命名卷首次创建时运行；之后修改 `.env` 中的角色或密码不会自动
+更新已有卷。
 
-## 读取授权元数据
+Compose 当前没有把宿主机端口显式绑定到 `127.0.0.1`，Docker 可能将 55432
+发布到所有网络接口。只应在受信开发机或有防火墙保护的环境运行，不要把该
+数据库端口暴露到不可信网络。
 
-```python
-from app.config import load_database_settings
-from app.connectors.postgresql import PostgreSQLConnector
+### 5. 启动 API
 
-
-settings = load_database_settings()
-with PostgreSQLConnector(settings) as connector:
-    snapshot = connector.read_metadata(
-        ("public",),
-        ("public.film", "public.language"),
-    )
-```
-
-`allowed_schemas` 和 `allowed_tables` 必须来自服务端可信授权结果。不得根据
-用户问题文本扩大范围。表名必须使用 `schema.table` 形式；任一授权范围为空时
-返回确定性的空快照，不扫描数据库中其他可见对象。
-
-## 校验 SQL
-
-```python
-from app.execution import execute_validated_sql
-from app.validation import validate_sql
-
-
-result = validate_sql(
-    "SELECT film_id, title FROM film",
-    allowed_schemas=("public",),
-    allowed_tables=("public.film",),
-    snapshot=snapshot,
-)
-if result.is_valid:
-    execution = execute_validated_sql(
-        result,
-        allowed_schemas=("public",),
-        allowed_tables=("public.film",),
-        snapshot=snapshot,
-        connector=connector,
-    )
-```
-
-`allowed_schemas`、`allowed_tables` 和 `snapshot` 必须来自同一份服务端可信授权
-上下文。`is_valid` 为 false 时不得执行；失败结果不会返回部分 SQL、对象引用或
-SQLGlot 原始错误。执行入口不接收第二份 SQL，只会使用当前策略校验结果中的
-`normalized_sql`；执行前还会用传入的同一份服务端可信授权范围和 Snapshot
-重新校验，防止公开结果工厂被伪造成安全凭证。返回值严格包含 `result` 或脱敏
-`error` 之一。
-
-## 关联 Schema
-
-```python
-from app.schema_linking import link_schema
-
-
-linking = link_schema(
-    "列出影片标题和语言名称",
-    allowed_schemas=("public",),
-    allowed_tables=("public.film", "public.language"),
-    snapshot=snapshot,
-)
-```
-
-Linker 只使用传入的可信授权快照，不查询数据库，也不会根据问题扩大权限。
-`candidate_tables` 最多包含 10 张表，`candidate_fields` 提供这些表的完整字段
-上下文，`join_paths` 只包含授权快照中的真实 FK。调用方不得把不同
-`schema_version` 的候选和快照混用。
-
-## 生成 SQL
-
-LLM 配置使用 `.env.example` 中的 `LLM_*` 变量名。API key 只放在被 Git
-忽略的本地环境或 Secret 管理中，不要写入源码、README、提交或日志。
-
-```python
-from app.config import load_llm_settings
-from app.generation import (
-    GenerationContext,
-    OpenAICompatibleLLMProvider,
-    generate_sql,
-)
-
-
-llm_settings = load_llm_settings()
-provider = OpenAICompatibleLLMProvider(llm_settings)
-generated = generate_sql(
-    GenerationContext(
-        question="列出影片标题和语言名称",
-        normalized_question="列出影片标题和语言名称",
-        normalized_time=None,
-        dialect="postgres",
-        schema_linking=linking,
-        snapshot=snapshot,
-    ),
-    provider=provider,
-)
-```
-
-`snapshot` 必须是生成 `linking` 的同一授权快照。模型返回 SQL 时，调用方仍须
-使用原始可信权限和该快照调用 `validate_sql()`；只有校验成功的规范 SQL 才能
-进入 Connector。澄清结果不得执行。工作流只对顶层
-直接列、`COUNT/SUM(普通列)` 和 `DATE_TRUNC` 的输出别名做确定性规范化，
-并同步无歧义的 `GROUP BY/ORDER BY` 别名引用。它不读取 Case/Gold，不修复
-不可解析 SQL、不改写 `COUNT(*)`，也不改变结果值。
-
-## 运行 Workflow
-
-```python
-from app.workflow import (
-    WorkflowContext,
-    new_task_state,
-    run_workflow,
-)
-
-
-state = new_task_state(
-    request_id="request-id",
-    trace_id="trace-id",
-    question="列出前 10 部影片标题",
-    datasource_id="pagila",
-    requested_schemas=("public",),
-)
-result = run_workflow(
-    state,
-    context=WorkflowContext(
-        provider=provider,
-        connector=connector,
-        datasource_id="pagila",
-        allowed_schemas=("public",),
-        allowed_tables=("public.film",),
-    ),
-)
-```
-
-`WorkflowContext` 中的数据源和授权范围必须来自服务端可信配置。客户端请求只能
-缩小 Schema 范围，不能扩大表权限。Workflow 中每个生成或修复 SQL 都会重新
-经过 Stage 3 校验和 Stage 6 执行边界；不要直接调用 Connector 执行模型输出。
-
-## FastAPI 接口
-
-标准 ASGI 应用目标为：
-
-```text
-app.main:app
-```
-
-ASGI server 启动 lifespan 时会读取 `.env.example` 所列的数据库和 LLM 环境
-变量；缺少 DSN、模型或 API Key 时启动失败，不会进入 Stub 或宽松模式。部署
-服务器不属于本 MVP 代码依赖，应由运行环境选择。
-
-请求示例：
-
-```json
-{
-  "question": "列出前 10 部影片标题",
-  "datasource_id": "pagila",
-  "schemas": ["public"],
-  "debug": false
-}
-```
-
-业务成功、澄清和拒绝均返回唯一 `status`。只有成功返回 SQL 和结果；所有失败
-不返回当前或历史 SQL。普通固定身份的 `debug=true` 返回 403，任意 Header 都
-不能提升 debug 权限。
-
-## Pagila MVP 评测
-
-锁定基线记录在 `evaluation/pagila_baseline.json`。旧 17/18 报告和明确的
-作废说明位于 `evaluation/reports/invalidated/`；当前正式候选的结构化报告
-和脱敏验收报告分别为 `evaluation/reports/pagila_mvp_stage10.json` 与
-`evaluation/reports/pagila_mvp_stage10.md`。最终结果是工程完成、发布资格
-`not_passed`：自动证据 `12/18`，独立审核
-`12 approved / 6 rejected`，Gold `verified=0`。
-基线同时锚定经逐条审核的
-`infrastructure/pagila/view_semantics.json`、候选/审核账本摘要、原始和增强
-`schema_version`、受控代码根、实际行为依赖版本、数据库非秘密执行参数、
-非秘密模型配置及各契约版本。运行时数据
-校验和来自
-`pg_dump --data-only --no-owner --no-privileges`；PostgreSQL 每次生成的
-`restrict/unrestrict` nonce 会先规范化为固定 `TOKEN`，其余内容不变。
-
-代码与语义审核完成后，先重新冻结基线：
+项目导出标准 ASGI 应用 `app.main:app`。可以使用现有部署环境中的任意 ASGI
+server；以下以 Uvicorn 为例：
 
 ```bash
-.venv/bin/python -m tools.run_pagila_evaluation freeze-baseline \
-  --baseline evaluation/pagila_baseline.json \
-  --output evaluation/pagila_baseline.json \
-  --cases evaluation/cases/pagila_mvp.jsonl \
-  --env-file .env
+.venv/bin/python -m pip install uvicorn
+.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-随后生成新的证据报告；此操作不会自动修改 Gold：
+Uvicorn 只是启动示例，未写入 `pyproject.toml`，也不属于当前资格冻结；正式
+部署应自行固定和验证 ASGI server 版本。
+
+启动时会加载 `.env`、连接数据库、读取授权元数据、校验锁定语义 manifest，
+并创建 LLM/Embedding runtime。缺少必需配置时进程会 fail closed。
+
+### 6. 发起查询
 
 ```bash
-.venv/bin/python -m tools.run_pagila_evaluation evaluate \
-  --cases evaluation/cases/pagila_mvp.jsonl \
-  --baseline evaluation/pagila_baseline.json \
-  --report evaluation/reports/pagila_mvp_stage10.json \
-  --env-file .env
+curl --fail-with-body \
+  --request POST \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "question": "列出前 10 部影片的编号和标题",
+    "datasource_id": "pagila",
+    "schemas": ["public"],
+    "debug": false
+  }' \
+  http://127.0.0.1:8000/api/v1/text-to-sql
 ```
 
-审核和状态更新是两个独立的单 Case 门。`review-case` 只在证据摘要有效且自动
-结果通过时允许 `--approve`；`verify-case` 还会核对审核状态和 status-neutral
-Gold 哈希，并只原子替换目标行的一个 `status` token。两个命令都必须显式提供
-当前外部 baseline，且会先重算代码、语义和依赖冻结，旧报告不能跨 baseline
-重放：
+成功响应包含：
+
+- `status`：`SUCCEEDED_FIRST_PASS` 或 `SUCCEEDED_REPAIRED`
+- `sql`：通过安全门并实际执行的规范 SQL
+- `columns`、`rows`、`returned_row_count` 和 `truncated`
+- `attempts` 和 `repair_count`
+- 独立的 `request_id` 和 `trace_id`
+
+需要澄清时返回 `CLARIFICATION_REQUIRED` 和结构化 `clarification`；拒绝或
+失败时只返回脱敏 `error`，不会返回当前或历史 SQL。交互式 OpenAPI 文档默认
+位于 `http://127.0.0.1:8000/docs`。
+
+## 配置说明
+
+| 配置组 | 用途 | 关键约束 |
+|---|---|---|
+| `PAGILA_*` | Docker 初始化和端口 | 密码必须只保存在本地或 Secret 管理中 |
+| `TEXT_TO_SQL_DATABASE_*` | 数据源、连接池、超时和行数 | 当前数据库名必须为 `pagila`；超时 ≤ 30 秒；行数 ≤ 1000 |
+| `LLM_*` | 基础 Chat Completions Provider | `temperature=0`；远程 URL 必须为 HTTPS |
+| `LLM_SIMPLE_*` / `STANDARD_*` / `COMPLEX_*` | 路由级模型覆盖 | 未设置的路由完整继承基础配置 |
+| `LLM_FALLBACK_*` | 可选备用模型 | 必须与启用开关、上下文预算和数据边界一致 |
+| `MODEL_ROUTING_*` | 数据边界和 fallback 策略 | 只由服务端配置，客户端不能覆盖 |
+| `EMBEDDING_*` | Embedding Provider、维数和批量限制 | 当前批量上限 64，响应上限 4 MiB，超时 ≤ 10 秒 |
+
+完整变量和默认值见 [.env.example](.env.example)。
+
+## API 约束
+
+`POST /api/v1/text-to-sql` 的请求字段：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `question` | string | 必填，去除首尾空白后 1～2000 字符 |
+| `datasource_id` | string | 默认 `pagila`；生产 Bootstrap 只接受 `pagila` |
+| `schemas` | string[] | 可缩小服务端授权 Schema，不能扩大权限 |
+| `debug` | boolean | 默认 `false`；当前固定身份没有 debug 权限 |
+
+API 不接受 SQL、表 allowlist、复杂度、Top-K、模型、Prompt 或超时参数。这些
+都属于服务端可信上下文。
+
+业务成功、澄清和业务失败通常都以 HTTP 200 返回，并由响应内的 `status`
+区分；未授权 `debug=true` 返回 403，请求体校验失败返回 422，未处理的服务
+边界异常返回 500。当前没有独立的认证、Session 或健康检查端点。
+
+## 安全边界
+
+- 生产 Bootstrap 当前只授权 Pagila 的 `public` Schema 和 13 张固定表。
+- 默认身份是代码内固定的 `mvp-fixed-user`，没有认证或多租户隔离；即使 API
+  示例只绑定回环地址，也不要把服务直接暴露到不可信网络。
+- 所有模型生成、修复或其他来源的 SQL 都必须重新经过权限、SQLGlot AST、
+  函数策略和执行边界。
+- Prompt、Schema 候选和结构化模型输出不是安全凭证。
+- 数据库账号与事务都应保持只读；Connector 的只读约束是第二道防线，不替代
+  AST 校验。
+- Trace 和评测报告使用白名单字段与摘要，不应记录问题、SQL、Prompt、结果行、
+  DSN、API Key、原始 Provider 响应或向量。
+- `.env` 已被 Git 忽略。提交前仍应执行独立的敏感信息检查。
+
+## 测试
+
+单元和安全测试不需要外部模型或数据库：
 
 ```bash
-.venv/bin/python -m tools.run_pagila_evaluation review-case \
-  --report evaluation/reports/pagila_mvp_stage10.json \
-  --baseline evaluation/pagila_baseline.json \
-  --case-id PG-MVP-001 --approve
-
-.venv/bin/python -m tools.run_pagila_evaluation verify-case \
-  --cases evaluation/cases/pagila_mvp.jsonl \
-  --report evaluation/reports/pagila_mvp_stage10.json \
-  --baseline evaluation/pagila_baseline.json \
-  --case-id PG-MVP-001
+PYTHONDONTWRITEBYTECODE=1 \
+  .venv/bin/pytest -q -p no:cacheprovider tests/unit tests/security
 ```
 
-不得使用脚本预先批量标记未执行或未审核的 Case。
-
-## 运行测试
-
-单元测试不需要数据库：
+完整集成测试要求锁定的 Pagila 服务正在运行，并且当前进程能读取
+`TEXT_TO_SQL_DATABASE_DSN`。测试 fixture 不会自动加载 `.env`，必须把同一
+只读 DSN 显式导出到 pytest 进程。Provider 协议测试使用本地确定性服务，不会
+调用真实外部模型：
 
 ```bash
-.venv/bin/pytest tests/unit -v
+export TEXT_TO_SQL_DATABASE_DSN='postgresql://text_to_sql_reader:replace-with-local-reader-password@127.0.0.1:55432/pagila'
+PYTHONDONTWRITEBYTECODE=1 \
+  .venv/bin/pytest -q -p no:cacheprovider tests/integration
 ```
 
-集成测试要求上述容器正在运行，且同一终端仍保留
-`TEXT_TO_SQL_DATABASE_DSN`：
-
-```bash
-.venv/bin/pytest tests/integration -v -m integration
-```
-
-运行确定性检查：
+其他静态检查：
 
 ```bash
 .venv/bin/python -m compileall -q app evaluation tools tests
+.venv/bin/python -m pip check
 docker compose -f infrastructure/pagila/compose.yaml config --quiet
+git diff --check
 ```
 
-## 停止服务
+Pagila 正式评测会调用真实模型、Embedding 和数据库，并受冻结基线约束；不要
+把它当作普通 smoke test，也不要为迎合结果修改 Gold。查看可用命令：
 
-正常停止不会删除 Pagila 数据卷：
+```bash
+.venv/bin/python -m tools.run_pagila_evaluation --help
+```
+
+新的 Stage 1 正式候选必须使用新的报告文件，不能覆盖或与历史 Stage 10 报告
+交叉执行审核/状态更新。
+
+## 停止本地环境
 
 ```bash
 docker compose -f infrastructure/pagila/compose.yaml down
 ```
 
-不要把删除数据卷作为日常 teardown。只有确认不再需要本地 Pagila 数据时，
-才应单独决定是否删除该命名卷。
+该命令保留 Pagila 命名卷。不要把删除数据卷作为日常 teardown；只有确认不再
+需要本地数据后再单独处理。
 
-## 安全说明
+## 项目结构
 
-- 不要把真实 DSN 或密码写进 `.env.example`、源码、提交或日志；
-- Connector 不负责 SQL 安全解析；所有模型 SQL 必须先经过
-  `app.validation.validate_sql()`；
-- Schema Linking 的候选不是新的授权结果；后续 SQL 校验仍必须使用原始可信
-  `allowed_schemas`、`allowed_tables` 和同版本快照；
-- Prompt 和结构化输出不是安全边界；模型 SQL 无论看起来是否只读，都必须通过
-  `app.validation.validate_sql()`，Provider 错误不得记录完整请求或响应；
-- Workflow 的 Provider、Connector、DSN 和完整 Prompt 不进入 State；
-  澄清和公开错误使用固定、脱敏内容；
-- Trace 和评测报告只保存白名单字段、稳定 code、计数和摘要，不保存问题、
-  SQL、Prompt、行值、凭据或原始异常；
-- Case 从 `draft` 更新为 `verified` 前必须同时通过真实执行/安全门、Gold
-  Comparator、证据摘要和逐条审核；Gold 的问题、SQL、字段与比较规则不可由
-  状态更新器修改；
-- 第一阶段的只读账号和只读事务是数据库侧第二道防线，不替代上层校验。
+```text
+app/
+  api/              FastAPI 契约、Bootstrap 和响应映射
+  connectors/       PostgreSQL、元数据、只读执行和锁定语义
+  schema_linking/   BM25、Embedding、RRF、Rerank 和版本化索引
+  generation/       Prompt、OpenAI-compatible Provider、模型路由与上下文裁剪
+  validation/       SQLGlot AST、对象和函数安全策略
+  execution/        校验后执行边界
+  reflection/       SQL 指纹、修复策略和循环终止
+  workflow/         LangGraph State、十种节点和条件路由
+  observability/    脱敏 Trace 模型与采集
+evaluation/         Case、Comparator、基线冻结、报告和审核工具
+infrastructure/     锁定 Pagila Compose、初始化和语义 manifest
+tests/              unit、security 和 integration 测试
+tools/              Pagila fixture 与正式评测命令
+docs/               主规格、验收规格、ADR、设计和实施记录
+```
+
+## 项目状态与路线图
+
+核心 PostgreSQL/Pagila MVP 闭环已实现，增强阶段 1 的确定性实现和本地集成已
+建立，但完整真实环境资格仍为 `not_passed`。业务知识与 Few-shot、Session /
+Checkpoint / Memory、多数据库与跨源查询、缓存与生产治理属于后续必做阶段，
+当前版本均不能宣称已支持。
+
+详细完成项、验证结果、已知限制和推荐推进顺序见 [RELEASE.md](RELEASE.md)；
+实现契约以 [项目复现规格](docs/Text-to-SQL项目复现规格.md) 和
+[测试与验收规格](docs/Text-to-SQL测试与验收规格.md) 为准。
+
+## License
+
+仓库当前尚未包含开源许可证。在维护者选择并提交 `LICENSE` 前，代码不会因公开
+可见而自动获得开源使用许可。

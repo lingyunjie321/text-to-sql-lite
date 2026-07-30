@@ -1,10 +1,14 @@
 # Text-to-SQL MVP Stage 3–10 执行台账
 
+> 本文件是 Stage 3–10 的历史执行记录，不是当前增强阶段的 Git 或交付指令。
+> 当前工作只遵守仓库根目录 `AGENTS.md`：仅使用本地 `main`，验证后推送
+> `origin main`，不创建额外分支、worktree 或 Pull Request。
+
 ## 执行约束
 
-- 当前分支：`codex/mvp-stages-3-10`
-- 推送目标：`origin/codex/mvp-stages-3-10`
-- 禁止合并或推送 `main`
+- 当时分支：`codex/mvp-stages-3-10`
+- 当时推送目标：`origin/codex/mvp-stages-3-10`
+- 当时约束：禁止合并或推送 `main`；该约束已由当前 `AGENTS.md` 单分支工作流取代
 - 阶段顺序：SQL 校验 → Schema Linking → SQL 生成 → 真实执行 →
   反思修复 → LangGraph Workflow → FastAPI → 评测与安全回归
 - 每个阶段串行执行，并遵循测试先行、完整回归、独立审查、单独提交和推送。
@@ -31,9 +35,9 @@
 | Stage 7 反思修复 | completed | `docs/superpowers/specs/2026-07-28-stage-7-reflection-repair-design.md` | `docs/superpowers/plans/2026-07-28-stage-7-reflection-repair.md` | `0d4c6b8` | Stage 8 |
 | Stage 8 LangGraph Workflow | completed | `docs/superpowers/specs/2026-07-28-stage-8-langgraph-workflow-design.md` | `docs/superpowers/plans/2026-07-28-stage-8-langgraph-workflow.md` | `22f3a91` | Stage 9 |
 | Stage 9 FastAPI | completed | `docs/superpowers/specs/2026-07-28-stage-9-fastapi-design.md` | `docs/superpowers/plans/2026-07-28-stage-9-fastapi.md` | `8120c73` | Stage 10 |
-| Stage 10 评测与安全回归 | implementation completed；qualification `not_passed` | `docs/superpowers/specs/2026-07-29-stage-10-evaluation-security-design.md` | `docs/superpowers/plans/2026-07-29-stage-10-evaluation-security.md` | 本阶段终局提交 | 等待用户决定是否合并 |
+| Stage 10 评测与安全回归 | implementation completed；qualification `not_passed` | `docs/superpowers/specs/2026-07-29-stage-10-evaluation-security-design.md` | `docs/superpowers/plans/2026-07-29-stage-10-evaluation-security.md` | 本阶段终局提交 | 当时等待用户决定是否合并 |
 
-## 当前阶段
+## 历史阶段记录
 
 ### Stage 3：SQLGlot PostgreSQL AST 与安全校验
 
@@ -583,7 +587,7 @@
   - `README.md`
   - 本设计、实施计划和执行台账
 - 已完成的入口检查：
-  - 当前分支与 `origin/codex/mvp-stages-3-10` 同步；
+  - 当时分支与 `origin/codex/mvp-stages-3-10` 同步；
   - Stage 9 工作区干净；
   - Stage 9 最终基线：单元 `411 passed`、安全 `75 passed`、集成
     `68 passed`；
@@ -760,4 +764,5 @@
   `blocking=0`、`high=0`。
 - 阶段提交 SHA：本阶段终局提交（实际 SHA 见最终报告）
 - 遗留问题：冻结模型未达到 18/18，工程完成但 MVP 发布资格未通过。
-- 下一阶段：停止，等待用户决定是否合并到 `main`。
+- 当时下一阶段：停止并等待用户决定是否合并到 `main`；当前工作流以根目录
+  `AGENTS.md` 为准。

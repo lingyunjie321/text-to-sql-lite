@@ -49,6 +49,7 @@ class GenerationContext:
     schema_linking: SchemaLinkingResult
     snapshot: SchemaSnapshot
     max_result_rows: int = 1000
+    selected_field_ids: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)

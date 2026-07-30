@@ -1112,11 +1112,21 @@ class FrozenSemanticConnector:
         self,
         allowed_schemas: tuple[str, ...],
         allowed_tables: tuple[str, ...],
+        *,
+        timeout_seconds: float | None = None,
     ) -> SchemaSnapshot:
         reader = getattr(self._delegate, "read_metadata", None)
         if not callable(reader):
             raise ValueError("semantic connector is invalid")
-        snapshot = reader(allowed_schemas, allowed_tables)
+        snapshot = (
+            reader(allowed_schemas, allowed_tables)
+            if timeout_seconds is None
+            else reader(
+                allowed_schemas,
+                allowed_tables,
+                timeout_seconds=timeout_seconds,
+            )
+        )
         if not isinstance(snapshot, SchemaSnapshot):
             raise ValueError("semantic connector is invalid")
         requested_schemas = set(allowed_schemas)
@@ -1149,11 +1159,23 @@ class FrozenSemanticConnector:
         )
         return _enrich_with_entries(snapshot, entries)
 
-    def execute(self, sql: str) -> ExecutionResult:
+    def execute(
+        self,
+        sql: str,
+        *,
+        timeout_seconds: float | None = None,
+    ) -> ExecutionResult:
         executor = getattr(self._delegate, "execute", None)
         if not callable(executor):
             raise ValueError("semantic connector is invalid")
-        result = executor(sql)
+        result = (
+            executor(sql)
+            if timeout_seconds is None
+            else executor(
+                sql,
+                timeout_seconds=timeout_seconds,
+            )
+        )
         if not isinstance(result, ExecutionResult):
             raise ValueError("semantic connector is invalid")
         return result

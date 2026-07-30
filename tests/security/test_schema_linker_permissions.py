@@ -1,12 +1,14 @@
 from dataclasses import replace
 
+import pytest
+
 from app.connectors.metadata import (
     ColumnMetadata,
     ForeignKeyMetadata,
     TableMetadata,
     build_schema_snapshot,
 )
-from app.schema_linking import link_schema
+from app.schema_linking import SchemaTopK, link_schema
 
 
 def _table(
@@ -66,12 +68,16 @@ def _snapshot(payroll: TableMetadata):
     )
 
 
-def test_unauthorized_metadata_cannot_change_result_or_version() -> None:
+@pytest.mark.parametrize("top_k", (5, 10, 20))
+def test_unauthorized_metadata_cannot_change_result_or_version(
+    top_k: SchemaTopK,
+) -> None:
     original = link_schema(
         "confidential salaries secret compensation 薪资",
         allowed_schemas=("public",),
         allowed_tables=("public.film",),
         snapshot=_snapshot(PAYROLL),
+        top_k=top_k,
     )
     changed = link_schema(
         "confidential salaries secret compensation 薪资",
@@ -84,9 +90,11 @@ def test_unauthorized_metadata_cannot_change_result_or_version() -> None:
                 aliases=("executive bonus",),
             )
         ),
+        top_k=top_k,
     )
 
     assert changed == original
+    assert original.top_k == top_k
     assert original.schema_version != _snapshot(PAYROLL).schema_version
     assert original.join_paths == ()
     assert tuple(
@@ -104,6 +112,7 @@ def test_empty_authorization_returns_no_metadata() -> None:
         allowed_schemas=(),
         allowed_tables=("public.film", "public.payroll"),
         snapshot=_snapshot(PAYROLL),
+        top_k=10,
     )
 
     assert result.candidate_tables == ()
@@ -117,6 +126,7 @@ def test_fk_with_an_unauthorized_endpoint_is_removed_before_graph_use() -> None:
         allowed_schemas=("public",),
         allowed_tables=("public.film",),
         snapshot=_snapshot(PAYROLL),
+        top_k=10,
     )
 
     assert result.join_paths == ()

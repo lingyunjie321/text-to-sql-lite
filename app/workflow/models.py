@@ -5,7 +5,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Protocol, Self
+from typing import Literal, Protocol, Self
 
 from pydantic import (
     BaseModel,
@@ -18,18 +18,153 @@ from pydantic import (
 from app.connectors.errors import DatabaseError, ErrorType
 from app.connectors.metadata import SchemaSnapshot
 from app.connectors.models import ExecutionResult
-from app.generation import LLMProvider
+from app.generation import (
+    CONTEXT_ESTIMATOR_VERSION,
+    MODEL_ROUTE_TABLE_VERSION,
+    ModelRoutingRuntime,
+)
 from app.reflection import (
     AttemptHistory,
     RepairStrategy,
     SQLAttempt,
 )
-from app.schema_linking import CandidateField, CandidateTable, JoinPath
+from app.schema_linking import (
+    CandidateField,
+    CandidateTable,
+    JoinPath,
+    RetrievalFailureEvidence,
+)
+from app.schema_linking.fusion import SchemaRetrievalPool
+from app.schema_linking.index import RetrievalRuntime
 from app.validation import ValidationResult
 
 MAX_WORKFLOW_STEPS = 32
 REQUEST_TIMEOUT_SECONDS = 120
 REPAIR_PROMPT_VERSION = "repair-v1"
+
+
+class QueryComplexity(str, Enum):
+    SIMPLE = "simple"
+    MEDIUM = "medium"
+    COMPLEX = "complex"
+
+
+class ComplexityReason(str, Enum):
+    AGGREGATION_REQUESTED = "aggregation_requested"
+    WINDOW_OR_RANKING_REQUESTED = "window_or_ranking_requested"
+    SUBQUERY_OR_ANTI_JOIN_REQUESTED = "subquery_or_anti_join_requested"
+    TIME_ANALYSIS_REQUESTED = "time_analysis_requested"
+    MULTIPLE_POSITIVE_TABLES = "multiple_positive_tables"
+    RELEVANT_JOIN_PATH = "relevant_join_path"
+    LONG_JOIN_PATH = "long_join_path"
+    REPAIR_HISTORY = "repair_history"
+    DEFAULT_SIMPLE = "default_simple"
+
+
+_HIGH_COMPLEXITY_REASONS = frozenset(
+    {
+        ComplexityReason.WINDOW_OR_RANKING_REQUESTED,
+        ComplexityReason.SUBQUERY_OR_ANTI_JOIN_REQUESTED,
+        ComplexityReason.LONG_JOIN_PATH,
+        ComplexityReason.REPAIR_HISTORY,
+    }
+)
+_MEDIUM_COMPLEXITY_REASONS = frozenset(
+    {
+        ComplexityReason.AGGREGATION_REQUESTED,
+        ComplexityReason.TIME_ANALYSIS_REQUESTED,
+        ComplexityReason.MULTIPLE_POSITIVE_TABLES,
+        ComplexityReason.RELEVANT_JOIN_PATH,
+    }
+)
+
+
+class ComplexityDecision(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+        strict=True,
+    )
+
+    level: QueryComplexity
+    schema_top_k: Literal[5, 10, 20]
+    reason_codes: tuple[ComplexityReason, ...]
+    policy_version: Literal["complexity-v1"] = "complexity-v1"
+
+    @field_validator("level", mode="before")
+    @classmethod
+    def validate_level(
+        cls,
+        value: object,
+    ) -> QueryComplexity:
+        if not isinstance(value, QueryComplexity):
+            raise ValueError("complexity decision is invalid")
+        return value
+
+    @field_validator("schema_top_k", mode="before")
+    @classmethod
+    def validate_schema_top_k(cls, value: object) -> int:
+        if type(value) is not int or value not in {5, 10, 20}:
+            raise ValueError("complexity decision is invalid")
+        return value
+
+    @field_validator("reason_codes", mode="before")
+    @classmethod
+    def validate_reason_codes(
+        cls,
+        value: object,
+    ) -> tuple[ComplexityReason, ...]:
+        if (
+            type(value) is not tuple
+            or any(
+                not isinstance(reason, ComplexityReason)
+                for reason in value
+            )
+        ):
+            raise ValueError("complexity decision is invalid")
+        return value
+
+    @field_validator("policy_version", mode="before")
+    @classmethod
+    def validate_policy_version(cls, value: object) -> str:
+        if value != "complexity-v1":
+            raise ValueError("complexity decision is invalid")
+        return "complexity-v1"
+
+    @model_validator(mode="after")
+    def validate_mapping(self) -> Self:
+        reasons = set(self.reason_codes)
+        ordered_reasons = tuple(
+            reason
+            for reason in ComplexityReason
+            if reason in reasons
+        )
+        if (
+            not reasons
+            or len(reasons) != len(self.reason_codes)
+            or self.reason_codes != ordered_reasons
+            or (
+                ComplexityReason.DEFAULT_SIMPLE in reasons
+                and reasons != {ComplexityReason.DEFAULT_SIMPLE}
+            )
+        ):
+            raise ValueError("complexity decision is invalid")
+
+        if reasons == {ComplexityReason.DEFAULT_SIMPLE}:
+            expected = (QueryComplexity.SIMPLE, 5)
+        elif (
+            reasons & _HIGH_COMPLEXITY_REASONS
+            or len(reasons & _MEDIUM_COMPLEXITY_REASONS) >= 2
+        ):
+            expected = (QueryComplexity.COMPLEX, 20)
+        elif reasons & _MEDIUM_COMPLEXITY_REASONS:
+            expected = (QueryComplexity.MEDIUM, 10)
+        else:
+            raise ValueError("complexity decision is invalid")
+
+        if (self.level, self.schema_top_k) != expected:
+            raise ValueError("complexity decision is invalid")
+        return self
 
 
 class FinalStatus(str, Enum):
@@ -121,23 +256,272 @@ class GenerationObservation(BaseModel):
         return self
 
 
+class ContextSelectionObservation(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+        strict=True,
+    )
+
+    call_number: int = Field(ge=1)
+    attempt_number: int = Field(ge=0, le=3)
+    estimator_version: Literal[
+        "utf8-bytes-div-3-v1"
+    ] = CONTEXT_ESTIMATOR_VERSION
+    candidate_field_count: int = Field(ge=0)
+    required_field_count: int = Field(ge=0)
+    selected_field_count: int = Field(ge=0)
+    pruned_field_count: int = Field(ge=0)
+    estimated_tokens: int = Field(ge=0)
+    usable_input_tokens: int
+    outcome: Literal["selected", "required_overflow"]
+
+    @field_validator(
+        "call_number",
+        "attempt_number",
+        "candidate_field_count",
+        "required_field_count",
+        "selected_field_count",
+        "pruned_field_count",
+        "estimated_tokens",
+        "usable_input_tokens",
+        mode="before",
+    )
+    @classmethod
+    def reject_coerced_integer(cls, value: object) -> int:
+        if type(value) is not int:
+            raise ValueError(
+                "context selection observation is invalid"
+            )
+        return value
+
+    @model_validator(mode="after")
+    def validate_selection(self) -> Self:
+        if (
+            self.required_field_count
+            > self.selected_field_count
+            or self.selected_field_count
+            + self.pruned_field_count
+            != self.candidate_field_count
+            or (
+                self.outcome == "selected"
+                and (
+                    self.estimated_tokens
+                    > self.usable_input_tokens
+                    or self.usable_input_tokens < 0
+                )
+            )
+            or (
+                self.outcome == "required_overflow"
+                and self.estimated_tokens
+                <= self.usable_input_tokens
+            )
+        ):
+            raise ValueError(
+                "context selection observation is invalid"
+            )
+        return self
+
+
+_MODEL_ROUTING_ERROR_CODES = frozenset(
+    {
+        "LLM_TIMEOUT",
+        "LLM_CONNECTION_ERROR",
+        "LLM_RATE_LIMITED",
+        "LLM_CAPACITY_ERROR",
+        "LLM_HTTP_ERROR",
+        "LLM_INVALID_RESPONSE",
+        "LLM_INVALID_OUTPUT",
+        "LLM_INTERNAL_ERROR",
+        "WORKFLOW_CONTEXT_REQUIRED_OVERFLOW",
+    }
+)
+_MODEL_ROUTING_FALLBACK_CODES = frozenset(
+    {
+        "LLM_TIMEOUT",
+        "LLM_CONNECTION_ERROR",
+        "LLM_RATE_LIMITED",
+        "LLM_CAPACITY_ERROR",
+    }
+)
+
+
+class ModelRoutingObservation(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+        strict=True,
+    )
+
+    call_number: int = Field(ge=1)
+    attempt_number: int = Field(ge=0, le=3)
+    route_id: Literal[
+        "simple_route",
+        "standard_route",
+        "complex_route",
+    ]
+    route_table_version: Literal[
+        "model-routes-v1"
+    ] = MODEL_ROUTE_TABLE_VERSION
+    primary_model_config_sha256: str = Field(
+        pattern=r"^[0-9a-f]{64}$"
+    )
+    model_config_sha256: str = Field(
+        pattern=r"^[0-9a-f]{64}$"
+    )
+    data_boundary_sha256: str = Field(
+        pattern=r"^[0-9a-f]{64}$"
+    )
+    provider_call_count: int = Field(ge=0, le=2)
+    fallback_used: bool
+    outcome: Literal[
+        "succeeded",
+        "failed",
+        "context_rejected",
+    ]
+    error_code: str | None = None
+    primary_error_code: str | None = None
+    failure_stage: Literal[
+        "provider",
+        "normalization",
+    ] | None = None
+
+    @field_validator(
+        "call_number",
+        "attempt_number",
+        "provider_call_count",
+        mode="before",
+    )
+    @classmethod
+    def reject_coerced_integer(cls, value: object) -> int:
+        if type(value) is not int:
+            raise ValueError(
+                "model routing observation is invalid"
+            )
+        return value
+
+    @model_validator(mode="after")
+    def validate_routing(self) -> Self:
+        if (
+            type(self.fallback_used) is not bool
+            or (
+                self.error_code is not None
+                and self.error_code
+                not in _MODEL_ROUTING_ERROR_CODES
+            )
+            or (
+                self.outcome == "succeeded"
+                and (
+                    self.provider_call_count not in {1, 2}
+                    or self.error_code is not None
+                    or self.failure_stage is not None
+                    or (
+                        self.fallback_used
+                        and self.primary_error_code
+                        not in _MODEL_ROUTING_FALLBACK_CODES
+                    )
+                    or (
+                        not self.fallback_used
+                        and self.primary_error_code is not None
+                    )
+                )
+            )
+            or (
+                self.outcome == "failed"
+                and (
+                    self.provider_call_count not in {0, 1, 2}
+                    or self.error_code is None
+                    or self.failure_stage is None
+                )
+            )
+            or (
+                self.outcome == "context_rejected"
+                and (
+                    self.provider_call_count != 0
+                    or self.fallback_used
+                    or self.error_code
+                    != "WORKFLOW_CONTEXT_REQUIRED_OVERFLOW"
+                    or self.primary_error_code is not None
+                    or self.failure_stage is not None
+                    or self.primary_model_config_sha256
+                    != self.model_config_sha256
+                )
+            )
+            or (
+                self.fallback_used
+                != (self.provider_call_count == 2)
+            )
+            or (
+                self.failure_stage == "provider"
+                and (
+                    self.primary_error_code is None
+                    or (
+                        not self.fallback_used
+                        and self.primary_error_code
+                        != self.error_code
+                    )
+                    or (
+                        self.fallback_used
+                        and self.primary_error_code
+                        not in _MODEL_ROUTING_FALLBACK_CODES
+                    )
+                    or (
+                        self.provider_call_count == 0
+                        and self.error_code != "LLM_TIMEOUT"
+                    )
+                )
+            )
+            or (
+                self.failure_stage == "normalization"
+                and (
+                    self.provider_call_count not in {1, 2}
+                    or self.error_code != "LLM_INTERNAL_ERROR"
+                    or (
+                        self.fallback_used
+                        and self.primary_error_code
+                        not in _MODEL_ROUTING_FALLBACK_CODES
+                    )
+                    or (
+                        not self.fallback_used
+                        and self.primary_error_code is not None
+                    )
+                )
+            )
+        ):
+            raise ValueError(
+                "model routing observation is invalid"
+            )
+        return self
+
+
 class WorkflowConnector(Protocol):
     def read_metadata(
         self,
         allowed_schemas: tuple[str, ...],
         allowed_tables: tuple[str, ...],
+        *,
+        timeout_seconds: float | None = None,
     ) -> SchemaSnapshot: ...
 
-    def execute(self, sql: str) -> ExecutionResult: ...
+    def execute(
+        self,
+        sql: str,
+        *,
+        timeout_seconds: float | None = None,
+    ) -> ExecutionResult: ...
 
 
 @dataclass(frozen=True, slots=True)
 class WorkflowContext:
-    provider: LLMProvider = field(repr=False)
     connector: WorkflowConnector = field(repr=False)
+    model_routing: ModelRoutingRuntime = field(repr=False)
     datasource_id: str
     allowed_schemas: tuple[str, ...]
     allowed_tables: tuple[str, ...]
+    retrieval_runtime: RetrievalRuntime | None = field(
+        default=None,
+        repr=False,
+    )
     now: datetime | None = None
     clock: Callable[[], float] = field(
         default=time.monotonic,
@@ -159,6 +543,17 @@ class WorkflowContext:
             or any(
                 table.split(".", 1)[0] not in schemas
                 for table in tables
+            )
+            or (
+                self.retrieval_runtime is not None
+                and not isinstance(
+                    self.retrieval_runtime,
+                    RetrievalRuntime,
+                )
+            )
+            or not isinstance(
+                self.model_routing,
+                ModelRoutingRuntime,
             )
             or not callable(self.clock)
             or (
@@ -196,6 +591,21 @@ class SQLTaskState(BaseModel):
     join_paths: tuple[JoinPath, ...] = ()
     schema_version: str | None = None
     schema_snapshot: SchemaSnapshot | None = None
+    retrieval_version_id: str | None = None
+    schema_retrieval_pool: SchemaRetrievalPool | None = None
+    retrieval_failure: RetrievalFailureEvidence | None = Field(
+        default=None,
+        repr=False,
+    )
+    probe_candidate_table_count: int | None = Field(
+        default=None,
+        ge=0,
+    )
+    probe_candidate_field_count: int | None = Field(
+        default=None,
+        ge=0,
+    )
+    complexity_decision: ComplexityDecision | None = None
 
     current_sql: str | None = None
     # SQLAttempt and ExecutionResult include the recursive JsonValue alias
@@ -219,6 +629,15 @@ class SQLTaskState(BaseModel):
 
     token_usage: TokenUsage = Field(default_factory=TokenUsage)
     generation_observations: tuple[GenerationObservation, ...] = ()
+    context_selection_observations: tuple[
+        ContextSelectionObservation,
+        ...,
+    ] = ()
+    selected_generation_field_ids: tuple[str, ...] = ()
+    model_routing_observations: tuple[
+        ModelRoutingObservation,
+        ...,
+    ] = ()
     node_timings: tuple[NodeTiming, ...] = ()
     step_count: int = Field(default=0, ge=0, le=MAX_WORKFLOW_STEPS)
     workflow_started_at: float | None = Field(default=None, ge=0)
@@ -241,6 +660,38 @@ class SQLTaskState(BaseModel):
     def validate_workflow_invariants(self) -> Self:
         if self.dialect != "postgres":
             raise ValueError("workflow dialect is invalid")
+        if (
+            (self.retrieval_version_id is None)
+            != (self.schema_retrieval_pool is None)
+            or (
+                self.retrieval_failure is not None
+                and self.schema_retrieval_pool is not None
+            )
+            or (
+                self.probe_candidate_table_count is None
+            )
+            != (
+                self.probe_candidate_field_count is None
+            )
+            or (
+                self.schema_retrieval_pool is not None
+                and (
+                    self.retrieval_version_id
+                    != self.schema_retrieval_pool.retrieval_version_id
+                    or self.schema_version
+                    != self.schema_retrieval_pool.schema_version
+                )
+            )
+            or (
+                self.retrieval_failure is not None
+                and self.schema_version
+                != (
+                    self.retrieval_failure
+                    .retrieval_version.schema_version
+                )
+            )
+        ):
+            raise ValueError("workflow retrieval state is invalid")
         if any(
             not isinstance(attempt, SQLAttempt)
             for attempt in self.sql_attempts
@@ -285,6 +736,12 @@ class SQLTaskState(BaseModel):
         expected_calls = tuple(
             range(1, len(self.generation_observations) + 1)
         )
+        expected_route_calls = tuple(
+            range(
+                1,
+                len(self.model_routing_observations) + 1,
+            )
+        )
         if (
             tuple(
                 observation.call_number
@@ -300,6 +757,30 @@ class SQLTaskState(BaseModel):
             != sum(
                 observation.output_tokens
                 for observation in self.generation_observations
+            )
+            or tuple(
+                observation.call_number
+                for observation
+                in self.context_selection_observations
+            )
+            != expected_route_calls
+            or tuple(
+                observation.call_number
+                for observation
+                in self.model_routing_observations
+            )
+            != expected_route_calls
+            or len(self.context_selection_observations)
+            != len(self.model_routing_observations)
+            or len(set(self.selected_generation_field_ids))
+            != len(self.selected_generation_field_ids)
+            or not set(
+                self.selected_generation_field_ids
+            ).issubset(
+                {
+                    field.object_id
+                    for field in self.candidate_fields
+                }
             )
         ):
             raise ValueError(

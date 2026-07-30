@@ -15,6 +15,7 @@ from app.workflow import (
     new_task_state,
     run_workflow,
 )
+from tests.routing_support import single_provider_test_routing
 
 
 @dataclass
@@ -27,7 +28,10 @@ class ScriptedProvider:
     def generate(
         self,
         messages: Sequence[LLMMessage],
+        *,
+        timeout_seconds: float | None = None,
     ) -> GenerationResult:
+        del timeout_seconds
         self.calls.append(tuple(messages))
         return GenerationResult(
             output=GeneratedSQL(sql=self.sql_outputs.pop(0)),
@@ -51,8 +55,10 @@ def _run(
             requested_schemas=("public",),
         ),
         context=WorkflowContext(
-            provider=provider,
             connector=connector,
+            model_routing=single_provider_test_routing(
+                provider
+            ),
             datasource_id="pagila",
             allowed_schemas=("public",),
             allowed_tables=("public.film",),

@@ -1,3 +1,4 @@
+import math
 from typing import Protocol
 
 from app.connectors.errors import PostgreSQLConnectorError
@@ -16,7 +17,12 @@ from app.validation import (
 
 
 class SQLExecutor(Protocol):
-    def execute(self, sql: str) -> ExecutionResult: ...
+    def execute(
+        self,
+        sql: str,
+        *,
+        timeout_seconds: float | None = None,
+    ) -> ExecutionResult: ...
 
 
 def _validate_execution_context(
@@ -51,7 +57,17 @@ def execute_validated_sql(
     allowed_tables: tuple[str, ...],
     snapshot: SchemaSnapshot,
     connector: SQLExecutor,
+    timeout_seconds: float | None = None,
 ) -> ExecutionOutcome:
+    if (
+        timeout_seconds is not None
+        and (
+            type(timeout_seconds) not in (int, float)
+            or not math.isfinite(float(timeout_seconds))
+            or timeout_seconds <= 0
+        )
+    ):
+        raise ValueError("execution context is invalid")
     normalized_sql = _validate_execution_context(validation_result)
     verified_result = validate_sql(
         normalized_sql,
@@ -62,6 +78,14 @@ def execute_validated_sql(
     if verified_result != validation_result:
         raise ValueError("execution context is invalid")
     try:
-        return success_outcome(connector.execute(normalized_sql))
+        result = (
+            connector.execute(normalized_sql)
+            if timeout_seconds is None
+            else connector.execute(
+                normalized_sql,
+                timeout_seconds=float(timeout_seconds),
+            )
+        )
+        return success_outcome(result)
     except PostgreSQLConnectorError as error:
         return failure_outcome(error.details)

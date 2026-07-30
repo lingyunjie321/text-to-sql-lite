@@ -92,6 +92,8 @@ def _manifest():
 class Delegate:
     def __init__(self) -> None:
         self.execute_calls = 0
+        self.execute_timeouts: list[float | None] = []
+        self.metadata_timeouts: list[float | None] = []
         self.snapshot_enters = 0
         self.retry_count = 2
 
@@ -99,8 +101,11 @@ class Delegate:
         self,
         allowed_schemas: tuple[str, ...],
         allowed_tables: tuple[str, ...],
+        *,
+        timeout_seconds: float | None = None,
     ):
         del allowed_schemas
+        self.metadata_timeouts.append(timeout_seconds)
         allowed = set(allowed_tables)
         return build_schema_snapshot(
             tables=tuple(
@@ -114,9 +119,15 @@ class Delegate:
             unique_indexes=(),
         )
 
-    def execute(self, sql: str) -> ExecutionResult:
+    def execute(
+        self,
+        sql: str,
+        *,
+        timeout_seconds: float | None = None,
+    ) -> ExecutionResult:
         del sql
         self.execute_calls += 1
+        self.execute_timeouts.append(timeout_seconds)
         return ExecutionResult(
             columns=(),
             rows=[],
@@ -182,6 +193,24 @@ def test_wrapper_delegates_execution_and_retry_accounting() -> None:
     assert delegate.execute_calls == 1
     assert wrapper._consume_retry_count() == 2
     assert wrapper._consume_retry_count() == 0
+
+
+def test_wrapper_forwards_database_timeouts() -> None:
+    delegate = Delegate()
+    wrapper = FrozenSemanticConnector(delegate, _manifest())
+
+    wrapper.read_metadata(
+        ("public",),
+        ("public.asset",),
+        timeout_seconds=0.4,
+    )
+    wrapper.execute(
+        "SELECT 1",
+        timeout_seconds=0.3,
+    )
+
+    assert delegate.metadata_timeouts == [0.4]
+    assert delegate.execute_timeouts == [0.3]
 
 
 def test_wrapper_preserves_shared_read_only_snapshot() -> None:

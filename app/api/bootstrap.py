@@ -6,7 +6,8 @@ from typing import Protocol
 
 from app.config import (
     load_database_settings,
-    load_llm_settings,
+    load_embedding_settings,
+    load_llm_route_settings,
 )
 from app.connectors.postgresql import PostgreSQLConnector
 from app.connectors.view_semantics import (
@@ -18,8 +19,16 @@ from app.connectors.view_semantics_lock import (
     VIEW_SEMANTIC_MANIFEST_PATH,
     VIEW_SEMANTIC_MANIFEST_SHA256,
 )
-from app.generation import OpenAICompatibleLLMProvider
+from app.generation import (
+    OpenAICompatibleLLMProvider,
+    build_configured_model_routing_runtime,
+)
 from app.observability import default_traced_runner
+from app.schema_linking import (
+    EmbeddingIndexRegistry,
+    OpenAICompatibleEmbeddingProvider,
+    RetrievalRuntime,
+)
 from app.workflow import (
     SQLTaskState,
     WorkflowContext,
@@ -126,14 +135,38 @@ def build_production_services() -> ApplicationServices:
             connector,
             manifest,
         )
-        llm_settings = load_llm_settings()
-        provider = OpenAICompatibleLLMProvider(llm_settings)
+        llm_route_settings = load_llm_route_settings()
+        declared_llm_settings = {
+            "simple": llm_route_settings.simple,
+            "standard": llm_route_settings.standard,
+            "complex": llm_route_settings.complex,
+        }
+        if llm_route_settings.fallback is not None:
+            declared_llm_settings["fallback"] = (
+                llm_route_settings.fallback
+            )
+        providers = {
+            key: OpenAICompatibleLLMProvider(settings)
+            for key, settings in declared_llm_settings.items()
+        }
+        embedding_settings = load_embedding_settings()
+        embedding_provider = OpenAICompatibleEmbeddingProvider(
+            embedding_settings
+        )
         context = WorkflowContext(
-            provider=provider,
             connector=semantic_connector,
+            model_routing=build_configured_model_routing_runtime(
+                settings=llm_route_settings,
+                providers=providers,
+            ),
             datasource_id=database_settings.datasource_id,
             allowed_schemas=PAGILA_MVP_ALLOWED_SCHEMAS,
             allowed_tables=PAGILA_MVP_ALLOWED_TABLES,
+            retrieval_runtime=RetrievalRuntime(
+                provider=embedding_provider,
+                registry=EmbeddingIndexRegistry(),
+                semantic_version=manifest.enriched_schema_version,
+            ),
         )
         return ApplicationServices(
             context=context,

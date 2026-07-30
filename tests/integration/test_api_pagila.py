@@ -13,6 +13,7 @@ from app.generation import (
     LLMMessage,
 )
 from app.workflow import WorkflowContext
+from tests.routing_support import single_provider_test_routing
 
 
 @dataclass
@@ -25,7 +26,10 @@ class ScriptedProvider:
     def generate(
         self,
         messages: Sequence[LLMMessage],
+        *,
+        timeout_seconds: float | None = None,
     ) -> GenerationResult:
+        del timeout_seconds
         self.calls.append(tuple(messages))
         return GenerationResult(
             output=GeneratedSQL(sql=self.sql_outputs.pop(0)),
@@ -46,16 +50,27 @@ class CountingConnector:
         self,
         allowed_schemas: tuple[str, ...],
         allowed_tables: tuple[str, ...],
+        *,
+        timeout_seconds: float | None = None,
     ):
         self.metadata_calls += 1
         return self.connector.read_metadata(
             allowed_schemas,
             allowed_tables,
+            timeout_seconds=timeout_seconds,
         )
 
-    def execute(self, sql: str) -> ExecutionResult:
+    def execute(
+        self,
+        sql: str,
+        *,
+        timeout_seconds: float | None = None,
+    ) -> ExecutionResult:
         self.execute_calls.append(sql)
-        return self.connector.execute(sql)
+        return self.connector.execute(
+            sql,
+            timeout_seconds=timeout_seconds,
+        )
 
     def _consume_retry_count(self) -> int:
         return self.connector._consume_retry_count()
@@ -70,8 +85,10 @@ def _client(
     app = create_app(
         services=ApplicationServices(
             context=WorkflowContext(
-                provider=provider,
                 connector=counted,
+                model_routing=single_provider_test_routing(
+                    provider
+                ),
                 datasource_id="pagila",
                 allowed_schemas=("public",),
                 allowed_tables=("public.film",),

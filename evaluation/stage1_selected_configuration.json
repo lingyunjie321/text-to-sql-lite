@@ -1,0 +1,84 @@
+{
+  "contract_version": "stage1-selected-configuration-v1",
+  "public_configuration": {
+    "complexity": {
+      "policy_version": "complexity-v1",
+      "probe_top_k": 20,
+      "simple_top_k": 5,
+      "medium_top_k": 10,
+      "complex_top_k": 20
+    },
+    "retrieval": {
+      "retrieval_version_contract": "retrieval-version-v1",
+      "document_version": "schema-doc-v1",
+      "bm25_version": "bm25-v1",
+      "bm25_k1": 1.5,
+      "bm25_b": 0.75,
+      "candidate_limit": 20,
+      "fusion_version": "rrf-v1",
+      "rrf_k": 60,
+      "index_max_entries": 32,
+      "index_embedding_batch_size": 64,
+      "semantic_version": "738588b193a776966a301f6f995883faa6e94ac2f909e3dddf45ddb112a35b0c"
+    },
+    "embedding": {
+      "provider_contract": "openai-compatible-embedding-v1",
+      "model": "text-embedding-v4",
+      "dimension": 1024,
+      "endpoint_identity_sha256": "5891aed827c4e67b2d7c0c73ea819327ce3f2b6ef72213cd79669486a26b1ead",
+      "timeout_seconds": 10.0,
+      "max_batch_documents": 64,
+      "max_response_bytes": 4194304
+    },
+    "rerank": {
+      "version": "schema-rerank-v2"
+    },
+    "context": {
+      "estimator_version": "utf8-bytes-div-3-v1",
+      "input_budget_ratio_numerator": 4,
+      "input_budget_ratio_denominator": 5
+    },
+    "model_routing": {
+      "route_table_version": "model-routes-v1",
+      "routes": [
+        {
+          "route_id": "simple_route",
+          "primary": {
+            "model_config_sha256": "d61d29d422e963aee4aa2d629a2775a39a1c4d8c617917902626b4e9c4b1989f",
+            "max_input_tokens": 32768,
+            "max_output_tokens": 2048,
+            "timeout_seconds": 30.0,
+            "data_boundary_sha256": "06c65598fa221066f9c76a39f8e9df5b15622b415a576433ca7c8cf7305b4456",
+            "output_contract_version": "openai-compatible-json-v1"
+          },
+          "fallback": null
+        },
+        {
+          "route_id": "standard_route",
+          "primary": {
+            "model_config_sha256": "d61d29d422e963aee4aa2d629a2775a39a1c4d8c617917902626b4e9c4b1989f",
+            "max_input_tokens": 32768,
+            "max_output_tokens": 2048,
+            "timeout_seconds": 30.0,
+            "data_boundary_sha256": "06c65598fa221066f9c76a39f8e9df5b15622b415a576433ca7c8cf7305b4456",
+            "output_contract_version": "openai-compatible-json-v1"
+          },
+          "fallback": null
+        },
+        {
+          "route_id": "complex_route",
+          "primary": {
+            "model_config_sha256": "d61d29d422e963aee4aa2d629a2775a39a1c4d8c617917902626b4e9c4b1989f",
+            "max_input_tokens": 32768,
+            "max_output_tokens": 2048,
+            "timeout_seconds": 30.0,
+            "data_boundary_sha256": "06c65598fa221066f9c76a39f8e9df5b15622b415a576433ca7c8cf7305b4456",
+            "output_contract_version": "openai-compatible-json-v1"
+          },
+          "fallback": null
+        }
+      ]
+    }
+  },
+  "stage1_config_sha256": "a76ffcacb889f0bba10aabbe35f81d0e6ad2cfdceb49221a33864c2f89135bf8"
+}

@@ -8,6 +8,27 @@ Accepted，2026-07-29。用户确认采用显式 `ComplexityRouteNode`。
 ADR 0008 的 State/Runtime Context、安全边界、32 步、120 秒、attempt 和
 错误路由决策继续有效。Stage 8 的九节点设计与验证记录保留为历史证据。
 
+## 当前实施与资格状态
+
+截至 2026-07-29，显式 `ComplexityRouteNode`、探测—路由—物化两遍
+Schema Linking、动态 5/10/20、双路召回、RRF、Rerank、上下文裁剪和
+可配置模型路由已进入代码与确定性测试。`WorkflowContext.model_routing`
+显式持有 `ModelRoutingRuntime`，生产启动按
+`LLM_SIMPLE_`、`LLM_STANDARD_`、`LLM_COMPLEX_` 和可选
+`LLM_FALLBACK_` 配置构建路由；缺失所声明路由的必要配置时 fail closed。
+
+Embedding Provider 已在确定性测试之后完成恰好一次真实环境调用：
+阿里云百炼北京区 OpenAI-compatible 接口，模型
+`text-embedding-v4`，维度 `1024`。响应通过模型、数量、索引、维度、有限值
+和非零向量校验，因此
+`embedding_provider.real_environment_validated=true`。测试和报告不记录
+API Key、原始端点、输入正文、响应正文或向量。
+
+这不等于 Stage 1 总体验收通过。目前仍缺至少两个真实生成模型在不同复杂度
+路由上的验证，以及新版 Pagila/Gold 正式评测，所以
+`stage1.real_environment_validated=false`。Stage 10 的历史报告只证明当时
+九节点基线，不作为本 ADR 或 Stage 1 的新验收证据，也不得被回写。
+
 ## 背景
 
 增强阶段 1 必须同时实现：

@@ -16,12 +16,16 @@ from app.workflow import (
     WorkflowPublicError,
     run_workflow,
 )
+from tests.routing_support import single_provider_test_routing
 
 
 def _context() -> WorkflowContext:
+    provider = Mock()
     return WorkflowContext(
-        provider=Mock(),
         connector=Mock(),
+        model_routing=single_provider_test_routing(
+            provider
+        ),
         datasource_id="pagila",
         allowed_schemas=("public",),
         allowed_tables=("public.film",),
@@ -141,7 +145,9 @@ def test_unknown_datasource_and_schema_expansion_call_no_dependencies() -> None:
         assert body["status"] == "REJECTED_SECURITY"
         assert body["sql"] is None
         assert "private" not in str(body)
-        context.provider.generate.assert_not_called()
+        context.model_routing.provider_registry.resolve(
+            "test-provider"
+        ).provider.generate.assert_not_called()
         context.connector.read_metadata.assert_not_called()
         context.connector.execute.assert_not_called()
 

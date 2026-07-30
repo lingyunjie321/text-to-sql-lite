@@ -85,7 +85,10 @@ class FixedProvider:
     def generate(
         self,
         messages: Sequence[LLMMessage],
+        *,
+        timeout_seconds: float | None = None,
     ) -> GenerationResult:
+        del timeout_seconds
         self.calls += 1
         return GenerationResult(
             output=self.output,
@@ -132,6 +135,7 @@ def test_link_generate_validate_pipeline(
         allowed_schemas=("public",),
         allowed_tables=allowed_tables,
         snapshot=snapshot,
+        top_k=10,
     )
     provider = FixedProvider(model_output)
 
@@ -166,6 +170,7 @@ def test_clarification_output_stops_before_validation() -> None:
         allowed_schemas=("public",),
         allowed_tables=("public.film",),
         snapshot=snapshot,
+        top_k=10,
     )
     provider = FixedProvider(
         GeneratedSQL(clarification_reason="Which date range?")

@@ -11,6 +11,7 @@ from ipaddress import ip_address
 from pathlib import Path
 
 from psycopg.conninfo import conninfo_to_dict
+from pydantic import ValidationError
 
 from app.api.bootstrap import (
     PAGILA_MVP_ALLOWED_SCHEMAS,
@@ -18,9 +19,11 @@ from app.api.bootstrap import (
 )
 from app.config import (
     DatabaseSettings,
+    EmbeddingSettings,
     LLMSettings,
     load_database_settings,
-    load_llm_settings,
+    load_embedding_settings,
+    load_llm_route_settings,
 )
 from app.connectors.postgresql import PostgreSQLConnector
 from app.connectors.view_semantics import (
@@ -32,10 +35,19 @@ from app.connectors.view_semantics_lock import (
     VIEW_SEMANTIC_MANIFEST_PATH,
     VIEW_SEMANTIC_MANIFEST_SHA256,
 )
-from app.generation import OpenAICompatibleLLMProvider
+from app.generation import (
+    ModelRoutingRuntime,
+    OpenAICompatibleLLMProvider,
+    build_configured_model_routing_runtime,
+)
 from app.generation.models import PROMPT_VERSION
 from app.generation.provider import PROVIDER_CONTRACT_VERSION
 from app.observability import TraceRecord
+from app.schema_linking import (
+    EmbeddingIndexRegistry,
+    OpenAICompatibleEmbeddingProvider,
+    RetrievalRuntime,
+)
 from evaluation.baseline import (
     RuntimeBaselineObservation,
     build_frozen_evaluation_baseline,
@@ -45,8 +57,17 @@ from evaluation.baseline import (
     verify_evaluation_baseline,
     verify_static_evaluation_freeze,
 )
-from evaluation.code_freeze import controlled_code_sha256
-from evaluation.loader import load_case_suite
+from evaluation.code_freeze import (
+    build_stage1_public_configuration,
+    controlled_code_sha256,
+    load_stage1_calibration_freeze,
+    load_stage1_selected_configuration,
+    verify_stage1_calibration_freeze,
+)
+from evaluation.loader import (
+    load_case_suite,
+    load_retrieval_routing_suites,
+)
 from evaluation.models import AuditStatus, CaseStatus
 from evaluation.report import (
     EvaluationBaseline,
@@ -65,6 +86,28 @@ from evaluation.runner import evaluate_case
 from evaluation.status import mark_case_verified
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+_STAGE1_SELECTED_CONFIGURATION_PATH = (
+    _REPOSITORY_ROOT
+    / "evaluation"
+    / "stage1_selected_configuration.json"
+)
+_STAGE1_CALIBRATION_FREEZE_PATH = (
+    _REPOSITORY_ROOT
+    / "evaluation"
+    / "stage1_calibration_freeze.json"
+)
+_STAGE1_DEVELOPMENT_CASES_PATH = (
+    _REPOSITORY_ROOT
+    / "evaluation"
+    / "cases"
+    / "retrieval_routing_development.jsonl"
+)
+_STAGE1_CALIBRATION_CASES_PATH = (
+    _REPOSITORY_ROOT
+    / "evaluation"
+    / "cases"
+    / "retrieval_routing_calibration.jsonl"
+)
 
 
 class _DiscardTraceSink:
@@ -280,6 +323,148 @@ def model_config_hash(
     return hashlib.sha256(payload).hexdigest()
 
 
+def _load_optional_embedding_settings(
+    env_file: Path,
+) -> EmbeddingSettings | None:
+    required_locations = {
+        ("base_url",),
+        ("api_key",),
+        ("model",),
+        ("dimension",),
+    }
+    try:
+        return load_embedding_settings(env_file)
+    except ValidationError as error:
+        issues = error.errors(
+            include_url=False,
+            include_context=False,
+            include_input=False,
+        )
+        if (
+            len(issues) == len(required_locations)
+            and {
+                tuple(issue.get("loc", ()))
+                for issue in issues
+            }
+            == required_locations
+            and all(
+                issue.get("type") == "missing"
+                for issue in issues
+            )
+        ):
+            return None
+        raise ValueError(
+            "embedding settings are invalid"
+        ) from None
+    except ValueError:
+        raise ValueError(
+            "embedding settings are invalid"
+        ) from None
+
+
+def _load_required_embedding_settings(
+    env_file: Path,
+) -> EmbeddingSettings:
+    settings = _load_optional_embedding_settings(env_file)
+    if settings is None:
+        raise ValueError("embedding settings are required")
+    return settings
+
+
+def _build_stage1_runtimes(
+    *,
+    env_file: Path,
+    semantic_version: str,
+) -> tuple[
+    ModelRoutingRuntime,
+    RetrievalRuntime,
+    dict[str, object],
+]:
+    llm_route_settings = load_llm_route_settings(env_file)
+    declared_llm_settings = {
+        "simple": llm_route_settings.simple,
+        "standard": llm_route_settings.standard,
+        "complex": llm_route_settings.complex,
+    }
+    if llm_route_settings.fallback is not None:
+        declared_llm_settings["fallback"] = (
+            llm_route_settings.fallback
+        )
+    model_routing = build_configured_model_routing_runtime(
+        settings=llm_route_settings,
+        providers={
+            provider_key: OpenAICompatibleLLMProvider(
+                provider_settings
+            )
+            for provider_key, provider_settings
+            in declared_llm_settings.items()
+        },
+    )
+    embedding_settings = _load_required_embedding_settings(
+        env_file
+    )
+    retrieval_runtime = RetrievalRuntime(
+        provider=OpenAICompatibleEmbeddingProvider(
+            embedding_settings
+        ),
+        registry=EmbeddingIndexRegistry(),
+        semantic_version=semantic_version,
+    )
+    public_configuration = build_stage1_public_configuration(
+        embedding_settings=embedding_settings,
+        retrieval_runtime=retrieval_runtime,
+        model_routing=model_routing,
+    )
+    return (
+        model_routing,
+        retrieval_runtime,
+        public_configuration,
+    )
+
+
+def _verify_stage1_runtime_freeze(
+    public_configuration: dict[str, object],
+) -> str:
+    selected = load_stage1_selected_configuration(
+        _STAGE1_SELECTED_CONFIGURATION_PATH
+    )
+    freeze = load_stage1_calibration_freeze(
+        _STAGE1_CALIBRATION_FREEZE_PATH
+    )
+    suites = load_retrieval_routing_suites(
+        _STAGE1_DEVELOPMENT_CASES_PATH,
+        _STAGE1_CALIBRATION_CASES_PATH,
+    )
+    if selected.public_configuration != public_configuration:
+        raise ValueError(
+            "stage1 runtime configuration does not match freeze"
+        )
+    verify_stage1_calibration_freeze(
+        freeze,
+        development_file_sha256=(
+            suites.development.raw_sha256
+        ),
+        development_normalized_sha256=(
+            suites.development.normalized_sha256
+        ),
+        calibration_file_sha256=(
+            suites.calibration.raw_sha256
+        ),
+        calibration_normalized_sha256=(
+            suites.calibration.normalized_sha256
+        ),
+        public_configuration=public_configuration,
+        controlled_code_sha256_value=(
+            controlled_code_sha256(_REPOSITORY_ROOT)
+        ),
+    )
+    if freeze.stage1_config_sha256 != selected.stage1_config_sha256:
+        raise ValueError(
+            "stage1 runtime configuration does not match freeze"
+        )
+    return selected.stage1_config_sha256
+
+
 def freeze_baseline(
     *,
     source_baseline_path: Path,
@@ -324,7 +509,7 @@ def freeze_baseline(
             PAGILA_MVP_ALLOWED_SCHEMAS,
             PAGILA_MVP_ALLOWED_TABLES,
         )
-        load_view_semantic_manifest(
+        manifest = load_view_semantic_manifest(
             VIEW_SEMANTIC_MANIFEST_PATH,
             expected_sha256=VIEW_SEMANTIC_MANIFEST_SHA256,
             snapshot=snapshot,
@@ -335,14 +520,18 @@ def freeze_baseline(
             allowed_schemas=PAGILA_MVP_ALLOWED_SCHEMAS,
             allowed_tables=PAGILA_MVP_ALLOWED_TABLES,
         )
-        llm_settings = load_llm_settings(env_file)
-        code_sha256 = controlled_code_sha256(_REPOSITORY_ROOT)
-        config_sha256 = model_config_hash(
-            llm_settings,
-            semantic_manifest_sha256=(
-                VIEW_SEMANTIC_MANIFEST_SHA256
+        (
+            _,
+            _,
+            public_configuration,
+        ) = _build_stage1_runtimes(
+            env_file=env_file,
+            semantic_version=(
+                manifest.enriched_schema_version
             ),
-            controlled_code_sha256=code_sha256,
+        )
+        config_sha256 = _verify_stage1_runtime_freeze(
+            public_configuration
         )
         baseline = build_frozen_evaluation_baseline(
             pagila=source.pagila,
@@ -456,15 +645,20 @@ def evaluate_to_report(
             connector,
             manifest,
         )
-        llm_settings = load_llm_settings(env_file)
-        current_model_config_hash = model_config_hash(
-            llm_settings,
-            semantic_manifest_sha256=(
-                baseline.semantic.manifest_sha256
+        (
+            model_routing,
+            retrieval_runtime,
+            public_configuration,
+        ) = _build_stage1_runtimes(
+            env_file=env_file,
+            semantic_version=(
+                manifest.enriched_schema_version
             ),
-            controlled_code_sha256=(
-                baseline.software.controlled_code_sha256
-            ),
+        )
+        current_model_config_hash = (
+            _verify_stage1_runtime_freeze(
+                public_configuration
+            )
         )
         verify_static_evaluation_freeze(
             baseline,
@@ -472,7 +666,6 @@ def evaluate_to_report(
             root=_REPOSITORY_ROOT,
             model_config_sha256=current_model_config_hash,
         )
-        provider = OpenAICompatibleLLMProvider(llm_settings)
         evaluations = tuple(
             evaluate_case(
                 case,
@@ -480,7 +673,8 @@ def evaluate_to_report(
                     baseline.evaluation_baseline_id
                 ),
                 connector=semantic_connector,
-                provider=provider,
+                model_routing=model_routing,
+                retrieval_runtime=retrieval_runtime,
                 trace_sink=_DiscardTraceSink(),
             )
             for case in suite.cases

@@ -10,9 +10,14 @@ from app.generation import (
     LLMMessage,
 )
 from app.observability import TraceRecord
+from app.schema_linking import (
+    EmbeddingIndexRegistry,
+    RetrievalRuntime,
+)
 from app.workflow import FinalStatus
 from evaluation import load_case_suite
 from evaluation.runner import evaluate_case
+from tests.routing_support import single_provider_test_routing
 
 CASES = load_case_suite(
     Path("evaluation/cases/pagila_mvp.jsonl")
@@ -26,7 +31,10 @@ class ScriptedProvider:
     def generate(
         self,
         messages: Sequence[LLMMessage],
+        *,
+        timeout_seconds: float | None = None,
     ) -> GenerationResult:
+        del timeout_seconds
         assert messages
         return GenerationResult(
             output=GeneratedSQL(sql=self.outputs.pop(0)),
@@ -45,6 +53,25 @@ class RecordingSink:
         self.records.append(record)
 
 
+class DeterministicEmbeddingProvider:
+    model_id = "pagila-evaluation-embedding-stub"
+    dimension = 2
+    provider_config_sha256 = "b" * 64
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, ...]] = []
+
+    def embed(
+        self,
+        texts: Sequence[str],
+        *,
+        timeout_seconds: float | None = None,
+    ) -> tuple[tuple[float, ...], ...]:
+        del timeout_seconds
+        self.calls.append(tuple(texts))
+        return tuple((1.0, 0.0) for _ in texts)
+
+
 @pytest.mark.integration
 def test_pagila_execute_case_matches_dynamic_gold_result(
     connector: PostgreSQLConnector,
@@ -54,8 +81,10 @@ def test_pagila_execute_case_matches_dynamic_gold_result(
     result = evaluate_case(
         CASES[0],
         connector=connector,
-        provider=ScriptedProvider(
-            ["SELECT film_id, title, rental_rate FROM film"]
+        model_routing=single_provider_test_routing(
+            ScriptedProvider(
+                ["SELECT film_id, title, rental_rate FROM film"]
+            )
         ),
         trace_sink=sink,
     )
@@ -68,14 +97,45 @@ def test_pagila_execute_case_matches_dynamic_gold_result(
 
 
 @pytest.mark.integration
+def test_pagila_execute_case_uses_hybrid_retrieval(
+    connector: PostgreSQLConnector,
+) -> None:
+    provider = DeterministicEmbeddingProvider()
+    sink = RecordingSink()
+
+    result = evaluate_case(
+        CASES[0],
+        connector=connector,
+        model_routing=single_provider_test_routing(
+            ScriptedProvider(
+                ["SELECT film_id, title, rental_rate FROM film"]
+            )
+        ),
+        retrieval_runtime=RetrievalRuntime(
+            provider=provider,
+            registry=EmbeddingIndexRegistry(),
+            semantic_version="pagila-evaluation-semantic-v1",
+        ),
+        trace_sink=sink,
+    )
+
+    assert result.passed is True
+    assert len(provider.calls) == 2
+    assert sink.records[0].retrieval is not None
+    assert sink.records[0].retrieval.mode == "hybrid"
+
+
+@pytest.mark.integration
 def test_pagila_dangerous_case_is_zero_execution(
     connector: PostgreSQLConnector,
 ) -> None:
     result = evaluate_case(
         CASES[15],
         connector=connector,
-        provider=ScriptedProvider(
-            ["SELECT film_id FROM film"]
+        model_routing=single_provider_test_routing(
+            ScriptedProvider(
+                ["SELECT film_id FROM film"]
+            )
         ),
         trace_sink=RecordingSink(),
     )
@@ -92,8 +152,10 @@ def test_pagila_reflection_case_repairs_once_and_matches_gold(
     result = evaluate_case(
         CASES[17],
         connector=connector,
-        provider=ScriptedProvider(
-            ["SELECT film_id, title FROM film"]
+        model_routing=single_provider_test_routing(
+            ScriptedProvider(
+                ["SELECT film_id, title FROM film"]
+            )
         ),
         trace_sink=RecordingSink(),
     )

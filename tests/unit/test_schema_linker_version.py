@@ -51,6 +51,7 @@ def _link(snapshot):
         allowed_schemas=("public",),
         allowed_tables=("public.archive", "public.film"),
         snapshot=snapshot,
+        top_k=10,
     )
 
 
@@ -85,12 +86,14 @@ def test_unauthorized_change_does_not_update_authorized_version() -> None:
         allowed_schemas=("public",),
         allowed_tables=("public.film",),
         snapshot=_snapshot(film, hidden),
+        top_k=10,
     )
     second = link_schema(
         "film",
         allowed_schemas=("public",),
         allowed_tables=("public.film",),
         snapshot=_snapshot(film, changed_hidden),
+        top_k=10,
     )
 
     assert second == first
@@ -104,12 +107,14 @@ def test_missing_field_feedback_can_trigger_stateless_relinking() -> None:
         allowed_schemas=("public",),
         allowed_tables=("public.film",),
         snapshot=snapshot,
+        top_k=10,
     )
     repaired = link_schema(
         "film film_id",
         allowed_schemas=("public",),
         allowed_tables=("public.film",),
         snapshot=snapshot,
+        top_k=10,
     )
 
     assert first.schema_version == repaired.schema_version

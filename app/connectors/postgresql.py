@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -142,14 +143,32 @@ class PostgreSQLConnector:
                 raise
             raise normalize_database_error(error) from None
 
-    def execute(self, sql: str) -> ExecutionResult:
+    def execute(
+        self,
+        sql: str,
+        *,
+        timeout_seconds: float | None = None,
+    ) -> ExecutionResult:
+        operation_started_at, timeout = _operation_timeout(
+            timeout_seconds
+        )
         self._retry_count.set(0)
         for retry_index in range(
             self._settings.connection_retry_count + 1
         ):
             self._retry_count.set(retry_index)
             try:
-                return self._execute_once(sql)
+                if timeout is None:
+                    return self._execute_once(sql)
+                return self._execute_once(
+                    sql,
+                    timeout_seconds=_remaining_timeout(
+                        operation_started_at=(
+                            operation_started_at
+                        ),
+                        timeout_seconds=timeout,
+                    ),
+                )
             except Exception as error:
                 normalized = normalize_database_error(error)
                 if (
@@ -164,7 +183,12 @@ class PostgreSQLConnector:
         self,
         allowed_schemas: tuple[str, ...],
         allowed_tables: tuple[str, ...],
+        *,
+        timeout_seconds: float | None = None,
     ) -> SchemaSnapshot:
+        operation_started_at, timeout = _operation_timeout(
+            timeout_seconds
+        )
         self._retry_count.set(0)
         scope = normalize_metadata_scope(
             allowed_schemas,
@@ -178,7 +202,17 @@ class PostgreSQLConnector:
         ):
             self._retry_count.set(retry_index)
             try:
-                return self._read_metadata_once(scope)
+                if timeout is None:
+                    return self._read_metadata_once(scope)
+                return self._read_metadata_once(
+                    scope,
+                    timeout_seconds=_remaining_timeout(
+                        operation_started_at=(
+                            operation_started_at
+                        ),
+                        timeout_seconds=timeout,
+                    ),
+                )
             except Exception as error:
                 normalized = normalize_database_error(error)
                 if (
@@ -197,23 +231,68 @@ class PostgreSQLConnector:
     def _read_metadata_once(
         self,
         scope: MetadataScope,
+        *,
+        timeout_seconds: float | None = None,
     ) -> SchemaSnapshot:
         try:
+            operation_started_at, timeout = _operation_timeout(
+                timeout_seconds
+            )
             snapshot_connection = self._snapshot_connection.get()
             if snapshot_connection is not None:
+                if timeout is not None:
+                    _set_statement_timeout(
+                        snapshot_connection,
+                        _remaining_timeout(
+                            operation_started_at=(
+                                operation_started_at
+                            ),
+                            timeout_seconds=timeout,
+                            maximum_seconds=(
+                                self._settings
+                                .statement_timeout_seconds
+                            ),
+                        ),
+                    )
                 return _read_metadata_from_connection(
                     snapshot_connection,
                     scope,
                 )
             with self._pool.connection(
-                timeout=self._settings.pool_timeout_seconds
+                timeout=(
+                    self._settings.pool_timeout_seconds
+                    if timeout is None
+                    else _remaining_timeout(
+                        operation_started_at=(
+                            operation_started_at
+                        ),
+                        timeout_seconds=timeout,
+                        maximum_seconds=(
+                            self._settings.pool_timeout_seconds
+                        ),
+                    )
+                )
             ) as connection:
                 with connection.transaction():
                     connection.execute("SET TRANSACTION READ ONLY")
-                    connection.execute(
-                        "SELECT set_config('statement_timeout', %s, true)",
+                    _set_statement_timeout(
+                        connection,
                         (
-                            f"{self._settings.statement_timeout_seconds}s",
+                            float(
+                                self._settings
+                                .statement_timeout_seconds
+                            )
+                            if timeout is None
+                            else _remaining_timeout(
+                                operation_started_at=(
+                                    operation_started_at
+                                ),
+                                timeout_seconds=timeout,
+                                maximum_seconds=(
+                                    self._settings
+                                    .statement_timeout_seconds
+                                ),
+                            )
                         ),
                     )
                     return _read_metadata_from_connection(
@@ -223,25 +302,73 @@ class PostgreSQLConnector:
         except Exception as error:
             raise normalize_database_error(error) from None
 
-    def _execute_once(self, sql: str) -> ExecutionResult:
+    def _execute_once(
+        self,
+        sql: str,
+        *,
+        timeout_seconds: float | None = None,
+    ) -> ExecutionResult:
         try:
+            operation_started_at, timeout = _operation_timeout(
+                timeout_seconds
+            )
             snapshot_connection = self._snapshot_connection.get()
             if snapshot_connection is not None:
                 with snapshot_connection.transaction():
+                    if timeout is not None:
+                        _set_statement_timeout(
+                            snapshot_connection,
+                            _remaining_timeout(
+                                operation_started_at=(
+                                    operation_started_at
+                                ),
+                                timeout_seconds=timeout,
+                                maximum_seconds=(
+                                    self._settings
+                                    .statement_timeout_seconds
+                                ),
+                            ),
+                        )
                     return _execute_from_connection(
                         snapshot_connection,
                         sql,
                         max_result_rows=self._settings.max_result_rows,
                     )
             with self._pool.connection(
-                timeout=self._settings.pool_timeout_seconds
+                timeout=(
+                    self._settings.pool_timeout_seconds
+                    if timeout is None
+                    else _remaining_timeout(
+                        operation_started_at=(
+                            operation_started_at
+                        ),
+                        timeout_seconds=timeout,
+                        maximum_seconds=(
+                            self._settings.pool_timeout_seconds
+                        ),
+                    )
+                )
             ) as connection:
                 with connection.transaction():
                     connection.execute("SET TRANSACTION READ ONLY")
-                    connection.execute(
-                        "SELECT set_config('statement_timeout', %s, true)",
+                    _set_statement_timeout(
+                        connection,
                         (
-                            f"{self._settings.statement_timeout_seconds}s",
+                            float(
+                                self._settings
+                                .statement_timeout_seconds
+                            )
+                            if timeout is None
+                            else _remaining_timeout(
+                                operation_started_at=(
+                                    operation_started_at
+                                ),
+                                timeout_seconds=timeout,
+                                maximum_seconds=(
+                                    self._settings
+                                    .statement_timeout_seconds
+                                ),
+                            )
                         ),
                     )
                     return _execute_from_connection(
@@ -251,6 +378,74 @@ class PostgreSQLConnector:
                     )
         except Exception as error:
             raise normalize_database_error(error) from None
+
+
+def _operation_timeout(
+    timeout_seconds: float | None,
+) -> tuple[float, float | None]:
+    if (
+        timeout_seconds is not None
+        and (
+            type(timeout_seconds) not in (int, float)
+            or not math.isfinite(float(timeout_seconds))
+            or timeout_seconds <= 0
+        )
+    ):
+        raise ValueError("database timeout is invalid")
+    return (
+        time.monotonic(),
+        (
+            float(timeout_seconds)
+            if timeout_seconds is not None
+            else None
+        ),
+    )
+
+
+def _timeout_error() -> PostgreSQLConnectorError:
+    return PostgreSQLConnectorError(
+        DatabaseError(
+            sqlstate="57014",
+            error_type=ErrorType.TIMEOUT,
+            code="DB_TIMEOUT",
+            retryable=False,
+            public_message="The database query timed out.",
+        )
+    )
+
+
+def _remaining_timeout(
+    *,
+    operation_started_at: float,
+    timeout_seconds: float,
+    maximum_seconds: float | None = None,
+) -> float:
+    remaining = timeout_seconds - (
+        time.monotonic() - operation_started_at
+    )
+    if remaining < 0.001:
+        raise _timeout_error() from None
+    return (
+        remaining
+        if maximum_seconds is None
+        else min(float(maximum_seconds), remaining)
+    )
+
+
+def _set_statement_timeout(
+    connection: psycopg.Connection,
+    timeout_seconds: float,
+) -> None:
+    whole_seconds = int(timeout_seconds)
+    value = (
+        f"{whole_seconds}s"
+        if timeout_seconds == whole_seconds
+        else f"{max(1, math.floor(timeout_seconds * 1000))}ms"
+    )
+    connection.execute(
+        "SELECT set_config('statement_timeout', %s, true)",
+        (value,),
+    )
 
 
 def _read_metadata_from_connection(

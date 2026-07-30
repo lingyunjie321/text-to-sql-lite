@@ -20,10 +20,15 @@ from app.generation import (
     LLMMessage,
 )
 from app.observability import TraceRecord
+from app.schema_linking import (
+    EmbeddingIndexRegistry,
+    RetrievalRuntime,
+)
 from app.workflow import FinalStatus
 from evaluation import load_case_suite
 import evaluation.runner as evaluation_runner
 from evaluation.runner import evaluate_case
+from tests.routing_support import single_provider_test_routing
 
 CASES = load_case_suite(
     Path("evaluation/cases/pagila_mvp.jsonl")
@@ -105,13 +110,22 @@ class QueueConnector:
         self,
         allowed_schemas: tuple[str, ...],
         allowed_tables: tuple[str, ...],
+        *,
+        timeout_seconds: float | None = None,
     ) -> SchemaSnapshot:
+        del timeout_seconds
         assert allowed_schemas == ("public",)
         assert allowed_tables == ("public.film",)
         self.metadata_calls += 1
         return _film_snapshot()
 
-    def execute(self, sql: str) -> ExecutionResult:
+    def execute(
+        self,
+        sql: str,
+        *,
+        timeout_seconds: float | None = None,
+    ) -> ExecutionResult:
+        del timeout_seconds
         assert sql
         self.execute_calls += 1
         return self.results.pop(0)
@@ -132,7 +146,13 @@ class SnapshotQueueConnector(QueueConnector):
 
 
 class FailFirstPredictionExecutionConnector(QueueConnector):
-    def execute(self, sql: str) -> ExecutionResult:
+    def execute(
+        self,
+        sql: str,
+        *,
+        timeout_seconds: float | None = None,
+    ) -> ExecutionResult:
+        del timeout_seconds
         assert sql
         self.execute_calls += 1
         if self.execute_calls == 2:
@@ -158,7 +178,10 @@ class ScriptedProvider:
     def generate(
         self,
         messages: Sequence[LLMMessage],
+        *,
+        timeout_seconds: float | None = None,
     ) -> GenerationResult:
+        del timeout_seconds
         self.calls.append(tuple(messages))
         return GenerationResult(
             output=GeneratedSQL(sql=self.outputs.pop(0)),
@@ -177,6 +200,25 @@ class RecordingSink:
         self.records.append(record)
 
 
+class DeterministicEmbeddingProvider:
+    model_id = "evaluation-embedding-stub"
+    dimension = 2
+    provider_config_sha256 = "b" * 64
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, ...]] = []
+
+    def embed(
+        self,
+        texts: Sequence[str],
+        *,
+        timeout_seconds: float | None = None,
+    ) -> tuple[tuple[float, ...], ...]:
+        del timeout_seconds
+        self.calls.append(tuple(texts))
+        return tuple((1.0, 0.0) for _ in texts)
+
+
 def test_execute_case_validates_executes_and_compares_gold_result() -> None:
     case = CASES[0]
     connector = QueueConnector([_film_result(), _film_result()])
@@ -188,7 +230,9 @@ def test_execute_case_validates_executes_and_compares_gold_result() -> None:
     evaluation = evaluate_case(
         case,
         connector=connector,
-        provider=provider,
+        model_routing=single_provider_test_routing(
+            provider
+        ),
         trace_sink=sink,
     )
 
@@ -209,6 +253,36 @@ def test_execute_case_validates_executes_and_compares_gold_result() -> None:
     assert connector.execute_calls == 2
 
 
+def test_execute_case_injects_hybrid_retrieval_through_snapshot() -> None:
+    connector = SnapshotQueueConnector(
+        [_film_result(), _film_result()]
+    )
+    provider = DeterministicEmbeddingProvider()
+    sink = RecordingSink()
+
+    evaluation = evaluate_case(
+        CASES[0],
+        connector=connector,
+        model_routing=single_provider_test_routing(
+            ScriptedProvider(
+                ["SELECT film_id, title, rental_rate FROM film"]
+            )
+        ),
+        retrieval_runtime=RetrievalRuntime(
+            provider=provider,
+            registry=EmbeddingIndexRegistry(),
+            semantic_version="evaluation-semantic-v1",
+        ),
+        trace_sink=sink,
+    )
+
+    assert evaluation.passed is True
+    assert connector.snapshot_entries == 1
+    assert len(provider.calls) == 2
+    assert sink.records[0].retrieval is not None
+    assert sink.records[0].retrieval.mode == "hybrid"
+
+
 def test_execute_case_reuses_one_schema_and_transaction_snapshot() -> None:
     connector = SnapshotQueueConnector(
         [_film_result(), _film_result()]
@@ -217,8 +291,10 @@ def test_execute_case_reuses_one_schema_and_transaction_snapshot() -> None:
     evaluation = evaluate_case(
         CASES[0],
         connector=connector,
-        provider=ScriptedProvider(
-            ["SELECT film_id, title, rental_rate FROM film"]
+        model_routing=single_provider_test_routing(
+            ScriptedProvider(
+                ["SELECT film_id, title, rental_rate FROM film"]
+            )
         ),
         trace_sink=RecordingSink(),
     )
@@ -241,8 +317,10 @@ def test_result_mismatch_fails_without_changing_execution_status() -> None:
     evaluation = evaluate_case(
         case,
         connector=QueueConnector([_film_result(), predicted]),
-        provider=ScriptedProvider(
-            ["SELECT film_id, title, rental_rate FROM film"]
+        model_routing=single_provider_test_routing(
+            ScriptedProvider(
+                ["SELECT film_id, title, rental_rate FROM film"]
+            )
         ),
         trace_sink=RecordingSink(),
     )
@@ -258,13 +336,15 @@ def test_final_sql_must_reference_every_required_gold_field() -> None:
         connector=QueueConnector(
             [_film_result(), _film_result()]
         ),
-        provider=ScriptedProvider(
-            [
-                (
-                    "SELECT film_id, title, "
-                    "0.99 AS rental_rate FROM film"
-                )
-            ]
+        model_routing=single_provider_test_routing(
+            ScriptedProvider(
+                [
+                    (
+                        "SELECT film_id, title, "
+                        "0.99 AS rental_rate FROM film"
+                    )
+                ]
+            )
         ),
         trace_sink=RecordingSink(),
     )
@@ -287,14 +367,16 @@ def test_repaired_database_failure_counts_both_execution_attempts() -> None:
     evaluation = evaluate_case(
         case,
         connector=connector,
-        provider=ScriptedProvider(
-            [
-                (
-                    "SELECT film_id, title, rental_rate FROM film "
-                    "WHERE film_id > 0"
-                ),
-                "SELECT film_id, title, rental_rate FROM film",
-            ]
+        model_routing=single_provider_test_routing(
+            ScriptedProvider(
+                [
+                    (
+                        "SELECT film_id, title, rental_rate FROM film "
+                        "WHERE film_id > 0"
+                    ),
+                    "SELECT film_id, title, rental_rate FROM film",
+                ]
+            )
         ),
         trace_sink=RecordingSink(),
     )
@@ -318,8 +400,10 @@ def test_gold_match_does_not_require_linker_join_path_recall(
     evaluation = evaluate_case(
         CASES[0],
         connector=QueueConnector([_film_result(), _film_result()]),
-        provider=ScriptedProvider(
-            ["SELECT film_id, title, rental_rate FROM film"]
+        model_routing=single_provider_test_routing(
+            ScriptedProvider(
+                ["SELECT film_id, title, rental_rate FROM film"]
+            )
         ),
         trace_sink=RecordingSink(),
     )
@@ -336,7 +420,9 @@ def test_dangerous_fixture_is_rejected_with_zero_prediction_execution() -> None:
     evaluation = evaluate_case(
         case,
         connector=connector,
-        provider=provider,
+        model_routing=single_provider_test_routing(
+            provider
+        ),
         trace_sink=RecordingSink(),
     )
 
@@ -356,7 +442,9 @@ def test_permission_case_uses_a_fixed_unauthorized_fixture() -> None:
     evaluation = evaluate_case(
         case,
         connector=connector,
-        provider=provider,
+        model_routing=single_provider_test_routing(
+            provider
+        ),
         trace_sink=RecordingSink(),
     )
 
@@ -380,7 +468,9 @@ def test_reflection_fixture_uses_real_provider_only_for_repair() -> None:
     evaluation = evaluate_case(
         case,
         connector=connector,
-        provider=provider,
+        model_routing=single_provider_test_routing(
+            provider
+        ),
         trace_sink=RecordingSink(),
     )
 

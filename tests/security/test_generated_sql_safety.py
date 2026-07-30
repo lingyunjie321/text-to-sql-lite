@@ -18,7 +18,10 @@ class MaliciousProvider:
     def generate(
         self,
         messages: tuple[LLMMessage, ...],
+        *,
+        timeout_seconds: float | None = None,
     ) -> GenerationResult:
+        del timeout_seconds
         self.calls += 1
         return GenerationResult(
             output=GeneratedSQL(sql=self.sql),

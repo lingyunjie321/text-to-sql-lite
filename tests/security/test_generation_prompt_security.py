@@ -71,6 +71,7 @@ LINKING = SchemaLinkingResult(
     ),
     join_paths=(),
     schema_version=SNAPSHOT.schema_version,
+    top_k=10,
 )
 
 

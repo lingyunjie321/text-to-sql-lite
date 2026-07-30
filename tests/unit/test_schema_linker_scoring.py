@@ -85,6 +85,7 @@ def test_table_alias_comment_unicode_and_field_comment_match(
         allowed_schemas=("public",),
         allowed_tables=ALLOWED,
         snapshot=SNAPSHOT,
+        top_k=10,
     )
 
     assert result.candidate_tables[0].object_id == "public.film"
@@ -98,6 +99,7 @@ def test_field_match_is_scored_and_aggregated_into_its_table() -> None:
         allowed_schemas=("public",),
         allowed_tables=ALLOWED,
         snapshot=SNAPSHOT,
+        top_k=10,
     )
 
     assert result.candidate_tables[0].object_id == "public.film"
@@ -113,6 +115,7 @@ def test_table_evidence_disambiguates_a_shared_field_name() -> None:
         allowed_schemas=("public",),
         allowed_tables=ALLOWED,
         snapshot=SNAPSHOT,
+        top_k=10,
     )
 
     assert result.candidate_tables[0].object_id == "public.film"

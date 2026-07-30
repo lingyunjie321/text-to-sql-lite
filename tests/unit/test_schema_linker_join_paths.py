@@ -1,10 +1,12 @@
+import pytest
+
 from app.connectors.metadata import (
     ColumnMetadata,
     ForeignKeyMetadata,
     TableMetadata,
     build_schema_snapshot,
 )
-from app.schema_linking import link_schema
+from app.schema_linking import SchemaTopK, link_schema
 
 
 def _table(
@@ -87,6 +89,7 @@ def _link(
     foreign_keys: tuple[ForeignKeyMetadata, ...],
     *,
     allowed_tables: tuple[str, ...] | None = None,
+    top_k: SchemaTopK,
 ):
     snapshot = build_schema_snapshot(
         tables=tables,
@@ -101,21 +104,27 @@ def _link(
         allowed_tables=allowed_tables
         or tuple(f"public.{table.table_name}" for table in tables),
         snapshot=snapshot,
+        top_k=top_k,
     )
 
 
-def test_fk_path_adds_an_intermediate_table_within_top_k_budget() -> None:
+@pytest.mark.parametrize("top_k", (5, 10, 20))
+def test_fk_path_adds_an_intermediate_table_within_requested_budget(
+    top_k: SchemaTopK,
+) -> None:
     fillers = tuple(
         _table(f"noise_{number:02d}", "noise_id")
-        for number in range(9)
+        for number in range(21)
     )
 
     result = _link(
         (FILM, CATEGORY, BRIDGE, *fillers),
         (BRIDGE_TO_FILM, BRIDGE_TO_CATEGORY),
+        top_k=top_k,
     )
 
-    assert len(result.candidate_tables) == 10
+    assert len(result.candidate_tables) == top_k
+    assert result.top_k == top_k
     assert "public.zz_bridge" in {
         table.object_id for table in result.candidate_tables
     }
@@ -171,6 +180,7 @@ def test_fk_connectivity_promotes_a_related_table_before_noise_cutoff() -> None:
             for table in (anchor, related, *fillers)
         ),
         snapshot=snapshot,
+        top_k=10,
     )
 
     selected = {
@@ -184,6 +194,59 @@ def test_fk_connectivity_promotes_a_related_table_before_noise_cutoff() -> None:
         == ("public.anchor", "public.zz_related")
         for path in result.join_paths
     )
+
+
+def test_path_that_cannot_fit_stays_bounded_without_full_join_path() -> None:
+    bridges = tuple(
+        _table(f"zz_bridge_{number}", "left_id", "right_id")
+        for number in range(4)
+    )
+    chain = (FILM, *bridges, CATEGORY)
+    foreign_keys = tuple(
+        ForeignKeyMetadata(
+            constraint_name=f"chain_{index}_fkey",
+            source_schema="public",
+            source_table=left.table_name,
+            source_columns=("film_id",)
+            if left is FILM
+            else ("right_id",),
+            target_schema="public",
+            target_table=right.table_name,
+            target_columns=("category_id",)
+            if right is CATEGORY
+            else ("left_id",),
+        )
+        for index, (left, right) in enumerate(
+            zip(chain, chain[1:]),
+            start=1,
+        )
+    )
+    fillers = tuple(
+        _table(f"noise_{number:02d}", "noise_id")
+        for number in range(5)
+    )
+
+    result = _link(
+        (*chain, *fillers),
+        foreign_keys,
+        top_k=5,
+    )
+
+    selected = {
+        candidate.object_id for candidate in result.candidate_tables
+    }
+    bridge_ids = {
+        f"public.{bridge.table_name}" for bridge in bridges
+    }
+    assert len(selected) == 5
+    assert {"public.film", "public.category"}.issubset(selected)
+    assert len(selected & bridge_ids) == 3
+    assert not bridge_ids.issubset(selected)
+    assert not any(
+        {"public.film", "public.category"}.issubset(path.tables)
+        for path in result.join_paths
+    )
+    assert all(set(path.tables).issubset(selected) for path in result.join_paths)
 
 
 def test_no_match_wide_fallback_stays_canonical_even_with_fk_paths() -> None:
@@ -214,6 +277,7 @@ def test_no_match_wide_fallback_stays_canonical_even_with_fk_paths() -> None:
     result = _link(
         (*canonical_tables, bridge),
         (bridge_to_a, bridge_to_b),
+        top_k=10,
     )
 
     assert tuple(
@@ -225,6 +289,7 @@ def test_unreachable_candidate_has_no_fabricated_join_path() -> None:
     result = _link(
         (FILM, CATEGORY, BRIDGE, ACTOR),
         (BRIDGE_TO_FILM, BRIDGE_TO_CATEGORY),
+        top_k=10,
     )
 
     assert not any(
@@ -246,6 +311,7 @@ def test_unauthorized_shortcut_never_enters_candidates_or_paths() -> None:
             "public.category",
             "public.zz_bridge",
         ),
+        top_k=10,
     )
 
     assert "public.secret_shortcut" not in {

@@ -144,6 +144,60 @@ def test_provider_sends_openai_compatible_structured_request() -> None:
     assert "stage5-test-secret" not in bytes(request.data or b"").decode()
 
 
+def test_provider_applies_the_stricter_per_call_timeout() -> None:
+    transport = FakeTransport(
+        body=_response(
+            {"sql": "SELECT 1", "clarification_reason": None},
+        )
+    )
+    provider = OpenAICompatibleLLMProvider(
+        _settings(),
+        transport=transport,
+    )
+
+    provider.generate(_messages(), timeout_seconds=4.25)
+
+    assert transport.calls[0][1] == 4.25
+
+
+def test_provider_never_expands_its_configured_timeout() -> None:
+    transport = FakeTransport(
+        body=_response(
+            {"sql": "SELECT 1", "clarification_reason": None},
+        )
+    )
+    provider = OpenAICompatibleLLMProvider(
+        _settings(),
+        transport=transport,
+    )
+
+    provider.generate(_messages(), timeout_seconds=60)
+
+    assert transport.calls[0][1] == 30
+
+
+@pytest.mark.parametrize(
+    "timeout_seconds",
+    (0, -1, True, float("inf"), float("nan")),
+)
+def test_provider_rejects_invalid_per_call_timeout(
+    timeout_seconds: object,
+) -> None:
+    provider = OpenAICompatibleLLMProvider(
+        _settings(),
+        transport=FakeTransport(),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"^provider timeout is invalid$",
+    ):
+        provider.generate(
+            _messages(),
+            timeout_seconds=timeout_seconds,  # type: ignore[arg-type]
+        )
+
+
 def test_provider_accepts_clarification_and_missing_usage() -> None:
     provider = OpenAICompatibleLLMProvider(
         _settings(),
@@ -193,6 +247,64 @@ def test_provider_accepts_clarification_and_missing_usage() -> None:
             ),
             ErrorType.UNKNOWN,
             "LLM_HTTP_ERROR",
+        ),
+        *(
+            (
+                HTTPError(
+                    "https://models.example.test/v1/chat/completions",
+                    status,
+                    "raw non-retryable provider failure",
+                    {},
+                    None,
+                ),
+                ErrorType.UNKNOWN,
+                "LLM_HTTP_ERROR",
+            )
+            for status in (400, 401, 403, 404)
+        ),
+        (
+            HTTPError(
+                "https://models.example.test/v1/chat/completions",
+                429,
+                "raw provider rate limit",
+                {},
+                None,
+            ),
+            ErrorType.RESOURCE_RISK,
+            "LLM_RATE_LIMITED",
+        ),
+        (
+            HTTPError(
+                "https://models.example.test/v1/chat/completions",
+                503,
+                "raw provider capacity failure",
+                {},
+                None,
+            ),
+            ErrorType.RESOURCE_RISK,
+            "LLM_CAPACITY_ERROR",
+        ),
+        (
+            HTTPError(
+                "https://models.example.test/v1/chat/completions",
+                502,
+                "raw bad gateway",
+                {},
+                None,
+            ),
+            ErrorType.RESOURCE_RISK,
+            "LLM_CAPACITY_ERROR",
+        ),
+        (
+            HTTPError(
+                "https://models.example.test/v1/chat/completions",
+                504,
+                "raw gateway timeout",
+                {},
+                None,
+            ),
+            ErrorType.RESOURCE_RISK,
+            "LLM_CAPACITY_ERROR",
         ),
         (
             BadStatusLine("private provider status line"),

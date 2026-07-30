@@ -1,3 +1,12 @@
+from app.generation.context import (
+    CONTEXT_ESTIMATOR_VERSION,
+    CONTEXT_INPUT_BUDGET_DENOMINATOR,
+    CONTEXT_INPUT_BUDGET_NUMERATOR,
+    ContextSelection,
+    ContextSelectionError,
+    estimate_message_tokens,
+    select_generation_context,
+)
 from app.generation.models import (
     GenerationContext,
     GenerationResult,
@@ -11,9 +20,30 @@ from app.generation.provider import (
     LLMProvider,
     OpenAICompatibleLLMProvider,
 )
+from app.generation.routing import (
+    FALLBACK_ERROR_CODES,
+    MODEL_ROUTE_TABLE_VERSION,
+    ModelRoute,
+    ModelRouteTable,
+    ModelRoutingRuntime,
+    ModelTarget,
+    ProviderRegistry,
+    RegisteredProvider,
+    RoutedGeneration,
+    RoutedGenerationError,
+    build_configured_model_routing_runtime,
+    build_single_provider_routing_runtime,
+    generate_with_model_route,
+    model_config_sha256,
+)
 from app.generation.service import generate_sql
 
 __all__ = [
+    "CONTEXT_ESTIMATOR_VERSION",
+    "CONTEXT_INPUT_BUDGET_DENOMINATOR",
+    "CONTEXT_INPUT_BUDGET_NUMERATOR",
+    "ContextSelection",
+    "ContextSelectionError",
     "GenerationContext",
     "GenerationResult",
     "GeneratedSQL",
@@ -21,7 +51,23 @@ __all__ = [
     "LLMMessage",
     "LLMProvider",
     "LLMProviderError",
+    "FALLBACK_ERROR_CODES",
+    "MODEL_ROUTE_TABLE_VERSION",
+    "ModelRoute",
+    "ModelRouteTable",
+    "ModelRoutingRuntime",
+    "ModelTarget",
     "OpenAICompatibleLLMProvider",
+    "ProviderRegistry",
+    "RegisteredProvider",
+    "RoutedGeneration",
+    "RoutedGenerationError",
+    "build_configured_model_routing_runtime",
+    "build_single_provider_routing_runtime",
     "build_generation_messages",
+    "estimate_message_tokens",
     "generate_sql",
+    "generate_with_model_route",
+    "model_config_sha256",
+    "select_generation_context",
 ]

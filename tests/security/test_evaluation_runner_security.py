@@ -16,6 +16,7 @@ from app.generation import (
 from app.observability import TraceRecord
 from evaluation import load_case_suite
 from evaluation.runner import evaluate_case
+from tests.routing_support import single_provider_test_routing
 
 CASES = load_case_suite(
     Path("evaluation/cases/pagila_mvp.jsonl")
@@ -60,12 +61,19 @@ class SecurityConnector:
         self,
         allowed_schemas: tuple[str, ...],
         allowed_tables: tuple[str, ...],
+        *,
+        timeout_seconds: float | None = None,
     ) -> SchemaSnapshot:
-        del allowed_schemas, allowed_tables
+        del allowed_schemas, allowed_tables, timeout_seconds
         return _snapshot()
 
-    def execute(self, sql: str) -> ExecutionResult:
-        del sql
+    def execute(
+        self,
+        sql: str,
+        *,
+        timeout_seconds: float | None = None,
+    ) -> ExecutionResult:
+        del sql, timeout_seconds
         self.execute_calls += 1
         if self.fail_execute:
             raise RuntimeError(
@@ -85,7 +93,10 @@ class RecordingProvider:
     def generate(
         self,
         messages: Sequence[LLMMessage],
+        *,
+        timeout_seconds: float | None = None,
     ) -> GenerationResult:
+        del timeout_seconds
         self.calls.append(tuple(messages))
         return GenerationResult(
             output=GeneratedSQL(sql=self.sql),
@@ -114,7 +125,9 @@ def test_gold_sql_and_expected_metadata_never_enter_model_messages() -> None:
     evaluation = evaluate_case(
         case,
         connector=connector,
-        provider=provider,
+        model_routing=single_provider_test_routing(
+            provider
+        ),
         trace_sink=RecordingSink(),
     )
 
@@ -134,7 +147,9 @@ def test_dangerous_case_report_contains_no_fixture_sql() -> None:
     evaluation = evaluate_case(
         case,
         connector=SecurityConnector(),
-        provider=RecordingProvider("SELECT film_id FROM film"),
+        model_routing=single_provider_test_routing(
+            RecordingProvider("SELECT film_id FROM film")
+        ),
         trace_sink=sink,
     )
 

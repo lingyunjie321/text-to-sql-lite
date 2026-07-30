@@ -140,6 +140,7 @@ LINKING = SchemaLinkingResult(
         ),
     ),
     schema_version=SNAPSHOT.schema_version,
+    top_k=10,
 )
 
 
@@ -217,6 +218,77 @@ def test_prompt_serializes_only_candidate_schema_context() -> None:
     ]
     assert "public.staff" not in messages[1].content
     assert "must never enter" not in messages[1].content
+
+
+def test_prompt_projects_selected_fields_and_matching_keys() -> None:
+    selected = (
+        "public.film.title",
+        "public.film.language_id",
+        "public.language.language_id",
+    )
+    messages = build_generation_messages(
+        replace(_context(), selected_field_ids=selected)
+    )
+    payload = json.loads(messages[1].content)
+
+    assert tuple(
+        field["object_id"]
+        for field in payload["candidate_fields"]
+    ) == selected
+    assert payload["primary_keys"] == [
+        {
+            "constraint_name": "language_pkey",
+            "table": "public.language",
+            "columns": ["language_id"],
+        }
+    ]
+    assert payload["foreign_keys"] == [
+        {
+            "constraint_name": "film_language_id_fkey",
+            "source_columns": ["language_id"],
+            "source_table": "public.film",
+            "target_columns": ["language_id"],
+            "target_table": "public.language",
+        }
+    ]
+    assert len(payload["join_paths"]) == 1
+
+
+def test_prompt_omits_keys_and_paths_with_pruned_endpoint_fields() -> None:
+    messages = build_generation_messages(
+        replace(
+            _context(),
+            selected_field_ids=("public.film.title",),
+        )
+    )
+    payload = json.loads(messages[1].content)
+
+    assert payload["primary_keys"] == []
+    assert payload["foreign_keys"] == []
+    assert payload["join_paths"] == []
+
+
+@pytest.mark.parametrize(
+    "selected",
+    (
+        ("public.staff.staff_id",),
+        ("public.film.title", "public.film.title"),
+        ["public.film.title"],
+    ),
+)
+def test_prompt_rejects_invalid_field_projection(
+    selected: object,
+) -> None:
+    with pytest.raises(
+        ValueError,
+        match=r"^generation context is invalid$",
+    ):
+        build_generation_messages(
+            replace(
+                _context(),
+                selected_field_ids=selected,  # type: ignore[arg-type]
+            )
+        )
 
 
 def test_prompt_sources_descriptive_metadata_from_snapshot() -> None:
@@ -307,10 +379,14 @@ def test_prompt_sources_field_aliases_only_from_snapshot() -> None:
     assert "polarity" not in payload
 
 
-def test_prompt_rejects_more_than_fixed_top_k_tables() -> None:
+def _wide_context(
+    *,
+    table_count: int,
+    top_k: int,
+) -> GenerationContext:
     tables = tuple(
         _table(f"table_{number:02d}", "entity_id")
-        for number in range(11)
+        for number in range(table_count)
     )
     snapshot = build_schema_snapshot(
         tables=tables,
@@ -335,19 +411,31 @@ def test_prompt_rejects_more_than_fixed_top_k_tables() -> None:
         candidate_fields=(),
         join_paths=(),
         schema_version=snapshot.schema_version,
+        top_k=top_k,  # type: ignore[arg-type]
     )
+    return GenerationContext(
+        question="list entities",
+        normalized_question="list entities",
+        normalized_time=None,
+        dialect="postgres",
+        schema_linking=linking,
+        snapshot=snapshot,
+    )
+
+
+def test_prompt_accepts_twenty_candidates_for_twenty_budget() -> None:
+    messages = build_generation_messages(
+        _wide_context(table_count=20, top_k=20)
+    )
+
+    payload = json.loads(messages[1].content)
+    assert len(payload["candidate_tables"]) == 20
+
+
+def test_prompt_rejects_six_candidates_for_five_budget() -> None:
 
     with pytest.raises(
         ValueError,
         match=r"^generation context is invalid$",
     ):
-        build_generation_messages(
-            GenerationContext(
-                question="list entities",
-                normalized_question="list entities",
-                normalized_time=None,
-                dialect="postgres",
-                schema_linking=linking,
-                snapshot=snapshot,
-            )
-        )
+        build_generation_messages(_wide_context(table_count=6, top_k=5))

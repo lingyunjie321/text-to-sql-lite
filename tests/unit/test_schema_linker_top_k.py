@@ -1,11 +1,11 @@
-import inspect
+import pytest
 
 from app.connectors.metadata import (
     ColumnMetadata,
     TableMetadata,
     build_schema_snapshot,
 )
-from app.schema_linking import TOP_K, link_schema
+from app.schema_linking import SchemaTopK, link_schema
 
 
 def _table(
@@ -45,7 +45,12 @@ def _table(
     )
 
 
-def _link(tables: tuple[TableMetadata, ...], question: str):
+def _link(
+    tables: tuple[TableMetadata, ...],
+    question: str,
+    *,
+    top_k: SchemaTopK,
+):
     snapshot = build_schema_snapshot(
         tables=tables,
         primary_keys=(),
@@ -60,31 +65,47 @@ def _link(tables: tuple[TableMetadata, ...], question: str):
             f"public.{table.table_name}" for table in tables
         ),
         snapshot=snapshot,
+        top_k=top_k,
     )
 
 
-def test_positive_matches_rank_first_without_exceeding_fixed_top_k() -> None:
+@pytest.mark.parametrize("top_k", (5, 10, 20))
+def test_positive_matches_rank_first_within_requested_budget(
+    top_k: SchemaTopK,
+) -> None:
     tables = tuple(
         _table(
             number,
-            aliases=(f"priority{number}",) if number >= 10 else (),
+            aliases=(f"priority{number}",) if number >= 22 else (),
         )
-        for number in range(12)
+        for number in range(24)
     )
 
-    result = _link(tables, "priority10 priority11")
+    result = _link(
+        tables,
+        "priority22 priority23",
+        top_k=top_k,
+    )
     object_ids = tuple(
         table.object_id for table in result.candidate_tables
     )
 
-    assert len(object_ids) == TOP_K == 10
-    assert object_ids[:2] == ("public.table_10", "public.table_11")
+    assert len(object_ids) == top_k
+    assert result.top_k == top_k
+    assert object_ids[:2] == ("public.table_22", "public.table_23")
+    assert set(object_ids).issubset(
+        {f"public.table_{number:02d}" for number in range(24)}
+    )
 
 
 def test_no_match_returns_all_tables_in_a_narrow_scope() -> None:
     tables = tuple(_table(number) for number in (3, 1, 2, 0))
 
-    result = _link(tables, "no matching vocabulary")
+    result = _link(
+        tables,
+        "no matching vocabulary",
+        top_k=5,
+    )
 
     assert tuple(
         table.object_id for table in result.candidate_tables
@@ -92,20 +113,28 @@ def test_no_match_returns_all_tables_in_a_narrow_scope() -> None:
     assert all(table.score == 0 for table in result.candidate_tables)
 
 
-def test_no_match_uses_canonical_first_ten_for_a_wide_scope() -> None:
-    tables = tuple(_table(number) for number in reversed(range(12)))
+@pytest.mark.parametrize("top_k", (5, 10, 20))
+def test_no_match_uses_canonical_requested_budget(
+    top_k: SchemaTopK,
+) -> None:
+    tables = tuple(_table(number) for number in reversed(range(24)))
 
-    result = _link(tables, "no matching vocabulary")
+    result = _link(
+        tables,
+        "no matching vocabulary",
+        top_k=top_k,
+    )
 
     assert tuple(
         table.object_id for table in result.candidate_tables
-    ) == tuple(f"public.table_{number:02d}" for number in range(10))
+    ) == tuple(f"public.table_{number:02d}" for number in range(top_k))
+    assert result.top_k == top_k
 
 
 def test_candidate_fields_cover_every_selected_table_column() -> None:
     tables = tuple(_table(number) for number in range(12))
 
-    result = _link(tables, "")
+    result = _link(tables, "", top_k=10)
     selected = {
         table.object_id for table in result.candidate_tables
     }
@@ -127,5 +156,46 @@ def test_candidate_fields_cover_every_selected_table_column() -> None:
     }
 
 
-def test_top_k_is_not_a_caller_controlled_parameter() -> None:
-    assert "top_k" not in inspect.signature(link_schema).parameters
+@pytest.mark.parametrize("invalid", (True, False, 0, 6, 21, -5, 5.0, "20"))
+def test_linker_rejects_non_closed_internal_budget(
+    invalid: object,
+) -> None:
+    tables = (_table(0),)
+    snapshot = build_schema_snapshot(
+        tables=tables,
+        primary_keys=(),
+        foreign_keys=(),
+        unique_constraints=(),
+        unique_indexes=(),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"^schema linking context is invalid$",
+    ):
+        link_schema(
+            "film",
+            allowed_schemas=("public",),
+            allowed_tables=("public.table_00",),
+            snapshot=snapshot,
+            top_k=invalid,  # type: ignore[arg-type]
+        )
+
+
+def test_linker_requires_an_explicit_internal_budget() -> None:
+    tables = (_table(0),)
+    snapshot = build_schema_snapshot(
+        tables=tables,
+        primary_keys=(),
+        foreign_keys=(),
+        unique_constraints=(),
+        unique_indexes=(),
+    )
+
+    with pytest.raises(TypeError):
+        link_schema(
+            "film",
+            allowed_schemas=("public",),
+            allowed_tables=("public.table_00",),
+            snapshot=snapshot,
+        )

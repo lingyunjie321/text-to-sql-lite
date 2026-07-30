@@ -101,12 +101,22 @@ def test_evaluate_refuses_baseline_drift_before_credentials(
     )
     monkeypatch.setattr(
         run_pagila_evaluation,
+        "verify_static_evaluation_freeze",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        run_pagila_evaluation,
         "load_database_settings",
         credential_loader,
     )
     monkeypatch.setattr(
         run_pagila_evaluation,
-        "load_llm_settings",
+        "load_llm_route_settings",
+        credential_loader,
+    )
+    monkeypatch.setattr(
+        run_pagila_evaluation,
+        "load_embedding_settings",
         credential_loader,
     )
 
@@ -119,6 +129,63 @@ def test_evaluate_refuses_baseline_drift_before_credentials(
         )
 
     assert credential_loads == 0
+
+
+def test_evaluate_runs_static_freeze_before_runtime_or_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    downstream_calls = 0
+
+    def reject_static_freeze(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise ValueError("evaluation code freeze does not match")
+
+    def forbidden_downstream(*args: object, **kwargs: object) -> None:
+        nonlocal downstream_calls
+        del args, kwargs
+        downstream_calls += 1
+        raise AssertionError("downstream gate ran too early")
+
+    monkeypatch.setattr(
+        run_pagila_evaluation,
+        "verify_static_evaluation_freeze",
+        reject_static_freeze,
+    )
+    monkeypatch.setattr(
+        run_pagila_evaluation,
+        "verify_evaluation_environment",
+        forbidden_downstream,
+    )
+    monkeypatch.setattr(
+        run_pagila_evaluation,
+        "load_database_settings",
+        forbidden_downstream,
+    )
+    monkeypatch.setattr(
+        run_pagila_evaluation,
+        "load_llm_route_settings",
+        forbidden_downstream,
+    )
+    monkeypatch.setattr(
+        run_pagila_evaluation,
+        "load_embedding_settings",
+        forbidden_downstream,
+    )
+    monkeypatch.setattr(
+        run_pagila_evaluation,
+        "PostgreSQLConnector",
+        forbidden_downstream,
+    )
+
+    with pytest.raises(ValueError, match="code freeze"):
+        run_pagila_evaluation.evaluate_to_report(
+            cases_path=Path("evaluation/cases/pagila_mvp.jsonl"),
+            baseline_path=Path("evaluation/pagila_baseline.json"),
+            report_path=Path("unused.json"),
+            env_file=Path(".env"),
+        )
+
+    assert downstream_calls == 0
 
 
 def test_evaluate_requires_exact_all_draft_gold_before_probes(
@@ -182,12 +249,17 @@ def test_evaluate_requires_exact_all_draft_gold_before_probes(
 def test_evaluate_refuses_unbound_database_before_llm_credentials(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    llm_credential_loads = 0
+    model_credential_loads = 0
 
     monkeypatch.setattr(
         run_pagila_evaluation,
         "verify_evaluation_environment",
         lambda **kwargs: None,
+    )
+    monkeypatch.setattr(
+        run_pagila_evaluation,
+        "verify_static_evaluation_freeze",
+        lambda *args, **kwargs: None,
     )
     monkeypatch.setattr(
         run_pagila_evaluation,
@@ -207,15 +279,23 @@ def test_evaluate_refuses_unbound_database_before_llm_credentials(
         ),
     )
 
-    def load_llm(*args: object, **kwargs: object) -> None:
-        nonlocal llm_credential_loads
+    def load_model_config(
+        *args: object,
+        **kwargs: object,
+    ) -> None:
+        nonlocal model_credential_loads
         del args, kwargs
-        llm_credential_loads += 1
+        model_credential_loads += 1
 
     monkeypatch.setattr(
         run_pagila_evaluation,
-        "load_llm_settings",
-        load_llm,
+        "load_llm_route_settings",
+        load_model_config,
+    )
+    monkeypatch.setattr(
+        run_pagila_evaluation,
+        "load_embedding_settings",
+        load_model_config,
     )
 
     with pytest.raises(ValueError, match="database target"):
@@ -226,7 +306,7 @@ def test_evaluate_refuses_unbound_database_before_llm_credentials(
             env_file=Path(".env"),
         )
 
-    assert llm_credential_loads == 0
+    assert model_credential_loads == 0
 
 
 @pytest.mark.parametrize(
@@ -298,6 +378,7 @@ def test_database_execution_drift_fails_before_connector_or_provider(
         "target": 0,
         "connector": 0,
         "llm": 0,
+        "embedding": 0,
         "provider": 0,
     }
     monkeypatch.setattr(
@@ -337,9 +418,16 @@ def test_database_execution_drift_fails_before_connector_or_provider(
     )
     monkeypatch.setattr(
         run_pagila_evaluation,
-        "load_llm_settings",
+        "load_llm_route_settings",
         lambda *args, **kwargs: calls.__setitem__(
             "llm", calls["llm"] + 1
+        ),
+    )
+    monkeypatch.setattr(
+        run_pagila_evaluation,
+        "load_embedding_settings",
+        lambda *args, **kwargs: calls.__setitem__(
+            "embedding", calls["embedding"] + 1
         ),
     )
     monkeypatch.setattr(
@@ -362,5 +450,6 @@ def test_database_execution_drift_fails_before_connector_or_provider(
         "target": 0,
         "connector": 0,
         "llm": 0,
+        "embedding": 0,
         "provider": 0,
     }

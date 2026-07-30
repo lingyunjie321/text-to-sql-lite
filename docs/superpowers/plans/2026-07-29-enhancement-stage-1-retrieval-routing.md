@@ -25,6 +25,21 @@
 - Stage 10 historical reports and Stage 4/8 historical design documents remain unchanged.
 - Do not commit or push Stage 1 as complete unless its applicable functional, integration, security, and real-environment gates have passed. If real services are unavailable, record `real_environment_validated=false` and do not claim Stage 1 completion.
 
+## Current Qualification Snapshot
+
+- `embedding_provider.real_environment_validated=true`: after deterministic
+  Provider tests, exactly one approved Alibaba Cloud Bailian Beijing
+  OpenAI-compatible request succeeded for `text-embedding-v4` and returned one
+  fully validated 1024-dimensional vector.
+- `stage1.real_environment_validated=false`: the Provider smoke does not prove
+  the authorized index, hybrid retrieval, two real generation-model routes,
+  a new Pagila baseline, or the 18-case Gold qualification.
+- No API key, raw endpoint, request document, response body, or vector value is
+  stored in this plan or the qualification report.
+- Checked implementation steps below are component evidence only. Task 11
+  calibration freeze and all applicable Task 12 gates remain authoritative
+  for the whole-stage status.
+
 ---
 
 ## File Map
@@ -36,6 +51,7 @@
 | `app/workflow/nodes.py` | Probe, explicit route node, materialization, model/context consumption |
 | `app/workflow/graph.py` | Ten node types and conditional probe/route/materialize edges |
 | `app/schema_linking/models.py` | Closed Top-K type and retrieval evidence models |
+| `app/schema_linking/authorization.py` | Shared authorization-first snapshot projection |
 | `app/schema_linking/linker.py` | Existing authorized BM25/FK behavior parameterized by internal Top-K |
 | `app/schema_linking/embedding.py` | OpenAI-compatible Embedding protocol and provider |
 | `app/schema_linking/index.py` | Authorized documents, retrieval version, bounded immutable vector indexes |
@@ -43,7 +59,8 @@
 | `app/schema_linking/rerank.py` | Explainable deterministic set-level reranking |
 | `app/generation/context.py` | Required-field preservation and conservative input-budget selection |
 | `app/generation/routing.py` | Server-owned model route table and bounded fallback decisions |
-| `app/config.py` | Strict Embedding and multi-model settings |
+| `app/http_transport.py` | Shared bounded no-redirect HTTP transport |
+| `app/config.py` | Strict Embedding and base/route/fallback model settings |
 | `app/observability/models.py` | Safe routing/retrieval/context Trace models |
 | `app/observability/tracing.py` | Mapping terminal State into safe Trace evidence |
 | `evaluation/` | Stage 1 metrics, frozen non-Gold inputs, and new baseline evidence |
@@ -64,7 +81,7 @@
 - Consumes: normalized question, probe `CandidateTable` values, probe `JoinPath` values, and derived `has_repair_history`.
 - Produces: `QueryComplexity`, `ComplexityReason`, `ComplexityDecision`, and `decide_complexity(...)`.
 
-- [ ] **Step 1: Write failing closed-model and mapping tests**
+- [x] **Step 1: Write failing closed-model and mapping tests**
 
 ```python
 def test_default_question_routes_to_simple_five() -> None:
@@ -104,7 +121,7 @@ fallback paths, duplicate phrases, NFKC/casefold, and invalid model
 combinations. The repair-history case passes `has_repair_history=True`
 independently of the numeric repair counter.
 
-- [ ] **Step 2: Run the tests and verify RED**
+- [x] **Step 2: Run the tests and verify RED**
 
 Run:
 
@@ -116,7 +133,7 @@ Expected: collection fails because the complexity types and function do not
 exist. Fix only test import mistakes until the failure is the missing
 production behavior.
 
-- [ ] **Step 3: Implement strict models and the pure decision**
+- [x] **Step 3: Implement strict models and the pure decision**
 
 ```python
 class QueryComplexity(str, Enum):
@@ -126,33 +143,26 @@ class QueryComplexity(str, Enum):
 
 
 class ComplexityDecision(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+        strict=True,
+    )
 
     level: QueryComplexity
     schema_top_k: Literal[5, 10, 20]
     reason_codes: tuple[ComplexityReason, ...]
     policy_version: Literal["complexity-v1"] = "complexity-v1"
-
-    @model_validator(mode="after")
-    def validate_mapping(self) -> Self:
-        expected_k = {
-            QueryComplexity.SIMPLE: 5,
-            QueryComplexity.MEDIUM: 10,
-            QueryComplexity.COMPLEX: 20,
-        }[self.level]
-        if self.schema_top_k != expected_k:
-            raise ValueError("complexity decision is invalid")
-        if not self.reason_codes or len(set(self.reason_codes)) != len(
-            self.reason_codes
-        ):
-            raise ValueError("complexity decision is invalid")
-        return self
 ```
 
-Implement exact reason extraction and precedence from the design. Relevant
-JOIN evidence must connect at least two positive-score candidates.
+Before-field validators reject coerced enum strings, lists, bools and
+float-valued Top-K inputs. The after validator enforces the exact
+reason-to-level mapping, non-empty unique reasons, declared-enum ordering,
+and exclusive `default_simple`. Implement exact reason extraction and
+precedence from the design. Relevant JOIN evidence must connect at least two
+positive-score candidates.
 
-- [ ] **Step 4: Run focused tests and verify GREEN**
+- [x] **Step 4: Run focused tests and verify GREEN**
 
 Run the Step 2 command. Expected: all selected tests pass with no warnings.
 
@@ -181,7 +191,7 @@ Restore production code and rerun Step 2 green.
 - Consumes: trusted internal `top_k: Literal[5, 10, 20]`.
 - Produces: `SchemaLinkingResult.top_k` and candidates bounded by that value.
 
-- [ ] **Step 1: Replace fixed-constant tests with behavior tests**
+- [x] **Step 1: Replace fixed-constant tests with behavior tests**
 
 ```python
 @pytest.mark.parametrize("top_k", (5, 10, 20))
@@ -218,7 +228,7 @@ def test_linker_rejects_non_closed_internal_budget(invalid: object) -> None:
 Update Prompt tests to prove 20 candidates are valid when `result.top_k=20`
 and 6 candidates are invalid when `result.top_k=5`.
 
-- [ ] **Step 2: Run linker, Prompt, and security tests and verify RED**
+- [x] **Step 2: Run linker, Prompt, and security tests and verify RED**
 
 Run:
 
@@ -234,7 +244,7 @@ Run:
 Expected: failures show that `link_schema` has no `top_k` parameter,
 `SchemaLinkingResult` has no `top_k`, and Prompt still uses `TOP_K=10`.
 
-- [ ] **Step 3: Implement the minimum dynamic-budget behavior**
+- [x] **Step 3: Implement the minimum dynamic-budget behavior**
 
 ```python
 SchemaTopK: TypeAlias = Literal[5, 10, 20]
@@ -253,13 +263,13 @@ slicing, FK bridge accounting, and termination. Remove the production
 `TOP_K` import. Add required `top_k` to `SchemaLinkingResult` and validate
 Prompt candidate count against the result value.
 
-- [ ] **Step 4: Update direct callers explicitly**
+- [x] **Step 4: Update direct callers explicitly**
 
 Every helper chooses 5, 10, or 20 based on what it tests. Retrieval-quality
 integration tests use 20; MVP compatibility tests use 10. Do not introduce a
 default that hides missing routing decisions.
 
-- [ ] **Step 5: Run focused tests and verify GREEN**
+- [x] **Step 5: Run focused tests and verify GREEN**
 
 Run Step 2 plus:
 
@@ -284,7 +294,7 @@ Expected: all selected tests pass and each budget path is exercised.
 - Consumes: Tasks 1–2 `ComplexityDecision`, `decide_complexity`, and dynamic `link_schema`.
 - Produces: ten node types; probe → route → materialize with one metadata read.
 
-- [ ] **Step 1: Write the failing graph and end-to-end state tests**
+- [x] **Step 1: Write the failing graph and end-to-end state tests**
 
 ```python
 def test_graph_registers_ten_nodes_and_two_pass_linking_edges() -> None:
@@ -306,7 +316,9 @@ def test_first_pass_uses_one_snapshot_and_materializes_selected_budget() -> None
     ]
     assert result.complexity_decision is not None
     assert result.complexity_decision.schema_top_k == 5
-    assert len(result.candidate_tables) <= 5
+    assert observed_top_ks == (20, 5)
+    assert observed_snapshots[0] is observed_snapshots[1]
+    assert observed_candidate_counts == (20, 5)
     assert tuple(t.node for t in result.node_timings[:5]) == (
         "request_preprocess",
         "permission_resolve",
@@ -320,9 +332,12 @@ Add a Schema repair test proving the decision is cleared, metadata is read
 again, and the three-step retrieval cycle repeats. Its first relink occurs
 while the existing `repair_count` is still zero and must nevertheless include
 `repair_history`. Add syntax repair proof that the decision is retained and
-metadata is not reread.
+metadata is not reread. Use a wide authorized fixture so the first-pass test
+proves actual 20 → 5 rematerialization rather than only checking a one-table
+result. Add fail-closed tests for a materialized result whose `top_k` or
+`schema_version` disagrees with the decision and probe snapshot.
 
-- [ ] **Step 2: Run Workflow tests and verify RED**
+- [x] **Step 2: Run Workflow tests and verify RED**
 
 Run:
 
@@ -336,7 +351,7 @@ Run:
 Expected: graph/state assertions fail because only nine nodes and one Linking
 pass exist.
 
-- [ ] **Step 3: Add state and node behavior**
+- [x] **Step 3: Add state and node behavior**
 
 Add `complexity_decision: ComplexityDecision | None` to `SQLTaskState`.
 Implement:
@@ -361,16 +376,19 @@ def _complexity_route(
                 or state.repair_count > 0
             ),
         ),
-        "error_type": None,
-        "public_error": None,
     }
 ```
+
+The node must not clear `error_type` or `repair_strategy`. During the first
+Schema repair, `repair_count` is still zero and Generate needs the retained
+`SCHEMA_ERROR` plus `RELINK_SCHEMA` to construct the repair context. Those
+fields remain owned by the existing Generate acceptance boundary.
 
 The first `_schema_linking` call reads metadata and passes
 `PROBE_SCHEMA_TOP_K`. The second call detects a decision, reuses
 `state.schema_snapshot`, and passes `decision.schema_top_k`.
 
-- [ ] **Step 4: Add exact conditional edges**
+- [x] **Step 4: Add exact conditional edges**
 
 `_schema_route` returns `complexity_route` when no decision exists and
 `generate_sql` when final candidates match the decision. Register
@@ -380,13 +398,15 @@ failure returns `finalize`.
 When reflection chooses `RELINK_SCHEMA`, its update sets
 `complexity_decision=None`; other repair strategies keep the decision.
 
-- [ ] **Step 5: Recalculate the 32-step proof**
+- [x] **Step 5: Recalculate the 32-step proof**
 
-Add a test with three consecutive Schema repairs and assert the workflow
-reaches a defined terminal status with `step_count <= 32`. Do not increase
-`MAX_WORKFLOW_STEPS` or recursion limit.
+Use four distinct, valid SQL attempts whose executions each return
+`SCHEMA_ERROR`. Assert exact termination as `FAILED_REPAIR_EXHAUSTED` at
+`step_count == 31`, with eight Linking invocations, four Complexity
+invocations, four metadata reads, and four execution attempts. Do not
+increase `MAX_WORKFLOW_STEPS` or recursion limit.
 
-- [ ] **Step 6: Run focused Workflow tests and verify GREEN**
+- [x] **Step 6: Run focused Workflow tests and verify GREEN**
 
 Run Step 2. Expected: all selected tests pass with the new exact node order,
 one metadata read per retrieval cycle, and no authorization/safety regression.
@@ -399,13 +419,12 @@ one metadata read per retrieval cycle, and no authorization/safety regression.
 - Modify: `app/observability/__init__.py`
 - Modify: `tests/unit/test_observability_trace.py`
 - Modify: `tests/security/test_observability_security.py`
-- Modify: `tests/unit/test_api.py`
 
 **Interfaces:**
 - Consumes: terminal `SQLTaskState.complexity_decision`.
 - Produces: optional safe `TraceComplexity`.
 
-- [ ] **Step 1: Write failing positive and negative Trace tests**
+- [x] **Step 1: Write failing positive and negative Trace tests**
 
 ```python
 def test_trace_records_versioned_complexity_evidence() -> None:
@@ -427,26 +446,25 @@ def test_complexity_trace_contains_no_input_or_object_names() -> None:
         assert forbidden.casefold() not in rendered.casefold()
 ```
 
-- [ ] **Step 2: Run Trace tests and verify RED**
+- [x] **Step 2: Run Trace tests and verify RED**
 
 Run:
 
 ```bash
 ./.venv/bin/pytest -q \
   tests/unit/test_observability_trace.py \
-  tests/security/test_observability_security.py \
-  tests/unit/test_api.py
+  tests/security/test_observability_security.py
 ```
 
 Expected: `TraceRecord` has no complexity field.
 
-- [ ] **Step 3: Implement the minimal safe mapping**
+- [x] **Step 3: Implement the minimal safe mapping**
 
 Add frozen `TraceComplexity` with only level, Top-K, reasons, and policy
 version. Map it from state. Do not add question, table IDs, or candidate
 documents.
 
-- [ ] **Step 4: Run Task 1–4 regression**
+- [x] **Step 4: Run Task 1–4 regression**
 
 ```bash
 ./.venv/bin/pytest -q \
@@ -477,7 +495,7 @@ Expected: all selected tests pass. This is the first complete vertical slice.
 **Interfaces:**
 - Produces: `EmbeddingProvider`, `EmbeddingProviderError`, `EmbeddingSettings`, and `OpenAICompatibleEmbeddingProvider.embed(...)`.
 
-- [ ] **Step 1: Write failing request/response contract tests**
+- [x] **Step 1: Write failing request/response contract tests**
 
 ```python
 def test_embedding_provider_preserves_input_order() -> None:
@@ -505,7 +523,7 @@ dimension mismatch, zero norm, oversized response, redirects, timeout,
 connection, HTTP error, malformed JSON, empty document, batch >64, and HTTPS/
 loopback validation.
 
-- [ ] **Step 2: Run tests and verify RED**
+- [x] **Step 2: Run tests and verify RED**
 
 ```bash
 ./.venv/bin/pytest -q \
@@ -515,20 +533,41 @@ loopback validation.
 
 Expected: imports fail because the provider does not exist.
 
-- [ ] **Step 3: Implement settings and provider**
+- [x] **Step 3: Implement settings and provider**
 
 Use `/embeddings`, Bearer auth, `model`, and ordered `input`. Reuse or
 surgically extract the existing no-redirect bounded `urllib` transport
 without changing generation behavior. Public errors are fixed and contain no
 document, endpoint credential, or response body.
 
-- [ ] **Step 4: Run local HTTP integration**
+- [x] **Step 4: Run local HTTP integration**
 
 ```bash
 ./.venv/bin/pytest -q tests/integration/test_openai_compatible_embedding_provider.py -m integration
 ```
 
 Expected: real loopback HTTP request and redirect rejection pass.
+
+**Execution evidence (2026-07-29)**
+
+- RED: the focused provider/security suite failed in 68 cases because the
+  Embedding settings and provider did not exist.
+- GREEN: the deterministic provider/security suite passed in 74 cases; the
+  real loopback `/embeddings` request and redirect-rejection tests both
+  passed. Existing LLM provider tests also passed after the HTTP transport
+  was extracted to a neutral module.
+- The approved Alibaba Cloud Bailian OpenAI-compatible service returned one
+  valid vector for `text-embedding-v4`; the configured and validated
+  dimension was `1024`. The response passed model, count/index, dimension,
+  finite-value, and nonzero-norm validation.
+- No endpoint value, API key, input document, raw response, or vector value
+  was written to this evidence.
+- Embedding Provider capability:
+  `real_environment_validated=true`.
+- Whole Stage 1: `real_environment_validated=false`. This smoke test does not
+  validate the authorized index, hybrid retrieval, RRF, reranking, context
+  selection, multi-model routing, Pagila baseline, or Gold E2E gates in
+  Task 12.
 
 ### Task 6: Build authorized versioned documents and a bounded vector index
 
@@ -542,7 +581,7 @@ Expected: real loopback HTTP request and redirect rejection pass.
 - Consumes: authorized `SchemaSnapshot`, datasource ID, authorization scope, semantic version, and `EmbeddingProvider`.
 - Produces: immutable `RetrievalVersion`, `EmbeddingIndex`, and `EmbeddingIndexRegistry`.
 
-- [ ] **Step 1: Write failing document/version/security tests**
+- [x] **Step 1: Write failing document/version/security tests**
 
 Assert exact deterministic documents from a hand-built snapshot, then assert:
 
@@ -555,7 +594,7 @@ Assert exact deterministic documents from a hand-built snapshot, then assert:
 - a failed build publishes no entry;
 - the 33rd version evicts exactly the least recently used entry.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 ```bash
 ./.venv/bin/pytest -q \
@@ -563,19 +602,19 @@ Assert exact deterministic documents from a hand-built snapshot, then assert:
   tests/security/test_schema_embedding_index_security.py
 ```
 
-- [ ] **Step 3: Implement `schema-doc-v1` and version hashing**
+- [x] **Step 3: Implement `schema-doc-v1` and version hashing**
 
 Serialize stable UTF-8 JSON with sorted keys and length-delimited version
 components. Build documents only after the same authorization filtering used
 by the BM25 linker.
 
-- [ ] **Step 4: Implement atomic bounded registry**
+- [x] **Step 4: Implement atomic bounded registry**
 
 Use an in-process lock per version, publish only after the whole batch
 validates, retain 32 immutable indexes, and make LRU eviction observable by
 version ID only.
 
-- [ ] **Step 5: Run tests and verify GREEN**
+- [x] **Step 5: Run tests and verify GREEN**
 
 Run Step 2; expected all pass.
 
@@ -593,7 +632,7 @@ Run Step 2; expected all pass.
 - Consumes: authorized BM25 ranks and same-version cosine ranks.
 - Produces: fused candidates with rank provenance and `rrf-v1`.
 
-- [ ] **Step 1: Write failing hand-derived RRF tests**
+- [x] **Step 1: Write failing hand-derived RRF tests**
 
 ```python
 def test_rrf_uses_rank_not_raw_channel_scores() -> None:
@@ -624,7 +663,7 @@ Choose literals whose totals do not tie; separately test exact ties use object
 ID. Cover duplicates, missing channels, empty ranks, rank starting at one,
 and invalid `k`.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 ```bash
 ./.venv/bin/pytest -q \
@@ -633,18 +672,18 @@ and invalid `k`.
   tests/security/test_hybrid_retrieval_permissions.py
 ```
 
-- [ ] **Step 3: Implement RRF `k=60` and cosine ranking**
+- [x] **Step 3: Implement RRF `k=60` and cosine ranking**
 
 Never mix raw BM25 and cosine scores. Both channels cap their ranked pool at
 20 and use canonical object ID tie-breaks.
 
-- [ ] **Step 4: Add same-version BM25-only degradation**
+- [x] **Step 4: Add same-version BM25-only degradation**
 
 Injected Embedding timeout/connection/invalid response yields BM25-only with
 an explicit degradation observation. Retrieval-version mismatch does not
 degrade to an old vector index.
 
-- [ ] **Step 5: Run tests and verify GREEN**
+- [x] **Step 5: Run tests and verify GREEN**
 
 Run Step 2 and existing linker authorization/version tests.
 
@@ -661,7 +700,7 @@ Run Step 2 and existing linker authorization/version tests.
 - Consumes: fused authorized candidates, matched fields, aliases, and authorized FK graph.
 - Produces: stable reranked candidates and closed reason codes.
 
-- [ ] **Step 1: Write failing set-level behavior tests**
+- [x] **Step 1: Write failing set-level behavior tests**
 
 Use literal fixtures proving:
 
@@ -673,7 +712,7 @@ Use literal fixtures proving:
 - exact evidence ties use canonical object ID;
 - reranker cannot add an object absent from fusion input.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 ```bash
 ./.venv/bin/pytest -q \
@@ -681,17 +720,17 @@ Use literal fixtures proving:
   tests/security/test_schema_rerank_security.py
 ```
 
-- [ ] **Step 3: Implement lexicographic feature ordering**
+- [x] **Step 3: Implement lexicographic feature ordering**
 
 Implement the exact ordered features from the design. Do not add tunable
 weights or an LLM call. Save only closed reasons and numeric rank evidence.
 
-- [ ] **Step 4: Implement RRF fallback on internal rerank error**
+- [x] **Step 4: Implement RRF fallback on internal rerank error**
 
 The injected-error integration path returns stable RRF ordering, never a
 partially reranked set, and records `rerank_degraded`.
 
-- [ ] **Step 5: Run tests and verify GREEN**
+- [x] **Step 5: Run tests and verify GREEN**
 
 Run Step 2 plus hybrid and existing FK tests.
 
@@ -711,7 +750,7 @@ Run Step 2 plus hybrid and existing FK tests.
 - Consumes: final reranked candidates, snapshot, decision, and model input/output limits.
 - Produces: selected fields and `ContextSelectionObservation`.
 
-- [ ] **Step 1: Write failing field-priority and budget tests**
+- [x] **Step 1: Write failing field-priority and budget tests**
 
 ```python
 def test_context_keeps_join_keys_before_unmatched_fields() -> None:
@@ -731,7 +770,7 @@ Cover direct matches, PK/FK, filter/aggregation/time evidence, deterministic
 remaining order, UTF-8 estimate `ceil(bytes/3)`, 80% input budget, and
 required-evidence overflow.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 ```bash
 ./.venv/bin/pytest -q \
@@ -740,18 +779,18 @@ required-evidence overflow.
   tests/security/test_generation_prompt_security.py
 ```
 
-- [ ] **Step 3: Implement minimal selector and Prompt consumption**
+- [x] **Step 3: Implement minimal selector and Prompt consumption**
 
 The selector returns an immutable view; Validator continues receiving the
 full authorized snapshot. Required evidence overflow produces the existing
 resource/clarification path before any Provider call.
 
-- [ ] **Step 4: Add safe observation**
+- [x] **Step 4: Add safe observation**
 
 Record counts and token estimates only, not question, field names, Prompt, or
 schema text.
 
-- [ ] **Step 5: Run tests and verify GREEN**
+- [x] **Step 5: Run tests and verify GREEN**
 
 Run Step 2 and Workflow routing security tests.
 
@@ -775,7 +814,7 @@ Run Step 2 and Workflow routing security tests.
 - Consumes: `ComplexityDecision` and server-owned route table.
 - Produces: selected Provider route, context limits, and at most one same-boundary fallback.
 
-- [ ] **Step 1: Write failing route and fallback tests**
+- [x] **Step 1: Write failing route and fallback tests**
 
 Assert simple/medium/complex choose `simple_route`, `standard_route`, and
 `complex_route`. Prove a request with extra `model`, `complexity`, or `top_k`
@@ -793,7 +832,7 @@ Fallback tests cover:
   failure never invoke fallback;
 - fallback does not increment `repair_count`.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 ```bash
 ./.venv/bin/pytest -q \
@@ -802,7 +841,7 @@ Fallback tests cover:
   tests/integration/test_multi_model_workflow.py
 ```
 
-- [ ] **Step 3: Implement strict route settings and registry**
+- [x] **Step 3: Implement strict route settings and registry**
 
 Use a frozen route table with `version="model-routes-v1"`, provider key,
 model-config hash, input/output limits, timeout, data-boundary ID, and
@@ -814,13 +853,13 @@ bodies: timeout, connection, HTTP 429, and HTTP 502/503/504 are the only
 fallback-eligible infrastructure failures. Preserve all existing output
 normalization and secret/redirect/response-size behavior.
 
-- [ ] **Step 4: Integrate selection and fallback**
+- [x] **Step 4: Integrate selection and fallback**
 
 `GenerateSQLNode` selects route before context pruning, calls the chosen
 Provider, and handles only the predeclared infrastructure failures. Preserve
 the existing Provider output normalization and SQL safety path.
 
-- [ ] **Step 5: Add safe Trace and run GREEN**
+- [x] **Step 5: Add safe Trace and run GREEN**
 
 Trace stores route ID, hashed actual model configuration, fallback boolean,
 route-table version, and hashed data-boundary ID. Run Step 2 and existing API/
@@ -831,19 +870,27 @@ generation/Workflow tests.
 **Files:**
 - Create: `evaluation/cases/retrieval_routing_development.jsonl`
 - Create: `evaluation/cases/retrieval_routing_calibration.jsonl`
+- Modify: `evaluation/__init__.py`
+- Modify: `evaluation/loader.py`
 - Modify: `evaluation/models.py`
 - Modify: `evaluation/runner.py`
 - Modify: `evaluation/report.py`
 - Modify: `evaluation/code_freeze.py`
+- Create: `evaluation/stage1_selected_configuration.json`
+- Create: `evaluation/stage1_calibration_freeze.json`
+- Create: `tests/unit/test_retrieval_routing_loader.py`
+- Create: `tests/unit/test_retrieval_stage_timings.py`
+- Create: `tests/unit/test_stage1_evaluation_freeze.py`
 - Create: `tests/unit/test_stage1_retrieval_metrics.py`
 - Modify: `tests/security/test_gold_case_integrity.py`
 - Modify: `tests/security/test_evaluation_runner_security.py`
 - Modify: `tests/security/test_generation_prompt_security.py`
+- Create: `tests/security/test_stage1_gold_isolation.py`
 
 **Interfaces:**
 - Produces: frozen non-Gold dataset digests, per-stage retrieval metrics, and successful-path Gold exclusion evidence.
 
-- [ ] **Step 1: Write failing dataset-isolation and metric tests**
+- [x] **Step 1: Write failing dataset-isolation and metric tests**
 
 The two new datasets use synthetic questions and synthetic metadata IDs.
 Tests compare normalized hashes against all Pagila question/SQL/tables/fields/
@@ -853,7 +900,7 @@ Metrics tests use literal Case evidence to assert Recall@5/10/20,
 Precision@5/10/20, mean candidates, channel/fusion/rerank recall, route
 distribution, degradation, pruning, and stage latency.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 ```bash
 ./.venv/bin/pytest -q \
@@ -863,19 +910,19 @@ distribution, degradation, pruning, and stage latency.
   tests/security/test_generation_prompt_security.py
 ```
 
-- [ ] **Step 3: Implement dataset loading and metrics**
+- [x] **Step 3: Implement dataset loading and metrics**
 
 Do not import `EvaluationCase.difficulty` into production. Evaluation compares
 the observed production complexity with labels only after the request ends.
 
-- [ ] **Step 4: Add successful-path Provider capture**
+- [x] **Step 4: Add successful-path Provider capture**
 
 Run an allowed evaluation Case through a capturing Provider and assert its
 messages contain only the current question and authorized runtime Schema,
 never Gold SQL/fields/result/labels/fixture. Prove neither Stage 1 dataset is
 loaded by `app/`.
 
-- [ ] **Step 5: Freeze calibration before quality comparison**
+- [x] **Step 5: Freeze calibration before quality comparison**
 
 Write the development and calibration SHA-256 values plus the chosen config
 hash into the new Stage 1 baseline. After this step, any config change
@@ -884,7 +931,10 @@ invalidates the calibration evidence.
 ### Task 12: Full verification, real-environment qualification, and stage handoff
 
 **Files:**
+- Modify: `.env.example`
 - Modify: `README.md`
+- Modify: `docs/Text-to-SQL项目复现规格.md`
+- Modify: `docs/MVP_EXECUTION_PLAN.md`
 - Modify: `docs/decisions/0011-explicit-complexity-route-node.md`
 - Modify: `docs/superpowers/specs/2026-07-29-enhancement-stage-1-retrieval-routing-design.md`
 - Create: `evaluation/reports/enhancement_stage1_qualification.md`

@@ -1,0 +1,10 @@
+{
+  "contract_version": "stage1-calibration-freeze-v1",
+  "development_file_sha256": "0ce763b3122b09a6b6718975789122918e4594b455b35d51197a37b359b595f0",
+  "development_normalized_sha256": "c1746bea22d588578929b25afb1a3a29d13c7e978f5687e2b6352b7029668dd7",
+  "calibration_file_sha256": "07070687fb39592e26b02fb21891b5108b38bc0f5337240de25a4df3ac638845",
+  "calibration_normalized_sha256": "d7e7d7d60a157ec78e00ba16fbf722dddd5552eb833863310a8d9ed95797b8bd",
+  "stage1_config_sha256": "a76ffcacb889f0bba10aabbe35f81d0e6ad2cfdceb49221a33864c2f89135bf8",
+  "controlled_code_sha256": "e02e79d4f4dcb5ac847bd5f35153ed89076793b0c63c43c856a8a8b80081655a",
+  "stage1_calibration_baseline_id": "2b53e182b3b472fa75d92f931591d0d5feea5137e69f4e3b47698ddcb4e44782"
+}

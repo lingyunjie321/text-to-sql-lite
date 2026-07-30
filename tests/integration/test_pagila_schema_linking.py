@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from app.connectors.postgresql import PostgreSQLConnector
-from app.schema_linking import TOP_K, link_schema
+from app.schema_linking import link_schema
 
 
 CASE_PATH = Path("evaluation/cases/pagila_mvp.jsonl")
@@ -53,6 +53,7 @@ def test_pagila_gold_tables_and_fields_are_recalled_within_authorization(
         allowed_schemas=("public",),
         allowed_tables=allowed_tables,
         snapshot=snapshot,
+        top_k=20,
     )
 
     candidate_tables = {
@@ -134,7 +135,8 @@ def test_pagila_gold_tables_and_fields_are_recalled_within_authorization(
     assert expected_tables.issubset(candidate_tables)
     assert expected_fields.issubset(candidate_fields)
     assert candidate_tables.issubset(allowed_tables)
-    assert len(candidate_tables) <= TOP_K
+    assert len(candidate_tables) <= 20
+    assert result.top_k == 20
     missing_snapshot_edges = expected_join_edges - snapshot_join_edges
     assert missing_snapshot_edges.issubset(
         KNOWN_PARTITION_PARENT_EDGE_GAP

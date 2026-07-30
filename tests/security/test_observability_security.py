@@ -13,6 +13,7 @@ from app.workflow import (
     WorkflowPublicError,
 )
 from app.connectors.errors import ErrorType
+from tests.routing_support import single_provider_test_routing
 
 
 def _failure_state() -> SQLTaskState:
@@ -32,9 +33,12 @@ def _failure_state() -> SQLTaskState:
 
 
 def _context() -> WorkflowContext:
+    provider = Mock()
     return WorkflowContext(
-        provider=Mock(),
         connector=Mock(),
+        model_routing=single_provider_test_routing(
+            provider
+        ),
         datasource_id="pagila",
         allowed_schemas=("public",),
         allowed_tables=("public.film",),
@@ -56,6 +60,7 @@ def test_logging_sink_emits_only_safe_trace_fields(
     assert "SAFE_FAILURE" in rendered
     assert "postgresql://" not in rendered
     assert "secret" not in rendered
+    assert build_trace_record(_failure_state()).complexity is None
 
 
 def test_sink_exception_logs_fixed_degradation_without_exception(

@@ -47,6 +47,18 @@
 
 只有 Stub 或本地伪向量时不得标记第三项。
 
+当前资格快照：
+
+- `embedding_provider.real_environment_validated=true`：确定性 Provider 与本地
+  HTTP 契约测试完成后，获批的阿里云百炼北京区 OpenAI-compatible 服务已成功
+  执行且仅执行一次真实 Embedding 调用；`text-embedding-v4` 返回一个通过模型、
+  数量/index、1024 维、有限值和非零范数校验的向量。
+- `stage1.real_environment_validated=false`：该单项证据不等于授权索引、混合检索、
+  多模型路由或 Pagila E2E 证据。整阶段仍缺至少两个真实生成模型按不同 route
+  运行，以及新的 Pagila/Gold 冻结候选和独立审核。
+
+资格记录不得包含 API Key、原始 endpoint、请求文档、响应正文或向量值。
+
 ## 范围
 
 ### 包含
@@ -183,7 +195,11 @@ class ComplexityReason(str, Enum):
 
 
 class ComplexityDecision(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+        strict=True,
+    )
 
     level: QueryComplexity
     schema_top_k: Literal[5, 10, 20]
@@ -192,7 +208,8 @@ class ComplexityDecision(BaseModel):
 ```
 
 模型校验 `level/schema_top_k/reason_codes` 与 `complexity-v1` 映射完全一致；
-理由去重并按枚举声明顺序稳定排序。
+理由去重并按枚举声明顺序稳定排序。Python 输入不得把字符串强制转换成枚举、
+把 list 强制转换成 tuple，或把 bool/float 强制转换成 Top-K 整数。
 
 ### 检索版本
 
@@ -206,7 +223,7 @@ class RetrievalVersion(BaseModel):
     embedding_dimension: int
     document_version: Literal["schema-doc-v1"]
     fusion_version: Literal["rrf-v1"]
-    rerank_version: Literal["schema-rerank-v1"]
+    rerank_version: Literal["schema-rerank-v2"]
 ```
 
 完整模型规范 JSON 的 SHA-256 是 `retrieval_version_id`。任何字段变化都不能
@@ -322,6 +339,12 @@ class EmbeddingProvider(Protocol):
 - 模型标识与配置一致，或由兼容服务明确省略；
 - 超过响应字节上限拒绝。
 
+阶段 1 采用的真实 Provider 是阿里云百炼北京区 OpenAI-compatible 接口，模型
+固定为 `text-embedding-v4`，维数固定为 `1024`。Base URL 和 API Key 只从
+`EMBEDDING_*` 环境变量注入；冻结和报告只保存非秘密 endpoint 身份摘要，不保存
+原值。真实烟测只证明 Provider 请求/响应契约，不能替代授权索引重建和整阶段
+真实环境门禁。
+
 ### 文档
 
 `schema-doc-v1` 每个授权对象产生确定性 UTF-8 文档：
@@ -359,7 +382,7 @@ rank 从 1 开始。缺席通道不贡献；同对象去重；融合分相同按
 Embedding 故障时：
 
 - 当前授权同版本 BM25 可用：降级为 BM25-only，Trace 标记
-  `embedding_degraded`；
+  `embedding_degradation`；
 - 无同版本 BM25 或版本不一致：结构化内部失败；
 - 不使用旧向量，不调用更宽权限范围索引。
 
@@ -371,8 +394,9 @@ Embedding 故障时：
 2. 问题直接命中字段数；
 3. 已批准 alias 命中数；
 4. 相关 JOIN 连通性与路径长度；
-5. RRF 分数；
-6. 规范对象 ID。
+5. 完整主键直接证据所表示的表粒度覆盖；
+6. RRF 分数；
+7. 规范对象 ID。
 
 断开且没有直接证据的候选排在连通候选之后。每次排序保存实际生效的理由码：
 
@@ -381,6 +405,7 @@ Embedding 故障时：
 - `approved_alias`
 - `join_connectivity`
 - `shorter_join_path`
+- `grain_key_coverage`
 - `fusion_rank`
 - `disconnected_penalty`
 - `canonical_tie_break`
@@ -412,8 +437,9 @@ usable_input = floor(max_input_tokens * 0.8) - max_output_tokens
 
 ## 多模型路由
 
-WorkflowContext 从单一 Provider 扩展为服务端 `provider_registry` 和版本化
-`model_route_table`。请求不能提供模型名。
+`WorkflowContext` 从单一 Provider 迁移为必填的服务端
+`model_routing: ModelRoutingRuntime`；runtime 内部持有
+`ProviderRegistry` 和版本化 `ModelRouteTable`。请求不能提供模型名。
 
 初始映射：
 
@@ -424,6 +450,12 @@ WorkflowContext 从单一 Provider 扩展为服务端 `provider_registry` 和版
 每个 route 配置 Provider key、模型配置摘要、输入/输出预算、超时和数据处理
 边界 ID。不同 route 可以暂时指向同一真实模型，但此时不能标记多模型真实环境
 验证完成。
+
+生产 Bootstrap 使用基础 `LLM_*` 配置，并允许
+`LLM_SIMPLE_*`、`LLM_STANDARD_*`、`LLM_COMPLEX_*` 覆盖对应 route；
+未设置的 route 完整继承基础配置。`LLM_FALLBACK_*` 只有在配置完整且对应
+`MODEL_ROUTING_*_FALLBACK_ENABLED=true` 时注册。Bootstrap 为每个声明的
+配置构造 Provider，并在未知、缺失或不兼容配置时 fail-closed。
 
 只在连接、限流、容量或 Provider timeout 时允许一次 fallback；fallback 必须：
 
@@ -489,7 +521,8 @@ Trace 新增：
 - BM25/Embedding 通道版本、数量、耗时和降级；
 - RRF 配置摘要；
 - Rerank 前后 rank 摘要及理由码；
-- 裁剪前后表/字段数、估算 token 和预算；
+- 裁剪前后字段数、必要字段数、估算 token 和预算；表集合由动态 Top-K 决定，
+  本阶段不在 Context selector 中再次裁剪；
 - model route、实际 Provider 配置 hash、fallback 和数据边界摘要。
 
 Trace 继续禁止 question、SQL、Prompt、表/字段原名、结果行、DSN、API key 和
@@ -524,25 +557,36 @@ embedding:
   protocol: openai_compatible
   base_url: ${EMBEDDING_BASE_URL}
   api_key: ${EMBEDDING_API_KEY}
-  model: ${EMBEDDING_MODEL}
-  dimension: ${EMBEDDING_DIMENSION}
+  model: text-embedding-v4
+  dimension: 1024
   timeout_seconds: 10
   max_batch_documents: 64
   max_response_bytes: 4194304
 
 context:
-  estimator_version: utf8-bytes-v1
+  estimator_version: utf8-bytes-div-3-v1
   input_budget_ratio: 0.8
 
 model_routes:
   version: model-routes-v1
-  simple: simple_route
-  medium: standard_route
-  complex: complex_route
+  simple:
+    route_id: simple_route
+    settings_prefix: LLM_SIMPLE_
+  medium:
+    route_id: standard_route
+    settings_prefix: LLM_STANDARD_
+  complex:
+    route_id: complex_route
+    settings_prefix: LLM_COMPLEX_
+  fallback:
+    settings_prefix: LLM_FALLBACK_
+    enabled_by: MODEL_ROUTING_*_FALLBACK_ENABLED
+  data_boundary_id: ${MODEL_ROUTING_DATA_BOUNDARY_ID}
 ```
 
-具体真实 endpoint、模型名和维数从环境注入并进入配置摘要；缺失时生产启动
-fail-closed。确定性单元测试使用固定 Provider，不读取开发者凭据。
+真实 endpoint 和 API Key 从环境注入；模型、维数、route 预算和非秘密 endpoint
+身份进入配置摘要。缺失必需配置时生产启动 fail-closed。确定性单元测试使用
+固定 Provider，不读取开发者凭据。
 
 ## 测试设计
 
@@ -588,11 +632,16 @@ fail-closed。确定性单元测试使用固定 Provider，不读取开发者凭
 
 ### 真实环境门
 
-- 真实 Embedding 模型与维数固定并完成索引重建验证；
+- 真实 Embedding 模型与维数固定并完成索引重建验证；当前只有 Provider 单次
+  请求/响应契约通过，不能据此勾选整项；
 - 至少两个真实生成模型按不同 route 运行；
 - 真实 Pagila 完成新的冻结候选；
 - 18 条 Gold 的最终状态和发布资格按测试规格独立审核；
 - 当前 Stage 10 的 `12/18`、`verified=0`、`not_passed` 只作为历史基线。
+
+截至 2026-07-29，只有
+`embedding_provider.real_environment_validated=true`；由于后续三项尚未通过，
+`stage1.real_environment_validated=false`。
 
 ## 迁移
 

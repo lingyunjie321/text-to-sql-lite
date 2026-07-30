@@ -1,8 +1,9 @@
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import pytest
 
+import app.workflow.nodes as workflow_nodes
 from app.connectors.errors import (
     DatabaseError,
     ErrorType,
@@ -27,6 +28,7 @@ from app.workflow import (
     new_task_state,
     run_workflow,
 )
+from tests.routing_support import single_provider_test_routing
 
 
 SNAPSHOT = build_schema_snapshot(
@@ -67,7 +69,10 @@ class Provider:
     def generate(
         self,
         messages: Sequence[LLMMessage],
+        *,
+        timeout_seconds: float | None = None,
     ) -> GenerationResult:
+        del timeout_seconds
         self.calls.append(tuple(messages))
         return GenerationResult(
             output=GeneratedSQL(sql=self.sql),
@@ -90,11 +95,20 @@ class Connector:
         self,
         allowed_schemas: tuple[str, ...],
         allowed_tables: tuple[str, ...],
+        *,
+        timeout_seconds: float | None = None,
     ):
+        del allowed_schemas, allowed_tables, timeout_seconds
         self.metadata_calls += 1
         return SNAPSHOT
 
-    def execute(self, sql: str) -> ExecutionResult:
+    def execute(
+        self,
+        sql: str,
+        *,
+        timeout_seconds: float | None = None,
+    ) -> ExecutionResult:
+        del timeout_seconds
         self.execute_calls.append(sql)
         if self.error is not None:
             raise PostgreSQLConnectorError(self.error)
@@ -116,8 +130,10 @@ def _run(
             datasource_id="pagila",
         ),
         context=WorkflowContext(
-            provider=provider,
             connector=connector,
+            model_routing=single_provider_test_routing(
+                provider
+            ),
             datasource_id="pagila",
             allowed_schemas=("public",),
             allowed_tables=("public.film",),
@@ -184,7 +200,10 @@ def test_model_timeout_is_terminal_and_never_reaches_execution() -> None:
         def generate(
             self,
             messages: Sequence[LLMMessage],
+            *,
+            timeout_seconds: float | None = None,
         ) -> GenerationResult:
+            del timeout_seconds
             self.calls += 1
             raise LLMProviderError(
                 LLMError(
@@ -205,8 +224,10 @@ def test_model_timeout_is_terminal_and_never_reaches_execution() -> None:
             datasource_id="pagila",
         ),
         context=WorkflowContext(
-            provider=provider,
             connector=connector,
+            model_routing=single_provider_test_routing(
+                provider
+            ),
             datasource_id="pagila",
             allowed_schemas=("public",),
             allowed_tables=("public.film",),
@@ -218,3 +239,102 @@ def test_model_timeout_is_terminal_and_never_reaches_execution() -> None:
     assert provider.calls == 1
     assert connector.execute_calls == []
     assert result.repair_count == 0
+
+
+def test_complexity_failure_is_internal_before_model_or_execution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = Provider("SELECT film_id FROM film LIMIT 1")
+    connector = Connector()
+    monkeypatch.setattr(
+        workflow_nodes,
+        "decide_complexity",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            RuntimeError("private route failure")
+        ),
+    )
+
+    result = run_workflow(
+        new_task_state(
+            request_id="req-route-failure",
+            trace_id="trace-route-failure",
+            question="List film identifiers",
+            datasource_id="pagila",
+        ),
+        context=WorkflowContext(
+            connector=connector,
+            model_routing=single_provider_test_routing(
+                provider
+            ),
+            datasource_id="pagila",
+            allowed_schemas=("public",),
+            allowed_tables=("public.film",),
+            clock=lambda: 0.0,
+        ),
+    )
+
+    assert result.final_status is FinalStatus.FAILED_INTERNAL
+    assert result.public_error is not None
+    assert result.public_error.code == "WORKFLOW_INTERNAL_ERROR"
+    assert provider.calls == []
+    assert connector.metadata_calls == 1
+    assert connector.execute_calls == []
+    assert tuple(timing.node for timing in result.node_timings) == (
+        "request_preprocess",
+        "permission_resolve",
+        "schema_linking",
+        "complexity_route",
+        "finalize",
+    )
+
+
+@pytest.mark.parametrize("mismatch", ("top_k", "schema_version"))
+def test_materialization_mismatch_fails_before_model(
+    mismatch: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = Provider("SELECT film_id FROM film LIMIT 1")
+    connector = Connector()
+    original = workflow_nodes.link_schema
+    calls = 0
+
+    def mismatched_second_result(*args: object, **kwargs: object):
+        nonlocal calls
+        calls += 1
+        result = original(*args, **kwargs)  # type: ignore[arg-type]
+        if calls != 2:
+            return result
+        if mismatch == "top_k":
+            return replace(result, top_k=10)
+        return replace(result, schema_version="stale-schema-version")
+
+    monkeypatch.setattr(
+        workflow_nodes,
+        "link_schema",
+        mismatched_second_result,
+    )
+
+    result = run_workflow(
+        new_task_state(
+            request_id="req-budget-mismatch",
+            trace_id="trace-budget-mismatch",
+            question="List film identifiers",
+            datasource_id="pagila",
+        ),
+        context=WorkflowContext(
+            connector=connector,
+            model_routing=single_provider_test_routing(
+                provider
+            ),
+            datasource_id="pagila",
+            allowed_schemas=("public",),
+            allowed_tables=("public.film",),
+            clock=lambda: 0.0,
+        ),
+    )
+
+    assert calls == 2
+    assert result.final_status is FinalStatus.FAILED_INTERNAL
+    assert provider.calls == []
+    assert connector.metadata_calls == 1
+    assert connector.execute_calls == []

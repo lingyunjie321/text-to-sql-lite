@@ -620,10 +620,34 @@ complexity_routing:
   policy_version: complexity-v1
 
 llm:
-  provider: ${MODEL_PROVIDER}
-  model: ${MODEL_NAME}
+  protocol: openai_compatible
+  base_url: ${LLM_BASE_URL}
+  api_key: ${LLM_API_KEY}
+  model: ${LLM_MODEL}
   timeout_seconds: 30
   temperature: 0
+  max_input_tokens: 32768
+  max_output_tokens: 2048
+
+model_routing:
+  simple_override_prefix: LLM_SIMPLE_
+  standard_override_prefix: LLM_STANDARD_
+  complex_override_prefix: LLM_COMPLEX_
+  fallback_override_prefix: LLM_FALLBACK_
+  data_boundary_id: ${MODEL_ROUTING_DATA_BOUNDARY_ID}
+  simple_fallback_enabled: false
+  standard_fallback_enabled: false
+  complex_fallback_enabled: false
+
+embedding:
+  protocol: openai_compatible
+  base_url: ${EMBEDDING_BASE_URL}
+  api_key: ${EMBEDDING_API_KEY}
+  model: text-embedding-v4
+  dimension: 1024
+  timeout_seconds: 10
+  max_batch_documents: 64
+  max_response_bytes: 4194304
 
 api:
   path: /api/v1/text-to-sql
@@ -635,7 +659,11 @@ time:
   default_timezone: Asia/Shanghai
 ```
 
-凭据只通过 Secret/环境变量注入。启动时校验配置；缺少模型或数据库配置时不得以宽松模式运行。
+基础 LLM 配置为三条主路由的默认值；每个非空的路由前缀覆盖项必须形成完整、
+合法的路由配置。Fallback 只有在配置了独立 Provider 且显式为至少一条路由开启
+时才生效，并且必须满足同一数据边界及 Token 上限约束。凭据只通过
+Secret/环境变量注入。启动时校验配置；缺少数据库、声明的生成模型路由或
+Embedding 必要配置时不得以宽松模式运行。
 
 ## 14. 日志与 Trace
 
@@ -658,18 +686,39 @@ time:
 app/
 ├── api/
 ├── workflow/
-│   ├── state.py
+│   ├── models.py
+│   ├── complexity.py
 │   ├── graph.py
-│   └── nodes/
+│   └── nodes.py
 ├── schema_linking/
+│   ├── authorization.py
+│   ├── embedding.py
+│   ├── fusion.py
+│   ├── index.py
+│   ├── linker.py
+│   └── rerank.py
 ├── generation/
+│   ├── context.py
+│   ├── routing.py
+│   ├── provider.py
+│   └── service.py
 ├── validation/
 ├── connectors/
 ├── observability/
 └── config.py
 evaluation/
-├── cases/pagila_mvp.jsonl
-└── comparator.py
+├── cases/
+│   ├── pagila_mvp.jsonl
+│   ├── retrieval_routing_development.jsonl
+│   └── retrieval_routing_calibration.jsonl
+├── code_freeze.py
+├── comparator.py
+├── loader.py
+├── report.py
+├── runner.py
+└── reports/
+    ├── pagila_mvp_stage10.md
+    └── enhancement_stage1_qualification.md
 tests/
 ├── unit/
 ├── integration/
@@ -678,11 +727,13 @@ tests/
 docs/
 ├── Text-to-SQL项目复现规格.md
 ├── Text-to-SQL测试与验收规格.md
-└── Text-to-SQL原项目参考信息.md
+├── decisions/
+└── superpowers/
 
 ```
 
 首批提交只创建当前纵向闭环需要的文件，不预建空的生产化模块。
+`docs/Text-to-SQL原项目参考信息.md` 不是编码需求，也不得纳入后续推送。
 
 ## 16. MVP 编码任务清单
 

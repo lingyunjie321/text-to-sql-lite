@@ -2,9 +2,13 @@
 
 from app.observability.models import (
     TraceAttempt,
+    TraceComplexity,
+    TraceContextSelection,
     TraceGeneration,
+    TraceModelRouting,
     TraceNode,
     TraceRecord,
+    TraceRetrieval,
 )
 from app.observability.tracing import (
     SafeLoggingTraceSink,
@@ -17,9 +21,13 @@ from app.observability.tracing import (
 __all__ = [
     "SafeLoggingTraceSink",
     "TraceAttempt",
+    "TraceComplexity",
+    "TraceContextSelection",
     "TraceGeneration",
+    "TraceModelRouting",
     "TraceNode",
     "TraceRecord",
+    "TraceRetrieval",
     "TraceSink",
     "TracedWorkflowRunner",
     "build_trace_record",

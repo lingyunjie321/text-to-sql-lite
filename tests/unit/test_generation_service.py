@@ -74,6 +74,7 @@ LINKING = SchemaLinkingResult(
     candidate_fields=(FIELD,),
     join_paths=(),
     schema_version=SNAPSHOT.schema_version,
+    top_k=10,
 )
 CONTEXT = GenerationContext(
     question="List film identifiers",
@@ -93,7 +94,10 @@ class StubProvider:
     def generate(
         self,
         messages: tuple[LLMMessage, ...],
+        *,
+        timeout_seconds: float | None = None,
     ) -> GenerationResult:
+        del timeout_seconds
         self.calls.append(messages)
         return self.result
 

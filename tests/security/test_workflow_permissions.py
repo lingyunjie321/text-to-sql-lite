@@ -9,12 +9,16 @@ from app.workflow import (
     WorkflowPermissionError,
     resolve_permissions,
 )
+from tests.routing_support import single_provider_test_routing
 
 
 def _context() -> WorkflowContext:
+    provider = Mock()
     return WorkflowContext(
-        provider=Mock(),
         connector=Mock(),
+        model_routing=single_provider_test_routing(
+            provider
+        ),
         datasource_id="pagila",
         allowed_schemas=("audit", "public"),
         allowed_tables=(
@@ -81,4 +85,6 @@ def test_overbroad_or_invalid_scope_is_denied(
     assert caught.value.details.code == "WORKFLOW_PERMISSION_DENIED"
     assert "private" not in caught.value.details.public_message
     context.connector.read_metadata.assert_not_called()
-    context.provider.generate.assert_not_called()
+    context.model_routing.provider_registry.resolve(
+        "test-provider"
+    ).provider.generate.assert_not_called()

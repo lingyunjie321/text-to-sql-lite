@@ -220,6 +220,40 @@ def test_metadata_read_uses_one_read_only_transaction_and_maps_tables() -> None:
     assert not _contains_driver_object(snapshot)
 
 
+def test_metadata_read_caps_pool_and_statement_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connection = FakeConnection(
+        {
+            TABLE_COLUMNS_SQL: [
+                _table_row("film", "film_id", 1)
+            ],
+            KEY_CONSTRAINTS_SQL: [],
+            FOREIGN_KEYS_SQL: [],
+            UNIQUE_INDEXES_SQL: [],
+        }
+    )
+    pool = FakePool(connection)
+    connector = PostgreSQLConnector(_settings())
+    connector._pool = pool
+    monkeypatch.setattr(
+        "app.connectors.postgresql.time.monotonic",
+        lambda: 10.0,
+    )
+
+    connector.read_metadata(
+        ("public",),
+        ("public.film",),
+        timeout_seconds=0.05,
+    )
+
+    assert pool.timeouts == [0.05]
+    assert connection.calls[1] == (
+        "SELECT set_config('statement_timeout', %s, true)",
+        ("50ms",),
+    )
+
+
 def test_metadata_read_maps_keys_relationships_and_unique_indexes() -> None:
     snapshot = _read_snapshot(
         {

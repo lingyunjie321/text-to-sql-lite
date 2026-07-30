@@ -1,8 +1,15 @@
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import ANY
 
 import pytest
 
-from app.config import DatabaseSettings, LLMSettings
+from app.config import (
+    DatabaseSettings,
+    EmbeddingSettings,
+    LLMRouteSettings,
+    LLMSettings,
+)
 from evaluation import (
     AuditStatus,
     CaseEvaluation,
@@ -99,6 +106,372 @@ def test_model_config_hash_excludes_api_key_but_includes_prompt_contract(
         first,
         **anchors,
     )
+
+
+def test_stage1_evaluation_requires_embedding_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tools import run_pagila_evaluation
+
+    def missing_settings(env_file: Path) -> EmbeddingSettings:
+        assert env_file == Path("settings.env")
+        return EmbeddingSettings.model_validate({})
+
+    monkeypatch.setattr(
+        run_pagila_evaluation,
+        "load_embedding_settings",
+        missing_settings,
+        raising=False,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"^embedding settings are required$",
+    ):
+        run_pagila_evaluation._load_required_embedding_settings(
+            Path("settings.env")
+        )
+
+
+def test_partial_embedding_configuration_fails_with_public_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tools import run_pagila_evaluation
+
+    def partial_settings(env_file: Path) -> EmbeddingSettings:
+        assert env_file == Path("settings.env")
+        return EmbeddingSettings.model_validate(
+            {
+                "base_url": "https://embedding.invalid/v1",
+                "model": "embedding-stub",
+                "dimension": 2,
+            }
+        )
+
+    monkeypatch.setattr(
+        run_pagila_evaluation,
+        "load_embedding_settings",
+        partial_settings,
+        raising=False,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"^embedding settings are invalid$",
+    ):
+        run_pagila_evaluation._load_optional_embedding_settings(
+            Path("settings.env")
+        )
+
+
+def test_evaluate_assembles_routes_and_injects_hybrid_runtime(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from tools import run_pagila_evaluation
+
+    def llm(model: str) -> LLMSettings:
+        return LLMSettings(
+            base_url="https://llm.invalid/v1",
+            api_key="unit-test-credential",
+            model=model,
+        )
+
+    route_settings = LLMRouteSettings(
+        simple=llm("simple-stub"),
+        standard=llm("standard-stub"),
+        complex=llm("complex-stub"),
+        fallback=llm("fallback-stub"),
+        fallback_route_ids=("complex_route",),
+        data_boundary_id="evaluation-boundary-v1",
+    )
+    case = SimpleNamespace(status=CaseStatus.DRAFT)
+    suite = SimpleNamespace(
+        cases=(case,),
+        file_sha256="1" * 64,
+        status_neutral_sha256="2" * 64,
+    )
+    baseline = SimpleNamespace(
+        gold_cases=SimpleNamespace(
+            initial_file_sha256=suite.file_sha256,
+            status_neutral_sha256=suite.status_neutral_sha256,
+        ),
+        semantic=SimpleNamespace(
+            manifest_sha256=(
+                run_pagila_evaluation
+                .VIEW_SEMANTIC_MANIFEST_SHA256
+            ),
+            database_schema_sha256=(
+                run_pagila_evaluation
+                .PAGILA_DATABASE_SCHEMA_SHA256
+            ),
+        ),
+        software=SimpleNamespace(
+            controlled_code_sha256="3" * 64,
+        ),
+        evaluation_baseline_id="4" * 64,
+    )
+    manifest = SimpleNamespace(
+        enriched_schema_version="enriched-semantic-v1"
+    )
+    semantic_connector = object()
+    route_runtime = object()
+    embedding_settings = object()
+    embedding_provider = object()
+    embedding_registry = object()
+    retrieval_runtime = object()
+    public_configuration = {"stage1": "public"}
+    evaluation = object()
+    report = object()
+    calls: dict[str, list[object]] = {
+        "route_loader": [],
+        "llm_provider": [],
+        "route_builder": [],
+        "embedding_loader": [],
+        "embedding_provider": [],
+        "embedding_registry": [],
+        "retrieval_runtime": [],
+        "public_configuration": [],
+        "evaluate_case": [],
+    }
+
+    class Connector:
+        def open(self) -> None:
+            return None
+
+        def close(self) -> None:
+            return None
+
+        def read_metadata(self, *args: object) -> object:
+            del args
+            return object()
+
+    monkeypatch.setattr(
+        run_pagila_evaluation,
+        "load_case_suite",
+        lambda path: suite,
+    )
+    monkeypatch.setattr(
+        run_pagila_evaluation,
+        "load_baseline",
+        lambda path: baseline,
+    )
+    monkeypatch.setattr(
+        run_pagila_evaluation,
+        "verify_static_evaluation_freeze",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        run_pagila_evaluation,
+        "verify_evaluation_environment",
+        lambda **kwargs: None,
+    )
+    monkeypatch.setattr(
+        run_pagila_evaluation,
+        "load_database_settings",
+        lambda path: DatabaseSettings(
+            dsn=(
+                "postgresql://text_to_sql_reader:"
+                "unit-test@127.0.0.1:55432/pagila"
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        run_pagila_evaluation,
+        "verify_database_execution_freeze",
+        lambda *args: None,
+    )
+    monkeypatch.setattr(
+        run_pagila_evaluation,
+        "verify_database_target",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        run_pagila_evaluation,
+        "PostgreSQLConnector",
+        lambda settings: Connector(),
+    )
+    monkeypatch.setattr(
+        run_pagila_evaluation,
+        "load_view_semantic_manifest",
+        lambda *args, **kwargs: manifest,
+    )
+    monkeypatch.setattr(
+        run_pagila_evaluation,
+        "FrozenSemanticConnector",
+        lambda connector, loaded_manifest: (
+            semantic_connector
+        ),
+    )
+    def load_routes(path: Path) -> LLMRouteSettings:
+        calls["route_loader"].append(path)
+        return route_settings
+
+    monkeypatch.setattr(
+        run_pagila_evaluation,
+        "load_llm_route_settings",
+        load_routes,
+        raising=False,
+    )
+
+    def build_llm_provider(settings: LLMSettings) -> object:
+        calls["llm_provider"].append(settings)
+        return SimpleNamespace(generate=lambda *args, **kwargs: None)
+
+    monkeypatch.setattr(
+        run_pagila_evaluation,
+        "OpenAICompatibleLLMProvider",
+        build_llm_provider,
+    )
+
+    def build_routes(*, settings, providers) -> object:
+        calls["route_builder"].append((settings, providers))
+        return route_runtime
+
+    monkeypatch.setattr(
+        run_pagila_evaluation,
+        "build_configured_model_routing_runtime",
+        build_routes,
+        raising=False,
+    )
+
+    def load_embedding(path: Path) -> object:
+        calls["embedding_loader"].append(path)
+        return embedding_settings
+
+    monkeypatch.setattr(
+        run_pagila_evaluation,
+        "load_embedding_settings",
+        load_embedding,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        run_pagila_evaluation,
+        "OpenAICompatibleEmbeddingProvider",
+        lambda settings: (
+            calls["embedding_provider"].append(settings)
+            or embedding_provider
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        run_pagila_evaluation,
+        "EmbeddingIndexRegistry",
+        lambda: (
+            calls["embedding_registry"].append(object())
+            or embedding_registry
+        ),
+        raising=False,
+    )
+
+    def build_retrieval_runtime(**kwargs: object) -> object:
+        calls["retrieval_runtime"].append(kwargs)
+        return retrieval_runtime
+
+    monkeypatch.setattr(
+        run_pagila_evaluation,
+        "RetrievalRuntime",
+        build_retrieval_runtime,
+        raising=False,
+    )
+
+    def build_public_configuration(**kwargs: object) -> object:
+        calls["public_configuration"].append(kwargs)
+        return public_configuration
+
+    monkeypatch.setattr(
+        run_pagila_evaluation,
+        "build_stage1_public_configuration",
+        build_public_configuration,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        run_pagila_evaluation,
+        "_verify_stage1_runtime_freeze",
+        lambda configuration: (
+            "5" * 64
+            if configuration is public_configuration
+            else (_ for _ in ()).throw(AssertionError)
+        ),
+    )
+
+    def evaluate(current_case: object, **kwargs: object) -> object:
+        calls["evaluate_case"].append((current_case, kwargs))
+        return evaluation
+
+    monkeypatch.setattr(
+        run_pagila_evaluation,
+        "evaluate_case",
+        evaluate,
+    )
+    monkeypatch.setattr(
+        run_pagila_evaluation,
+        "build_evaluation_report",
+        lambda *args, **kwargs: report,
+    )
+    monkeypatch.setattr(
+        run_pagila_evaluation,
+        "write_report_atomic",
+        lambda path, built_report: None,
+    )
+
+    actual = run_pagila_evaluation.evaluate_to_report(
+        cases_path=tmp_path / "cases.jsonl",
+        baseline_path=tmp_path / "baseline.json",
+        report_path=tmp_path / "report.json",
+        env_file=tmp_path / "settings.env",
+    )
+
+    assert actual is report
+    assert calls["route_loader"] == [tmp_path / "settings.env"]
+    assert calls["llm_provider"] == [
+        route_settings.simple,
+        route_settings.standard,
+        route_settings.complex,
+        route_settings.fallback,
+    ]
+    assert len(calls["route_builder"]) == 1
+    built_settings, providers = calls["route_builder"][0]
+    assert built_settings is route_settings
+    assert tuple(providers) == (
+        "simple",
+        "standard",
+        "complex",
+        "fallback",
+    )
+    assert calls["embedding_loader"] == [
+        tmp_path / "settings.env"
+    ]
+    assert calls["embedding_provider"] == [embedding_settings]
+    assert len(calls["embedding_registry"]) == 1
+    assert calls["retrieval_runtime"] == [
+        {
+            "provider": embedding_provider,
+            "registry": embedding_registry,
+            "semantic_version": manifest.enriched_schema_version,
+        }
+    ]
+    assert calls["public_configuration"] == [
+        {
+            "embedding_settings": embedding_settings,
+            "retrieval_runtime": retrieval_runtime,
+            "model_routing": route_runtime,
+        }
+    ]
+    assert calls["evaluate_case"] == [
+        (
+            case,
+            {
+                "evaluation_baseline_id": (
+                    baseline.evaluation_baseline_id
+                ),
+                "connector": semantic_connector,
+                "model_routing": route_runtime,
+                "retrieval_runtime": retrieval_runtime,
+                "trace_sink": ANY,
+            },
+        )
+    ]
 
 
 def test_database_target_must_match_locked_container_port_and_role(

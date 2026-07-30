@@ -60,6 +60,7 @@ def test_pagila_schema_error_is_repaired_and_reexecuted(
         allowed_schemas=allowed_schemas,
         allowed_tables=allowed_tables,
         snapshot=snapshot,
+        top_k=10,
     )
     assert "public.film" in {
         table.object_id for table in linking.candidate_tables
@@ -89,6 +90,7 @@ def test_pagila_schema_error_is_repaired_and_reexecuted(
         allowed_schemas=allowed_schemas,
         allowed_tables=allowed_tables,
         snapshot=snapshot,
+        top_k=10,
     )
     assert relinked.schema_version == linking.schema_version
 

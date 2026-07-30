@@ -14,10 +14,17 @@ from app.connectors.errors import (
 )
 from app.execution import execute_validated_sql
 from app.generation import (
+    CONTEXT_INPUT_BUDGET_DENOMINATOR,
+    CONTEXT_INPUT_BUDGET_NUMERATOR,
+    ContextSelectionError,
     GenerationContext,
     LLMMessage,
     LLMProviderError,
+    RoutedGenerationError,
     build_generation_messages,
+    estimate_message_tokens,
+    generate_with_model_route,
+    select_generation_context,
 )
 from app.generation.normalization import normalize_generation_result
 from app.reflection import (
@@ -31,15 +38,25 @@ from app.reflection import (
     register_repair_sql,
     start_attempt,
 )
-from app.schema_linking import SchemaLinkingResult, link_schema
+from app.schema_linking import (
+    EmbeddingIndexBuildError,
+    EmbeddingProviderError,
+    PROBE_SCHEMA_TOP_K,
+    SchemaRetrievalFailure,
+    SchemaLinkingResult,
+    link_schema,
+)
 from app.validation import validate_sql
+from app.workflow.complexity import decide_complexity
 from app.workflow.models import (
     MAX_WORKFLOW_STEPS,
     REQUEST_TIMEOUT_SECONDS,
     REPAIR_PROMPT_VERSION,
     Clarification,
+    ContextSelectionObservation,
     FinalStatus,
     GenerationObservation,
+    ModelRoutingObservation,
     NodeTiming,
     SQLTaskState,
     WorkflowContext,
@@ -72,6 +89,11 @@ _TIMEOUT_ERROR = WorkflowPublicError(
     code="WORKFLOW_TIMEOUT",
     public_message="The request timed out.",
 )
+_MODEL_INTERNAL_ERROR = WorkflowPublicError(
+    error_type=ErrorType.UNKNOWN,
+    code="LLM_INTERNAL_ERROR",
+    public_message="The model request failed.",
+)
 _STEP_LIMIT_ERROR = WorkflowPublicError(
     error_type=ErrorType.UNKNOWN,
     code="WORKFLOW_STEP_LIMIT",
@@ -87,6 +109,47 @@ _DUPLICATE_ERROR = WorkflowPublicError(
     code="WORKFLOW_DUPLICATE_SQL",
     public_message="The SQL repair loop was stopped.",
 )
+_CONTEXT_RESOURCE_ERROR = WorkflowPublicError(
+    error_type=ErrorType.RESOURCE_RISK,
+    code="WORKFLOW_CONTEXT_REQUIRED_OVERFLOW",
+    public_message=(
+        "The required model context exceeds the safety limit."
+    ),
+)
+_EMBEDDING_PUBLIC_ERRORS = {
+    "EMBEDDING_INVALID_INPUT": WorkflowPublicError(
+        error_type=ErrorType.UNKNOWN,
+        code="EMBEDDING_INVALID_INPUT",
+        public_message="The embedding input is invalid.",
+    ),
+    "EMBEDDING_TIMEOUT": WorkflowPublicError(
+        error_type=ErrorType.TIMEOUT,
+        code="EMBEDDING_TIMEOUT",
+        public_message="The embedding request timed out.",
+    ),
+    "EMBEDDING_CONNECTION_ERROR": WorkflowPublicError(
+        error_type=ErrorType.CONNECTION_ERROR,
+        code="EMBEDDING_CONNECTION_ERROR",
+        public_message="The embedding service is unavailable.",
+    ),
+    "EMBEDDING_HTTP_ERROR": WorkflowPublicError(
+        error_type=ErrorType.UNKNOWN,
+        code="EMBEDDING_HTTP_ERROR",
+        public_message="The embedding request failed.",
+    ),
+    "EMBEDDING_RATE_LIMITED": WorkflowPublicError(
+        error_type=ErrorType.UNKNOWN,
+        code="EMBEDDING_RATE_LIMITED",
+        public_message=(
+            "The embedding service is temporarily busy."
+        ),
+    ),
+    "EMBEDDING_INVALID_RESPONSE": WorkflowPublicError(
+        error_type=ErrorType.UNKNOWN,
+        code="EMBEDDING_INVALID_RESPONSE",
+        public_message="The embedding response is invalid.",
+    ),
+}
 
 
 def _failure_update(error: WorkflowPublicError) -> NodeUpdate:
@@ -94,6 +157,15 @@ def _failure_update(error: WorkflowPublicError) -> NodeUpdate:
         "error_type": error.error_type,
         "public_error": error,
     }
+
+
+def _public_embedding_error(
+    error: EmbeddingProviderError,
+) -> WorkflowPublicError:
+    return _EMBEDDING_PUBLIC_ERRORS.get(
+        error.details.code,
+        _INTERNAL_ERROR,
+    )
 
 
 def _attempt_history(state: SQLTaskState) -> AttemptHistory:
@@ -206,27 +278,104 @@ def _permission_resolve(
 def _schema_linking(
     state: SQLTaskState,
     context: WorkflowContext,
+    *,
+    deadline_at: float,
+    database_timeout_seconds: float,
 ) -> NodeUpdate:
     assert state.normalized_question is not None
+    decision = state.complexity_decision
+    if decision is None:
+        try:
+            snapshot = context.connector.read_metadata(
+                state.allowed_schemas,
+                state.allowed_tables,
+                timeout_seconds=database_timeout_seconds,
+            )
+        except PostgreSQLConnectorError as error:
+            update = _failure_update(_public_database_error(error))
+            update["infrastructure_retry_count"] = (
+                state.infrastructure_retry_count
+                + _consume_infrastructure_retries(context)
+            )
+            return update
+        retry_count = _consume_infrastructure_retries(context)
+        top_k = PROBE_SCHEMA_TOP_K
+    else:
+        if (
+            state.schema_snapshot is None
+            or state.schema_version is None
+        ):
+            return _failure_update(_INTERNAL_ERROR)
+        snapshot = state.schema_snapshot
+        retry_count = 0
+        top_k = decision.schema_top_k
+    linking_arguments: dict[str, object] = {}
+    if context.retrieval_runtime is not None:
+        linking_arguments = {
+            "datasource_id": context.datasource_id,
+            "retrieval_runtime": context.retrieval_runtime,
+            "prepared_pool": (
+                state.schema_retrieval_pool
+                if decision is not None
+                else None
+            ),
+        }
     try:
-        snapshot = context.connector.read_metadata(
-            state.allowed_schemas,
-            state.allowed_tables,
+        result = link_schema(
+            state.normalized_question,
+            allowed_schemas=state.allowed_schemas,
+            allowed_tables=state.allowed_tables,
+            snapshot=snapshot,
+            top_k=top_k,
+            deadline_at=deadline_at,
+            clock=context.clock,
+            **linking_arguments,  # type: ignore[arg-type]
         )
-    except PostgreSQLConnectorError as error:
-        update = _failure_update(_public_database_error(error))
-        update["infrastructure_retry_count"] = (
-            state.infrastructure_retry_count
-            + _consume_infrastructure_retries(context)
+    except SchemaRetrievalFailure as error:
+        cause = error.cause
+        public_error = (
+            _public_embedding_error(cause)
+            if isinstance(cause, EmbeddingProviderError)
+            else _EMBEDDING_PUBLIC_ERRORS[
+                "EMBEDDING_INVALID_RESPONSE"
+            ]
+        )
+        update = _failure_update(public_error)
+        update.update(
+            {
+                "schema_version": snapshot.schema_version,
+                "schema_snapshot": snapshot,
+                "retrieval_failure": error.evidence,
+            }
         )
         return update
-    retry_count = _consume_infrastructure_retries(context)
-    result = link_schema(
-        state.normalized_question,
-        allowed_schemas=state.allowed_schemas,
-        allowed_tables=state.allowed_tables,
-        snapshot=snapshot,
-    )
+    except EmbeddingProviderError as error:
+        return _failure_update(_public_embedding_error(error))
+    except EmbeddingIndexBuildError:
+        return _failure_update(
+            _EMBEDDING_PUBLIC_ERRORS[
+                "EMBEDDING_INVALID_RESPONSE"
+            ]
+        )
+    if (
+        result.top_k != top_k
+        or len(result.candidate_tables) > top_k
+        or (
+            decision is not None
+            and result.schema_version != state.schema_version
+        )
+        or (
+            decision is not None
+            and context.retrieval_runtime is not None
+            and (
+                result.retrieval_version_id
+                != state.retrieval_version_id
+                or result.retrieval_pool
+                is not state.schema_retrieval_pool
+            )
+        )
+    ):
+        return _failure_update(_INTERNAL_ERROR)
     if not result.candidate_tables:
         if state.repair_strategy is RepairStrategy.RELINK_SCHEMA:
             update = _failure_update(_INTERNAL_ERROR)
@@ -236,28 +385,73 @@ def _schema_linking(
             state.infrastructure_retry_count + retry_count
         )
         return update
-    return {
+    update: NodeUpdate = {
         "candidate_tables": result.candidate_tables,
         "candidate_fields": result.candidate_fields,
         "join_paths": result.join_paths,
         "schema_version": result.schema_version,
         "schema_snapshot": snapshot,
+        "retrieval_version_id": result.retrieval_version_id,
+        "schema_retrieval_pool": result.retrieval_pool,
+        "retrieval_failure": None,
         "infrastructure_retry_count": (
             state.infrastructure_retry_count + retry_count
         ),
         "public_error": None,
     }
+    if decision is None:
+        update.update(
+            {
+                "probe_candidate_table_count": len(
+                    result.candidate_tables
+                ),
+                "probe_candidate_field_count": len(
+                    result.candidate_fields
+                ),
+            }
+        )
+    return update
 
 
-def _generation_context(state: SQLTaskState) -> GenerationContext:
+def _complexity_route(
+    state: SQLTaskState,
+    context: WorkflowContext,
+) -> NodeUpdate:
+    del context
+    assert state.normalized_question is not None
+    return {
+        "complexity_decision": decide_complexity(
+            state.normalized_question,
+            candidate_tables=state.candidate_tables,
+            join_paths=state.join_paths,
+            has_repair_history=(
+                (
+                    bool(state.sql_attempts)
+                    and state.repair_strategy is not None
+                )
+                or state.repair_count > 0
+            ),
+        ),
+    }
+
+
+def _generation_context(
+    state: SQLTaskState,
+    *,
+    selected_field_ids: tuple[str, ...] | None = None,
+) -> GenerationContext:
     assert state.normalized_question is not None
     assert state.schema_snapshot is not None
     assert state.schema_version is not None
+    assert state.complexity_decision is not None
     linking = SchemaLinkingResult(
         candidate_tables=state.candidate_tables,
         candidate_fields=state.candidate_fields,
         join_paths=state.join_paths,
         schema_version=state.schema_version,
+        top_k=state.complexity_decision.schema_top_k,
+        retrieval_version_id=state.retrieval_version_id,
+        retrieval_pool=state.schema_retrieval_pool,
     )
     return GenerationContext(
         question=state.question,
@@ -266,13 +460,21 @@ def _generation_context(state: SQLTaskState) -> GenerationContext:
         dialect=state.dialect,
         schema_linking=linking,
         snapshot=state.schema_snapshot,
+        selected_field_ids=selected_field_ids,
     )
 
 
 def _generation_messages(
     state: SQLTaskState,
+    *,
+    selected_field_ids: tuple[str, ...] | None = None,
 ) -> tuple[LLMMessage, ...]:
-    messages = build_generation_messages(_generation_context(state))
+    messages = build_generation_messages(
+        _generation_context(
+            state,
+            selected_field_ids=selected_field_ids,
+        )
+    )
     if not state.sql_attempts:
         return messages
     if state.error_type is None or state.repair_strategy is None:
@@ -301,14 +503,250 @@ def _generation_messages(
 def _generate_sql(
     state: SQLTaskState,
     context: WorkflowContext,
+    *,
+    deadline_at: float,
 ) -> NodeUpdate:
+    assert state.complexity_decision is not None
+    call_number = len(state.model_routing_observations) + 1
+    attempt_number = len(state.sql_attempts)
+    route = context.model_routing.route_table.select(
+        state.complexity_decision.level.value
+    )
+    candidate_field_count = len(state.candidate_fields)
+    try:
+        selection = select_generation_context(
+            _generation_context(state),
+            max_input_tokens=(
+                route.primary.max_input_tokens
+            ),
+            max_output_tokens=(
+                route.primary.max_output_tokens
+            ),
+        )
+        selected_field_ids = selection.field_ids
+        usable_input_tokens = selection.usable_input_tokens
+        while True:
+            messages = _generation_messages(
+                state,
+                selected_field_ids=selected_field_ids,
+            )
+            estimated_tokens = estimate_message_tokens(messages)
+            if estimated_tokens <= usable_input_tokens:
+                break
+            if (
+                len(selected_field_ids)
+                <= selection.required_field_count
+            ):
+                raise ContextSelectionError(
+                    "CONTEXT_REQUIRED_OVERFLOW",
+                    candidate_field_count=(
+                        candidate_field_count
+                    ),
+                    required_field_count=(
+                        selection.required_field_count
+                    ),
+                    estimated_tokens=estimated_tokens,
+                    usable_input_tokens=usable_input_tokens,
+                )
+            selected_field_ids = selected_field_ids[:-1]
+    except ContextSelectionError as error:
+        usable_input_tokens = (
+            error.usable_input_tokens
+            if error.usable_input_tokens is not None
+            else (
+                route.primary.max_input_tokens
+                * CONTEXT_INPUT_BUDGET_NUMERATOR
+                // CONTEXT_INPUT_BUDGET_DENOMINATOR
+                - route.primary.max_output_tokens
+            )
+        )
+        required_field_count = (
+            error.required_field_count
+            if error.required_field_count is not None
+            else 0
+        )
+        estimated_tokens = (
+            error.estimated_tokens
+            if error.estimated_tokens is not None
+            else max(0, usable_input_tokens + 1)
+        )
+        observed_candidate_count = (
+            error.candidate_field_count
+            if error.candidate_field_count is not None
+            else candidate_field_count
+        )
+        update = _failure_update(_CONTEXT_RESOURCE_ERROR)
+        update.update(
+            {
+                "context_selection_observations": (
+                    *state.context_selection_observations,
+                    ContextSelectionObservation(
+                        call_number=call_number,
+                        attempt_number=attempt_number,
+                        candidate_field_count=(
+                            observed_candidate_count
+                        ),
+                        required_field_count=(
+                            required_field_count
+                        ),
+                        selected_field_count=(
+                            required_field_count
+                        ),
+                        pruned_field_count=(
+                            observed_candidate_count
+                            - required_field_count
+                        ),
+                        estimated_tokens=estimated_tokens,
+                        usable_input_tokens=(
+                            usable_input_tokens
+                        ),
+                        outcome="required_overflow",
+                    ),
+                ),
+                "selected_generation_field_ids": (),
+                "model_routing_observations": (
+                    *state.model_routing_observations,
+                    ModelRoutingObservation(
+                        call_number=call_number,
+                        attempt_number=attempt_number,
+                        route_id=route.route_id,
+                        primary_model_config_sha256=(
+                            route.primary.model_config_sha256
+                        ),
+                        model_config_sha256=(
+                            route.primary.model_config_sha256
+                        ),
+                        data_boundary_sha256=(
+                            route.primary.data_boundary_sha256
+                        ),
+                        provider_call_count=0,
+                        fallback_used=False,
+                        outcome="context_rejected",
+                        error_code=(
+                            "WORKFLOW_CONTEXT_REQUIRED_OVERFLOW"
+                        ),
+                    ),
+                ),
+            }
+        )
+        return update
+
+    context_observation = ContextSelectionObservation(
+        call_number=call_number,
+        attempt_number=attempt_number,
+        candidate_field_count=candidate_field_count,
+        required_field_count=selection.required_field_count,
+        selected_field_count=len(selected_field_ids),
+        pruned_field_count=(
+            candidate_field_count - len(selected_field_ids)
+        ),
+        estimated_tokens=estimated_tokens,
+        usable_input_tokens=usable_input_tokens,
+        outcome="selected",
+    )
+
+    try:
+        routed = generate_with_model_route(
+            runtime=context.model_routing,
+            route=route,
+            messages=messages,
+            deadline_at=deadline_at,
+            clock=context.clock,
+        )
+    except RoutedGenerationError as error:
+        update = _failure_update(
+            WorkflowPublicError(
+                error_type=error.details.error_type,
+                code=error.details.code,
+                public_message=error.details.public_message,
+            )
+        )
+        update.update(
+            {
+                "context_selection_observations": (
+                    *state.context_selection_observations,
+                    context_observation,
+                ),
+                "selected_generation_field_ids": (
+                    selected_field_ids
+                ),
+                "model_routing_observations": (
+                    *state.model_routing_observations,
+                    ModelRoutingObservation(
+                        call_number=call_number,
+                        attempt_number=attempt_number,
+                        route_id=route.route_id,
+                        primary_model_config_sha256=(
+                            route.primary.model_config_sha256
+                        ),
+                        model_config_sha256=(
+                            error.target.model_config_sha256
+                        ),
+                        data_boundary_sha256=(
+                            error.target.data_boundary_sha256
+                        ),
+                        provider_call_count=(
+                            error.provider_call_count
+                        ),
+                        fallback_used=error.fallback_used,
+                        outcome="failed",
+                        error_code=error.details.code,
+                        primary_error_code=(
+                            error.primary_error_code
+                        ),
+                        failure_stage="provider",
+                    ),
+                ),
+            }
+        )
+        return update
+
     try:
         result = normalize_generation_result(
-            context.provider.generate(_generation_messages(state)),
+            routed.result,
             snapshot=state.schema_snapshot,
         )
-    except LLMProviderError as error:
-        return _failure_update(_public_model_error(error))
+    except Exception:
+        update = _failure_update(_MODEL_INTERNAL_ERROR)
+        update.update(
+            {
+                "context_selection_observations": (
+                    *state.context_selection_observations,
+                    context_observation,
+                ),
+                "selected_generation_field_ids": (
+                    selected_field_ids
+                ),
+                "model_routing_observations": (
+                    *state.model_routing_observations,
+                    ModelRoutingObservation(
+                        call_number=call_number,
+                        attempt_number=attempt_number,
+                        route_id=route.route_id,
+                        primary_model_config_sha256=(
+                            route.primary.model_config_sha256
+                        ),
+                        model_config_sha256=(
+                            routed.target.model_config_sha256
+                        ),
+                        data_boundary_sha256=(
+                            routed.target.data_boundary_sha256
+                        ),
+                        provider_call_count=(
+                            routed.provider_call_count
+                        ),
+                        fallback_used=routed.fallback_used,
+                        outcome="failed",
+                        error_code="LLM_INTERNAL_ERROR",
+                        primary_error_code=(
+                            routed.primary_error_code
+                        ),
+                        failure_stage="normalization",
+                    ),
+                ),
+            }
+        )
+        return update
 
     update: NodeUpdate = {
         "token_usage": state.token_usage.add(
@@ -333,6 +771,36 @@ def _generate_sql(
                 repair_strategy=state.repair_strategy,
                 input_tokens=result.input_tokens,
                 output_tokens=result.output_tokens,
+            ),
+        ),
+        "context_selection_observations": (
+            *state.context_selection_observations,
+            context_observation,
+        ),
+        "selected_generation_field_ids": selected_field_ids,
+        "model_routing_observations": (
+            *state.model_routing_observations,
+            ModelRoutingObservation(
+                call_number=call_number,
+                attempt_number=attempt_number,
+                route_id=route.route_id,
+                primary_model_config_sha256=(
+                    route.primary.model_config_sha256
+                ),
+                model_config_sha256=(
+                    routed.target.model_config_sha256
+                ),
+                data_boundary_sha256=(
+                    routed.target.data_boundary_sha256
+                ),
+                provider_call_count=(
+                    routed.provider_call_count
+                ),
+                fallback_used=routed.fallback_used,
+                outcome="succeeded",
+                primary_error_code=(
+                    routed.primary_error_code
+                ),
             ),
         ),
     }
@@ -428,6 +896,8 @@ def _validate_sql(
 def _execute_sql(
     state: SQLTaskState,
     context: WorkflowContext,
+    *,
+    database_timeout_seconds: float,
 ) -> NodeUpdate:
     assert state.validation_result is not None
     assert state.schema_snapshot is not None
@@ -437,6 +907,7 @@ def _execute_sql(
         allowed_tables=state.allowed_tables,
         snapshot=state.schema_snapshot,
         connector=context.connector,
+        timeout_seconds=database_timeout_seconds,
     )
     retry_count = _consume_infrastructure_retries(context)
     history = record_execution(_attempt_history(state), outcome)
@@ -479,6 +950,13 @@ def _reflect_sql(
     update: NodeUpdate = {
         "repair_strategy": decision.strategy,
     }
+    if decision.strategy is RepairStrategy.RELINK_SCHEMA:
+        update["complexity_decision"] = None
+        update["retrieval_version_id"] = None
+        update["schema_retrieval_pool"] = None
+        update["probe_candidate_table_count"] = None
+        update["probe_candidate_field_count"] = None
+        update["selected_generation_field_ids"] = ()
     if (
         decision.route is ReflectionRoute.FINALIZE
         and decision.code == "REFLECT_REPAIR_EXHAUSTED"
@@ -636,7 +1114,42 @@ def workflow_node(
             ):
                 update = _failure_update(_TIMEOUT_ERROR)
             else:
-                update = core(state, context)
+                if name == "schema_linking":
+                    deadline_at = (
+                        workflow_started_at
+                        + REQUEST_TIMEOUT_SECONDS
+                    )
+                    update = _schema_linking(
+                        state,
+                        context,
+                        deadline_at=deadline_at,
+                        database_timeout_seconds=(
+                            deadline_at - started
+                        ),
+                    )
+                elif name == "generate_sql":
+                    update = _generate_sql(
+                        state,
+                        context,
+                        deadline_at=(
+                            workflow_started_at
+                            + REQUEST_TIMEOUT_SECONDS
+                        ),
+                    )
+                elif name == "execute_sql":
+                    deadline_at = (
+                        workflow_started_at
+                        + REQUEST_TIMEOUT_SECONDS
+                    )
+                    update = _execute_sql(
+                        state,
+                        context,
+                        database_timeout_seconds=(
+                            deadline_at - started
+                        ),
+                    )
+                else:
+                    update = core(state, context)
         except Exception:
             update = (
                 _catastrophic_finalize_update()
@@ -692,6 +1205,10 @@ PERMISSION_RESOLVE_NODE = workflow_node(
 SCHEMA_LINKING_NODE = workflow_node(
     "schema_linking",
     _schema_linking,
+)
+COMPLEXITY_ROUTE_NODE = workflow_node(
+    "complexity_route",
+    _complexity_route,
 )
 GENERATE_SQL_NODE = workflow_node("generate_sql", _generate_sql)
 VALIDATE_SQL_NODE = workflow_node("validate_sql", _validate_sql)

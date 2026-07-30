@@ -6,7 +6,7 @@ from app.generation.models import (
     GenerationContext,
     LLMMessage,
 )
-from app.schema_linking import TOP_K
+from app.schema_linking import validate_schema_top_k
 from app.validation import ALLOWED_FUNCTIONS
 
 SYSTEM_PROMPT = """\
@@ -41,6 +41,13 @@ def _invalid_context() -> Never:
 
 
 def _validate_context(context: GenerationContext) -> None:
+    try:
+        top_k = validate_schema_top_k(
+            context.schema_linking.top_k
+        )
+    except ValueError:
+        _invalid_context()
+
     if (
         not context.question.strip()
         or context.dialect != "postgres"
@@ -53,7 +60,7 @@ def _validate_context(context: GenerationContext) -> None:
             and not context.normalized_time.strip()
         )
         or not context.schema_linking.candidate_tables
-        or len(context.schema_linking.candidate_tables) > TOP_K
+        or len(context.schema_linking.candidate_tables) > top_k
         or type(context.max_result_rows) is not int
         or not 1 <= context.max_result_rows <= 1000
         or (
@@ -107,6 +114,22 @@ def _validate_context(context: GenerationContext) -> None:
         ):
             _invalid_context()
         selected_field_ids.add(candidate.object_id)
+
+    projected_field_ids = context.selected_field_ids
+    if (
+        projected_field_ids is not None
+        and (
+            type(projected_field_ids) is not tuple
+            or len(set(projected_field_ids))
+            != len(projected_field_ids)
+            or any(
+                not isinstance(object_id, str)
+                or object_id not in selected_field_ids
+                for object_id in projected_field_ids
+            )
+        )
+    ):
+        _invalid_context()
 
     snapshot_edges = {
         (
@@ -171,6 +194,16 @@ def build_generation_messages(
         table.object_id
         for table in context.schema_linking.candidate_tables
     }
+    candidate_fields = {
+        field.object_id: field
+        for field in context.schema_linking.candidate_fields
+    }
+    projected_field_ids = (
+        tuple(candidate_fields)
+        if context.selected_field_ids is None
+        else context.selected_field_ids
+    )
+    selected_field_ids = set(projected_field_ids)
     snapshot_tables = {
         f"{table.schema_name}.{table.table_name}": table
         for table in context.snapshot.tables
@@ -217,7 +250,10 @@ def build_generation_messages(
                 "score": field.score,
                 "matched_tokens": list(field.matched_tokens),
             }
-            for field in context.schema_linking.candidate_fields
+            for field in (
+                candidate_fields[object_id]
+                for object_id in projected_field_ids
+            )
         ],
         "primary_keys": [
             {
@@ -226,8 +262,18 @@ def build_generation_messages(
                 "columns": list(key.columns),
             }
             for key in context.snapshot.primary_keys
-            if f"{key.schema_name}.{key.table_name}"
-            in selected_table_ids
+            if (
+                f"{key.schema_name}.{key.table_name}"
+                in selected_table_ids
+                and all(
+                    (
+                        f"{key.schema_name}.{key.table_name}."
+                        f"{column}"
+                    )
+                    in selected_field_ids
+                    for column in key.columns
+                )
+            )
         ],
         "foreign_keys": [
             _edge_payload(
@@ -247,6 +293,22 @@ def build_generation_messages(
                 in selected_table_ids
                 and f"{key.target_schema}.{key.target_table}"
                 in selected_table_ids
+                and all(
+                    (
+                        f"{key.source_schema}.{key.source_table}."
+                        f"{column}"
+                    )
+                    in selected_field_ids
+                    for column in key.source_columns
+                )
+                and all(
+                    (
+                        f"{key.target_schema}.{key.target_table}."
+                        f"{column}"
+                    )
+                    in selected_field_ids
+                    for column in key.target_columns
+                )
             )
         ],
         "join_paths": [
@@ -264,6 +326,19 @@ def build_generation_messages(
                 ],
             }
             for path in context.schema_linking.join_paths
+            if all(
+                all(
+                    f"{edge.source_table}.{column}"
+                    in selected_field_ids
+                    for column in edge.source_columns
+                )
+                and all(
+                    f"{edge.target_table}.{column}"
+                    in selected_field_ids
+                    for column in edge.target_columns
+                )
+                for edge in path.edges
+            )
         ],
     }
     return (

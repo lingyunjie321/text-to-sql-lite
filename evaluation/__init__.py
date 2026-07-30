@@ -4,8 +4,13 @@ from evaluation.loader import (
     CASES_INITIAL_SHA256,
     CASES_STATUS_NEUTRAL_SHA256,
     LoadedCaseSuite,
+    LoadedRetrievalRoutingSuite,
+    LoadedRetrievalRoutingSuites,
     load_case_suite,
+    load_retrieval_routing_suite,
+    load_retrieval_routing_suites,
     status_neutral_sha256,
+    validate_retrieval_routing_gold_isolation,
 )
 from evaluation.models import (
     AuditStatus,
@@ -19,12 +24,18 @@ from evaluation.models import (
     GoldResultSource,
     NumericTolerance,
     ComparisonResult,
+    RetrievalLatencyEvidence,
+    RetrievalRoutingCase,
+    RetrievalRoutingCaseEvidence,
+    RetrievalRoutingSuiteRole,
+    RetrievalStageEvidence,
 )
 from evaluation.comparator import (
     compare_results,
 )
 from evaluation.runner import (
     case_evidence_sha256,
+    collect_retrieval_routing_evidence,
     evaluate_case,
     review_evidence_sha256,
 )
@@ -43,11 +54,22 @@ __all__ = [
     "ExpectedBehavior",
     "GoldResultSource",
     "LoadedCaseSuite",
+    "LoadedRetrievalRoutingSuite",
+    "LoadedRetrievalRoutingSuites",
     "NumericTolerance",
+    "RetrievalLatencyEvidence",
+    "RetrievalRoutingCase",
+    "RetrievalRoutingCaseEvidence",
+    "RetrievalRoutingSuiteRole",
+    "RetrievalStageEvidence",
     "compare_results",
     "case_evidence_sha256",
+    "collect_retrieval_routing_evidence",
     "evaluate_case",
     "load_case_suite",
+    "load_retrieval_routing_suite",
+    "load_retrieval_routing_suites",
     "review_evidence_sha256",
     "status_neutral_sha256",
+    "validate_retrieval_routing_gold_isolation",
 ]

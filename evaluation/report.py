@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import tempfile
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Self
+from typing import Literal, Self
 
 from pydantic import (
     BaseModel,
@@ -17,14 +18,21 @@ from pydantic import (
     model_validator,
 )
 
-from app.workflow import FinalStatus
+from app.workflow import FinalStatus, QueryComplexity
 from evaluation.code_freeze import (
+    Stage1CalibrationFreeze,
     evaluation_baseline_id as compute_evaluation_baseline_id,
 )
+from evaluation.loader import LoadedRetrievalRoutingSuite
 from evaluation.models import (
     AuditStatus,
     CaseEvaluation,
     ExpectedBehavior,
+    RetrievalLatencyStage,
+    RetrievalObjectKind,
+    RetrievalRoutingCaseEvidence,
+    RetrievalRoutingSuiteRole,
+    RetrievalStage,
 )
 from evaluation.runner import (
     case_evidence_sha256,
@@ -33,6 +41,34 @@ from evaluation.runner import (
 
 BASELINE_VERSION = "stage10-freeze-v3"
 REPORT_VERSION = "stage10-report-v3"
+
+_STAGE1_OBJECT_STAGES: tuple[
+    tuple[RetrievalObjectKind, RetrievalStage],
+    ...,
+] = (
+    ("table", "bm25"),
+    ("table", "embedding"),
+    ("table", "rrf"),
+    ("table", "rerank"),
+    ("table", "final"),
+    ("field", "bm25"),
+    ("field", "embedding"),
+    ("field", "rrf"),
+    ("field", "final"),
+)
+_STAGE1_LATENCY_STAGES: tuple[
+    RetrievalLatencyStage,
+    ...,
+] = (
+    "bm25",
+    "embedding",
+    "rrf",
+    "rerank",
+    "retrieval_total",
+    "generation",
+    "wall_clock",
+)
+_STAGE1_KS = (5, 10, 20)
 
 
 class PagilaBaseline(BaseModel):
@@ -232,6 +268,245 @@ class EvaluationMetrics(BaseModel):
     database_duration_ms: float = Field(ge=0)
 
 
+class Stage1RetrievalMetricBucket(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+        strict=True,
+    )
+
+    complexity: QueryComplexity
+    object_kind: RetrievalObjectKind
+    stage: RetrievalStage
+    k: Literal[5, 10, 20]
+    case_count: int = Field(ge=0)
+    hit_count: int = Field(ge=0)
+    expected_count: int = Field(ge=0)
+    candidate_count: int = Field(ge=0)
+    recall: float = Field(ge=0, le=1)
+    precision: float = Field(ge=0, le=1)
+    mean_candidates: float = Field(ge=0)
+
+    @model_validator(mode="after")
+    def validate_bucket_formula(self) -> Self:
+        expected_recall = (
+            self.hit_count / self.expected_count
+            if self.expected_count
+            else 0.0
+        )
+        expected_precision = (
+            self.hit_count / self.candidate_count
+            if self.candidate_count
+            else 0.0
+        )
+        expected_mean = (
+            self.candidate_count / self.case_count
+            if self.case_count
+            else 0.0
+        )
+        if (
+            self.hit_count > self.expected_count
+            or self.hit_count > self.candidate_count
+            or (
+                self.case_count == 0
+                and (
+                    self.hit_count != 0
+                    or self.expected_count != 0
+                    or self.candidate_count != 0
+                )
+            )
+            or any(
+                not math.isfinite(value)
+                for value in (
+                    self.recall,
+                    self.precision,
+                    self.mean_candidates,
+                )
+            )
+            or not math.isclose(
+                self.recall,
+                expected_recall,
+                rel_tol=1e-12,
+                abs_tol=1e-12,
+            )
+            or not math.isclose(
+                self.precision,
+                expected_precision,
+                rel_tol=1e-12,
+                abs_tol=1e-12,
+            )
+            or not math.isclose(
+                self.mean_candidates,
+                expected_mean,
+                rel_tol=1e-12,
+                abs_tol=1e-12,
+            )
+        ):
+            raise ValueError(
+                "stage1 retrieval metric bucket is invalid"
+            )
+        return self
+
+
+class Stage1RouteDistribution(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+        strict=True,
+    )
+
+    complexity: QueryComplexity
+    count: int = Field(ge=0)
+
+
+class Stage1LatencyMetric(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+        strict=True,
+    )
+
+    stage: RetrievalLatencyStage
+    sample_count: int = Field(ge=1)
+    p50_ms: float = Field(ge=0)
+    p95_ms: float = Field(ge=0)
+
+    @model_validator(mode="after")
+    def validate_percentiles(self) -> Self:
+        if (
+            not math.isfinite(self.p50_ms)
+            or not math.isfinite(self.p95_ms)
+            or self.p50_ms > self.p95_ms
+        ):
+            raise ValueError("stage1 latency metric is invalid")
+        return self
+
+
+class Stage1RetrievalMetrics(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+        strict=True,
+    )
+
+    suite_role: RetrievalRoutingSuiteRole
+    dataset_file_sha256: str = Field(
+        pattern=r"^[0-9a-f]{64}$"
+    )
+    dataset_normalized_sha256: str = Field(
+        pattern=r"^[0-9a-f]{64}$"
+    )
+    stage1_config_sha256: str = Field(
+        pattern=r"^[0-9a-f]{64}$"
+    )
+    controlled_code_sha256: str = Field(
+        pattern=r"^[0-9a-f]{64}$"
+    )
+    stage1_calibration_baseline_id: str = Field(
+        pattern=r"^[0-9a-f]{64}$"
+    )
+    case_count: int = Field(ge=1)
+    retrieval_buckets: tuple[
+        Stage1RetrievalMetricBucket,
+        ...,
+    ]
+    complexity_match_count: int = Field(ge=0)
+    route_distribution: tuple[
+        Stage1RouteDistribution,
+        ...,
+    ]
+    embedding_degraded_count: int = Field(ge=0)
+    rerank_degraded_count: int = Field(ge=0)
+    expected_field_selection_pass_count: int = Field(ge=0)
+    join_recall_pass_count: int = Field(ge=0)
+    probe_table_mean: float = Field(ge=0)
+    final_table_mean: float = Field(ge=0)
+    probe_field_mean: float = Field(ge=0)
+    final_field_mean: float = Field(ge=0)
+    pruned_field_count: int = Field(ge=0)
+    candidate_field_count: int = Field(ge=0)
+    pruning_ratio: float = Field(ge=0, le=1)
+    input_tokens: int = Field(ge=0)
+    output_tokens: int = Field(ge=0)
+    latencies: tuple[Stage1LatencyMetric, ...]
+
+    @model_validator(mode="after")
+    def validate_stage1_metrics(self) -> Self:
+        expected_bucket_keys = tuple(
+            (complexity, object_kind, stage, k)
+            for complexity in QueryComplexity
+            for object_kind, stage in _STAGE1_OBJECT_STAGES
+            for k in _STAGE1_KS
+        )
+        if (
+            tuple(
+                (
+                    bucket.complexity,
+                    bucket.object_kind,
+                    bucket.stage,
+                    bucket.k,
+                )
+                for bucket in self.retrieval_buckets
+            )
+            != expected_bucket_keys
+            or tuple(
+                item.complexity
+                for item in self.route_distribution
+            )
+            != tuple(QueryComplexity)
+            or tuple(
+                item.stage for item in self.latencies
+            )
+            != _STAGE1_LATENCY_STAGES
+            or self.complexity_match_count > self.case_count
+            or self.embedding_degraded_count > self.case_count
+            or self.rerank_degraded_count > self.case_count
+            or self.expected_field_selection_pass_count
+            > self.case_count
+            or self.join_recall_pass_count > self.case_count
+            or self.pruned_field_count
+            > self.candidate_field_count
+            or sum(
+                item.count for item in self.route_distribution
+            )
+            != self.case_count
+        ):
+            raise ValueError("stage1 retrieval metrics are invalid")
+        return self
+
+
+class Stage1RetrievalQualityGate(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+        strict=True,
+    )
+
+    contract_version: Literal[
+        "stage1-retrieval-quality-gate-v1"
+    ] = "stage1-retrieval-quality-gate-v1"
+    stage1_calibration_baseline_id: str = Field(
+        pattern=r"^[0-9a-f]{64}$"
+    )
+    compared_bucket_count: int = Field(ge=1)
+    non_regressed_bucket_count: int = Field(ge=1)
+    improved_bucket_count: int = Field(ge=1)
+    passed: Literal[True] = True
+
+    @model_validator(mode="after")
+    def validate_quality_gate(self) -> Self:
+        if (
+            self.non_regressed_bucket_count
+            != self.compared_bucket_count
+            or self.improved_bucket_count
+            > self.compared_bucket_count
+        ):
+            raise ValueError(
+                "stage1 retrieval quality gate is invalid"
+            )
+        return self
+
+
 class EvaluationReport(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -283,6 +558,322 @@ class EvaluationReport(BaseModel):
         ):
             raise ValueError("evaluation report is invalid")
         return self
+
+
+def _percentile(
+    values: Sequence[float],
+    percentile: float,
+) -> float:
+    ordered = tuple(sorted(values))
+    if not ordered:
+        raise ValueError("stage1 retrieval evidence is invalid")
+    position = (len(ordered) - 1) * percentile
+    lower_index = int(position)
+    upper_index = min(lower_index + 1, len(ordered) - 1)
+    fraction = position - lower_index
+    return (
+        ordered[lower_index]
+        + (ordered[upper_index] - ordered[lower_index])
+        * fraction
+    )
+
+
+def aggregate_stage1_retrieval_metrics(
+    evidence: Sequence[RetrievalRoutingCaseEvidence],
+    *,
+    suite: LoadedRetrievalRoutingSuite,
+    freeze: Stage1CalibrationFreeze,
+) -> Stage1RetrievalMetrics:
+    if (
+        isinstance(evidence, (str, bytes, bytearray))
+        or not isinstance(evidence, Sequence)
+        or not evidence
+        or any(
+            not isinstance(
+                item,
+                RetrievalRoutingCaseEvidence,
+            )
+            for item in evidence
+        )
+        or len({item.case_id for item in evidence})
+        != len(evidence)
+        or not isinstance(suite, LoadedRetrievalRoutingSuite)
+        or not isinstance(freeze, Stage1CalibrationFreeze)
+    ):
+        raise ValueError("stage1 retrieval evidence is invalid")
+    items = tuple(evidence)
+    if suite.role.value == "development":
+        expected_dataset_hashes = (
+            freeze.development_file_sha256,
+            freeze.development_normalized_sha256,
+        )
+    else:
+        expected_dataset_hashes = (
+            freeze.calibration_file_sha256,
+            freeze.calibration_normalized_sha256,
+        )
+    if (
+        tuple(item.case_id for item in items)
+        != tuple(case.case_id for case in suite.cases)
+        or (
+            suite.raw_sha256,
+            suite.normalized_sha256,
+        )
+        != expected_dataset_hashes
+        or any(
+            item.suite_role is not suite.role
+            or item.expected_complexity.value
+            != case.expected_complexity.value
+            or item.dataset_file_sha256
+            != suite.raw_sha256
+            or item.dataset_normalized_sha256
+            != suite.normalized_sha256
+            or item.stage1_config_sha256
+            != freeze.stage1_config_sha256
+            or item.controlled_code_sha256
+            != freeze.controlled_code_sha256
+            or item.stage1_calibration_baseline_id
+            != freeze.stage1_calibration_baseline_id
+            for item, case in zip(
+                items,
+                suite.cases,
+                strict=True,
+            )
+        )
+    ):
+        raise ValueError("stage1 retrieval evidence is invalid")
+    buckets: list[Stage1RetrievalMetricBucket] = []
+    for complexity in QueryComplexity:
+        complexity_cases = tuple(
+            item
+            for item in items
+            if item.expected_complexity.value
+            == complexity.value
+        )
+        stage_by_case = {
+            item.case_id: {
+                (
+                    stage.object_kind,
+                    stage.stage,
+                ): stage
+                for stage in item.stage_evidence
+            }
+            for item in complexity_cases
+        }
+        for object_kind, stage in _STAGE1_OBJECT_STAGES:
+            for k in _STAGE1_KS:
+                selected = tuple(
+                    stage_by_case[item.case_id][
+                        (object_kind, stage)
+                    ]
+                    for item in complexity_cases
+                )
+                hit_count = sum(
+                    getattr(item, f"hit_count_at_{k}")
+                    for item in selected
+                )
+                expected_count = sum(
+                    item.expected_count for item in selected
+                )
+                candidate_count = sum(
+                    getattr(item, f"candidate_count_at_{k}")
+                    for item in selected
+                )
+                case_count = len(complexity_cases)
+                buckets.append(
+                    Stage1RetrievalMetricBucket(
+                        complexity=complexity,
+                        object_kind=object_kind,
+                        stage=stage,
+                        k=k,
+                        case_count=case_count,
+                        hit_count=hit_count,
+                        expected_count=expected_count,
+                        candidate_count=candidate_count,
+                        recall=(
+                            hit_count / expected_count
+                            if expected_count
+                            else 0.0
+                        ),
+                        precision=(
+                            hit_count / candidate_count
+                            if candidate_count
+                            else 0.0
+                        ),
+                        mean_candidates=(
+                            candidate_count / case_count
+                            if case_count
+                            else 0.0
+                        ),
+                    )
+                )
+
+    latency_by_case = {
+        item.case_id: {
+            latency.stage: latency.duration_ms
+            for latency in item.latency_evidence
+        }
+        for item in items
+    }
+    case_count = len(items)
+    candidate_field_count = sum(
+        item.candidate_field_count for item in items
+    )
+    pruned_field_count = sum(
+        item.pruned_field_count for item in items
+    )
+    return Stage1RetrievalMetrics(
+        suite_role=suite.role,
+        dataset_file_sha256=suite.raw_sha256,
+        dataset_normalized_sha256=suite.normalized_sha256,
+        stage1_config_sha256=freeze.stage1_config_sha256,
+        controlled_code_sha256=freeze.controlled_code_sha256,
+        stage1_calibration_baseline_id=(
+            freeze.stage1_calibration_baseline_id
+        ),
+        case_count=case_count,
+        retrieval_buckets=tuple(buckets),
+        complexity_match_count=sum(
+            item.expected_complexity.value
+            == item.observed_complexity.value
+            for item in items
+        ),
+        route_distribution=tuple(
+            Stage1RouteDistribution(
+                complexity=complexity,
+                count=sum(
+                    item.observed_complexity is complexity
+                    for item in items
+                ),
+            )
+            for complexity in QueryComplexity
+        ),
+        embedding_degraded_count=sum(
+            item.embedding_degraded for item in items
+        ),
+        rerank_degraded_count=sum(
+            item.rerank_degraded for item in items
+        ),
+        expected_field_selection_pass_count=sum(
+            item.expected_fields_selected for item in items
+        ),
+        join_recall_pass_count=sum(
+            item.join_recall_passed for item in items
+        ),
+        probe_table_mean=sum(
+            item.probe_table_count for item in items
+        )
+        / case_count,
+        final_table_mean=sum(
+            item.final_table_count for item in items
+        )
+        / case_count,
+        probe_field_mean=sum(
+            item.probe_field_count for item in items
+        )
+        / case_count,
+        final_field_mean=sum(
+            item.final_field_count for item in items
+        )
+        / case_count,
+        pruned_field_count=pruned_field_count,
+        candidate_field_count=candidate_field_count,
+        pruning_ratio=(
+            pruned_field_count / candidate_field_count
+            if candidate_field_count
+            else 0.0
+        ),
+        input_tokens=sum(item.input_tokens for item in items),
+        output_tokens=sum(item.output_tokens for item in items),
+        latencies=tuple(
+            Stage1LatencyMetric(
+                stage=stage,
+                sample_count=case_count,
+                p50_ms=_percentile(
+                    tuple(
+                        latency_by_case[item.case_id][stage]
+                        for item in items
+                    ),
+                    0.5,
+                ),
+                p95_ms=_percentile(
+                    tuple(
+                        latency_by_case[item.case_id][stage]
+                        for item in items
+                    ),
+                    0.95,
+                ),
+            )
+            for stage in _STAGE1_LATENCY_STAGES
+        ),
+    )
+
+
+def qualify_stage1_retrieval(
+    metrics: Stage1RetrievalMetrics,
+) -> Stage1RetrievalQualityGate:
+    if (
+        not isinstance(metrics, Stage1RetrievalMetrics)
+        or metrics.suite_role
+        is not RetrievalRoutingSuiteRole.CALIBRATION
+        or metrics.complexity_match_count != metrics.case_count
+        or metrics.embedding_degraded_count != 0
+        or metrics.rerank_degraded_count != 0
+        or metrics.expected_field_selection_pass_count
+        != metrics.case_count
+        or metrics.join_recall_pass_count
+        != metrics.case_count
+    ):
+        raise ValueError(
+            "stage1 retrieval quality gate failed"
+        )
+    by_key = {
+        (
+            bucket.complexity,
+            bucket.object_kind,
+            bucket.stage,
+            bucket.k,
+        ): bucket
+        for bucket in metrics.retrieval_buckets
+    }
+    comparisons: list[tuple[float, float]] = []
+    for complexity in QueryComplexity:
+        for object_kind in ("table", "field"):
+            for k in _STAGE1_KS:
+                baseline = by_key[
+                    (complexity, object_kind, "bm25", k)
+                ]
+                combined = by_key[
+                    (complexity, object_kind, "final", k)
+                ]
+                if baseline.case_count:
+                    comparisons.append(
+                        (baseline.recall, combined.recall)
+                    )
+    non_regressed = sum(
+        combined + 1e-12 >= baseline
+        for baseline, combined in comparisons
+    )
+    improved = sum(
+        combined > baseline + 1e-12
+        for baseline, combined in comparisons
+    )
+    if (
+        not comparisons
+        or non_regressed != len(comparisons)
+        or improved < 1
+    ):
+        raise ValueError(
+            "stage1 retrieval quality gate failed"
+        )
+    return Stage1RetrievalQualityGate(
+        stage1_calibration_baseline_id=(
+            metrics.stage1_calibration_baseline_id
+        ),
+        compared_bucket_count=len(comparisons),
+        non_regressed_bucket_count=non_regressed,
+        improved_bucket_count=improved,
+    )
 
 
 def load_baseline(path: Path) -> EvaluationBaseline:

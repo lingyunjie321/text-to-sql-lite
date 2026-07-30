@@ -1,14 +1,11 @@
 import json
+import math
 import socket
 from collections.abc import Sequence
 from http.client import HTTPException, IncompleteRead
 from typing import Protocol
 from urllib.error import HTTPError, URLError
-from urllib.request import (
-    HTTPRedirectHandler,
-    Request,
-    build_opener,
-)
+from urllib.request import Request
 
 from pydantic import ValidationError
 
@@ -22,61 +19,18 @@ from app.generation.models import (
     LLMMessage,
     LLMProviderError,
 )
+from app.http_transport import HTTPTransport, UrllibHTTPTransport
 
 MAX_RESPONSE_BYTES = 1024 * 1024
 PROVIDER_CONTRACT_VERSION = "openai-compatible-json-v1"
-
-
-class _HTTPResponse(Protocol):
-    def __enter__(self) -> "_HTTPResponse": ...
-
-    def __exit__(self, *args: object) -> object: ...
-
-    def read(self, amount: int = -1) -> bytes: ...
-
-
-class HTTPTransport(Protocol):
-    def open(
-        self,
-        request: Request,
-        *,
-        timeout: float,
-    ) -> _HTTPResponse: ...
-
-
-class _NoRedirectHandler(HTTPRedirectHandler):
-    def redirect_request(
-        self,
-        req: Request,
-        fp: object,
-        code: int,
-        msg: str,
-        headers: object,
-        newurl: str,
-    ) -> None:
-        return None
-
-
-class UrllibHTTPTransport:
-    def __init__(self) -> None:
-        self._opener = build_opener(_NoRedirectHandler())
-
-    def open(
-        self,
-        request: Request,
-        *,
-        timeout: float,
-    ) -> _HTTPResponse:
-        return self._opener.open(  # type: ignore[return-value]
-            request,
-            timeout=timeout,
-        )
 
 
 class LLMProvider(Protocol):
     def generate(
         self,
         messages: Sequence[LLMMessage],
+        *,
+        timeout_seconds: float | None = None,
     ) -> GenerationResult: ...
 
 
@@ -84,14 +38,26 @@ _PUBLIC_ERRORS = {
     "LLM_TIMEOUT": LLMError(
         error_type=ErrorType.TIMEOUT,
         code="LLM_TIMEOUT",
-        retryable=False,
+        retryable=True,
         public_message="The model request timed out.",
     ),
     "LLM_CONNECTION_ERROR": LLMError(
         error_type=ErrorType.CONNECTION_ERROR,
         code="LLM_CONNECTION_ERROR",
-        retryable=False,
+        retryable=True,
         public_message="The model service is unavailable.",
+    ),
+    "LLM_RATE_LIMITED": LLMError(
+        error_type=ErrorType.RESOURCE_RISK,
+        code="LLM_RATE_LIMITED",
+        retryable=True,
+        public_message="The model service is temporarily unavailable.",
+    ),
+    "LLM_CAPACITY_ERROR": LLMError(
+        error_type=ErrorType.RESOURCE_RISK,
+        code="LLM_CAPACITY_ERROR",
+        retryable=True,
+        public_message="The model service is temporarily unavailable.",
     ),
     "LLM_HTTP_ERROR": LLMError(
         error_type=ErrorType.UNKNOWN,
@@ -111,11 +77,24 @@ _PUBLIC_ERRORS = {
         retryable=False,
         public_message="The model output is invalid.",
     ),
+    "LLM_INTERNAL_ERROR": LLMError(
+        error_type=ErrorType.UNKNOWN,
+        code="LLM_INTERNAL_ERROR",
+        retryable=False,
+        public_message="The model request failed.",
+    ),
 }
 
 
 def _provider_error(code: str) -> LLMProviderError:
     return LLMProviderError(_PUBLIC_ERRORS[code])
+
+
+def normalize_llm_provider_error(details: LLMError) -> LLMError:
+    return _PUBLIC_ERRORS.get(
+        details.code,
+        _PUBLIC_ERRORS["LLM_INTERNAL_ERROR"],
+    )
 
 
 def _is_timeout(error: BaseException) -> bool:
@@ -147,7 +126,22 @@ class OpenAICompatibleLLMProvider:
     def generate(
         self,
         messages: Sequence[LLMMessage],
+        *,
+        timeout_seconds: float | None = None,
     ) -> GenerationResult:
+        if timeout_seconds is None:
+            effective_timeout = self._settings.timeout_seconds
+        else:
+            if (
+                type(timeout_seconds) not in (int, float)
+                or not math.isfinite(timeout_seconds)
+                or timeout_seconds <= 0
+            ):
+                raise ValueError("provider timeout is invalid")
+            effective_timeout = min(
+                self._settings.timeout_seconds,
+                timeout_seconds,
+            )
         request_body = json.dumps(
             {
                 "model": self._settings.model,
@@ -183,11 +177,17 @@ class OpenAICompatibleLLMProvider:
         try:
             with self._transport.open(
                 request,
-                timeout=self._settings.timeout_seconds,
+                timeout=effective_timeout,
             ) as response:
                 response_body = response.read(MAX_RESPONSE_BYTES + 1)
-        except HTTPError:
-            raise _provider_error("LLM_HTTP_ERROR") from None
+        except HTTPError as error:
+            if error.code == 429:
+                code = "LLM_RATE_LIMITED"
+            elif error.code in {502, 503, 504}:
+                code = "LLM_CAPACITY_ERROR"
+            else:
+                code = "LLM_HTTP_ERROR"
+            raise _provider_error(code) from None
         except (TimeoutError, socket.timeout):
             raise _provider_error("LLM_TIMEOUT") from None
         except IncompleteRead:
