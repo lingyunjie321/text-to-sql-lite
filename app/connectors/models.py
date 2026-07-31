@@ -6,9 +6,14 @@ from enum import Enum
 from typing import TypeAlias
 from uuid import UUID
 
-JsonValue: TypeAlias = (
-    None | bool | int | float | str | list["JsonValue"] | dict[str, "JsonValue"]
-)
+from app.connectors.types import JsonValue
+
+__all__ = [
+    "ExecutionResult",
+    "JsonValue",
+    "ResultColumn",
+    "normalize_value",
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,6 +32,12 @@ class ExecutionResult:
 
 
 def normalize_value(value: object) -> JsonValue:
+    """Normalize a database driver return value into a JSON-safe
+    representation, using the PostgreSQL (psycopg) dialect.
+
+    For multi-dialect support use :func:`app.connectors.types.normalize_value`
+    directly with an explicit *dialect* parameter.
+    """
     if value is None or isinstance(value, (bool, int, float, str)):
         return value
     if isinstance(value, Decimal):

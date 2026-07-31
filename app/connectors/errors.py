@@ -1,8 +1,14 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
 from enum import Enum
+from typing import TYPE_CHECKING
 
 import psycopg
 from psycopg_pool import PoolTimeout
+
+if TYPE_CHECKING:
+    import pymysql
 
 
 class ErrorType(str, Enum):
@@ -28,10 +34,17 @@ class DatabaseError:
     public_message: str
 
 
-class PostgreSQLConnectorError(RuntimeError):
+class DatabaseConnectorError(RuntimeError):
+    """Generic database connector error used across all backends."""
+
     def __init__(self, details: DatabaseError) -> None:
         super().__init__(details.public_message)
         self.details = details
+
+
+# Backward-compatible alias for existing code that references
+# PostgreSQLConnectorError directly.
+PostgreSQLConnectorError = DatabaseConnectorError
 
 
 _PUBLIC_ERRORS: dict[ErrorType, tuple[str, str]] = {
@@ -66,7 +79,11 @@ _PUBLIC_ERRORS: dict[ErrorType, tuple[str, str]] = {
 }
 
 
+# ── PostgreSQL SQLSTATE classification ──────────────────────────
+
+
 def classify_sqlstate(sqlstate: str | None) -> ErrorType:
+    """Classify a PostgreSQL SQLSTATE into a generic ErrorType."""
     if sqlstate == "42601":
         return ErrorType.SYNTAX_ERROR
     if sqlstate in {"42P01", "42703", "42702"}:
@@ -82,16 +99,66 @@ def classify_sqlstate(sqlstate: str | None) -> ErrorType:
     return ErrorType.UNKNOWN
 
 
-def _effective_sqlstate(error: Exception) -> str | None:
+# ── MySQL error-code classification ─────────────────────────────
+# Reference: https://dev.mysql.com/doc/refman/8.0/en/error-reference.html
+
+
+# MySQL server error codes mapped to ErrorType categories.
+# Values are (error_code_range_start, error_code_range_end).
+_MYSQL_ERROR_RANGES: dict[ErrorType, list[tuple[int, int]]] = {
+    ErrorType.SYNTAX_ERROR: [
+        (1064, 1065),  # ER_PARSE_ERROR, ER_EMPTY_QUERY
+        (1149, 1149),  # ER_SYNTAX_ERROR
+    ],
+    ErrorType.SCHEMA_ERROR: [
+        (1049, 1051),  # Unknown DB, table exists, unknown table
+        (1054, 1054),  # ER_BAD_FIELD_ERROR
+        (1146, 1146),  # ER_NO_SUCH_TABLE
+    ],
+    ErrorType.PERMISSION_DENIED: [
+        (1044, 1045),  # ER_DBACCESS_DENIED_ERROR, ER_ACCESS_DENIED_ERROR
+        (1142, 1143),  # ER_TABLEACCESS_DENIED_ERROR, ER_COLUMNACCESS_DENIED_ERROR
+        (1227, 1227),  # ER_SPECIFIC_ACCESS_DENIED_ERROR
+    ],
+    ErrorType.CONNECTION_ERROR: [
+        (2001, 2018),  # CR_SOCKET_CREATE_ERROR … CR_TCP_CONNECTION
+        (2026, 2026),  # CR_SSL_CONNECTION_ERROR
+        (2047, 2054),  # Various connection errors
+    ],
+    ErrorType.TIMEOUT: [
+        (3024, 3024),  # ER_QUERY_TIMEOUT
+        (2006, 2006),  # CR_SERVER_GONE_ERROR (can be timeout)
+        (2013, 2013),  # CR_SERVER_LOST (can be timeout)
+        (2062, 2062),  # ER_WARN_EXEC_TIME_EXCEEDED
+    ],
+    ErrorType.RESOURCE_RISK: [
+        (1041, 1041),  # ER_OUT_OF_RESOURCES
+    ],
+}
+
+
+def classify_mysql_error_code(error_code: int) -> ErrorType:
+    """Classify a MySQL server error code into a generic ErrorType."""
+    for error_type, ranges in _MYSQL_ERROR_RANGES.items():
+        for low, high in ranges:
+            if low <= error_code <= high:
+                return error_type
+    return ErrorType.UNKNOWN
+
+
+# ── Error normalisation ─────────────────────────────────────────
+
+
+def _effective_sqlstate_pg(error: Exception) -> str | None:
+    """Extract a PostgreSQL SQLSTATE from *error*, with a fallback for
+    auth failures that happen during the libpq handshake (which doesn't
+    expose the server-side SQLSTATE)."""
     sqlstate = getattr(error, "sqlstate", None)
     if sqlstate is not None or not isinstance(
         error, psycopg.OperationalError
     ):
         return sqlstate
 
-    # libpq doesn't expose the server SQLSTATE for connection-handshake
-    # failures. Keep this fallback limited to the canonical authentication
-    # response; all established-session errors remain SQLSTATE-driven.
     pgconn = getattr(error, "pgconn", None)
     message = getattr(pgconn, "error_message", b"")
     if isinstance(message, str):
@@ -101,12 +168,84 @@ def _effective_sqlstate(error: Exception) -> str | None:
     return None
 
 
-def normalize_database_error(error: Exception) -> PostgreSQLConnectorError:
-    if isinstance(error, PostgreSQLConnectorError):
+def _effective_sqlstate_mysql(error: Exception) -> str | None:
+    """Extract a MySQL error code from *error* and convert to a
+    SQLSTATE-like string."""
+    errno = getattr(error, "args", None)
+    if isinstance(errno, tuple) and len(errno) >= 1:
+        code = errno[0]
+        if isinstance(code, int):
+            return f"MY-{code:05d}"
+    return None
+
+
+def normalize_database_error(
+    error: Exception,
+) -> DatabaseConnectorError:
+    """Normalize any database driver exception into a
+    :class:`DatabaseConnectorError`.
+
+    Handles psycopg (PostgreSQL) and pymysql (MySQL / StarRocks)
+    driver exceptions.  Falls back to classifying by ``sqlstate``
+    attribute for generic errors (useful in tests).
+    """
+    if isinstance(error, DatabaseConnectorError):
         return error
 
-    sqlstate = _effective_sqlstate(error)
+    # ── psycopg / PostgreSQL path ────────────────────────────
+    if isinstance(error, psycopg.Error):
+        return _normalize_psycopg_error(error)
+
+    # ── pymysql / MySQL path ─────────────────────────────────
+    if _is_pymysql_error(error):
+        return _normalize_pymysql_error(error)
+
+    # ── Generic error with sqlstate-like attribute ───────────
+    # (e.g. FakeDatabaseError in tests)
+    sqlstate = _effective_sqlstate_pg(error)
+    if sqlstate is not None:
+        return _build_error(sqlstate)
+
+    mysql_state = _effective_sqlstate_mysql(error)
+    if mysql_state is not None:
+        return _build_error(mysql_state)
+
+    # ── True unknown / connection error fallback ─────────────
+    return DatabaseConnectorError(
+        DatabaseError(
+            sqlstate=None,
+            error_type=ErrorType.CONNECTION_ERROR,
+            code="DB_CONNECTION_ERROR",
+            retryable=True,
+            public_message="The database connection failed.",
+        )
+    )
+
+
+def _build_error(sqlstate: str | None) -> DatabaseConnectorError:
+    """Build a :class:`DatabaseConnectorError` from a SQLSTATE string."""
     error_type = classify_sqlstate(sqlstate)
+    retryable = (
+        error_type is ErrorType.CONNECTION_ERROR
+        and sqlstate is not None
+        and sqlstate.startswith("08")
+    )
+    code, public_message = _PUBLIC_ERRORS[error_type]
+    return DatabaseConnectorError(
+        DatabaseError(
+            sqlstate=sqlstate,
+            error_type=error_type,
+            code=code,
+            retryable=retryable,
+            public_message=public_message,
+        )
+    )
+
+
+def _normalize_psycopg_error(error: Exception) -> DatabaseConnectorError:
+    sqlstate = _effective_sqlstate_pg(error)
+    error_type = classify_sqlstate(sqlstate)
+
     if isinstance(error, PoolTimeout):
         error_type = ErrorType.CONNECTION_ERROR
     elif isinstance(error, psycopg.OperationalError) and sqlstate is None:
@@ -121,7 +260,45 @@ def normalize_database_error(error: Exception) -> PostgreSQLConnectorError:
         )
     )
     code, public_message = _PUBLIC_ERRORS[error_type]
-    return PostgreSQLConnectorError(
+    return DatabaseConnectorError(
+        DatabaseError(
+            sqlstate=sqlstate,
+            error_type=error_type,
+            code=code,
+            retryable=retryable,
+            public_message=public_message,
+        )
+    )
+
+
+def _is_pymysql_error(error: Exception) -> bool:
+    """Check if *error* originates from the pymysql driver."""
+    return type(error).__module__.startswith("pymysql.")
+
+
+def _normalize_pymysql_error(
+    error: Exception,
+) -> DatabaseConnectorError:
+    """Normalize a pymysql driver exception."""
+    errno: int | None = None
+    args = getattr(error, "args", None)
+    if isinstance(args, tuple) and len(args) >= 1:
+        code = args[0]
+        if isinstance(code, int):
+            errno = code
+
+    sqlstate = f"MY-{errno:05d}" if errno is not None else None
+    error_type = (
+        classify_mysql_error_code(errno)
+        if errno is not None
+        else ErrorType.CONNECTION_ERROR
+    )
+
+    retryable = error_type in (
+        ErrorType.CONNECTION_ERROR,
+    )
+    code, public_message = _PUBLIC_ERRORS[error_type]
+    return DatabaseConnectorError(
         DatabaseError(
             sqlstate=sqlstate,
             error_type=error_type,

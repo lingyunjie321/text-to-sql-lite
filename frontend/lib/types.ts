@@ -37,14 +37,35 @@ export type ErrorType =
 // Query Request
 // ========================
 
+// ========================
+// Model / Datasource Override types (Phase 2)
+// ========================
+
+export interface ModelEndpointOverride {
+  base_url: string;
+  api_key: string;
+  model_name: string;
+}
+
+export interface DatasourceOverride {
+  host: string;
+  port: number;
+  database: string;
+  username: string;
+  password: string;
+  type: string;
+  schemas: string[];
+  allowed_tables: string[];
+}
+
 export interface QueryRequest {
   question: string;
   datasource_id?: string;
   schemas?: string[];
   debug?: boolean;
-  // --- 新增：前端配置传递（可选，需后端扩展）---
-  model_config?: RequestModelConfig;
-  datasource_config?: RequestDatasourceConfig;
+  // --- 前端配置传递（仅传覆写值，不传 enabled 等前端专用字段）---
+  model_overrides?: Record<string, ModelEndpointOverride>;
+  datasource_override?: DatasourceOverride;
 }
 
 export interface ResponseColumn {

@@ -28,7 +28,7 @@ def test_database_settings_reject_missing_dsn(
 
 
 def test_database_settings_reject_malformed_conninfo() -> None:
-    with pytest.raises(ValidationError, match="dsn must be valid PostgreSQL conninfo"):
+    with pytest.raises(ValidationError, match="dsn must be a valid PostgreSQL connection string"):
         DatabaseSettings(dsn="not a valid dsn with password=secret")
 
 
@@ -62,10 +62,12 @@ def test_database_settings_reject_inverted_pool_bounds() -> None:
         )
 
 
-def test_database_settings_reject_other_database() -> None:
-    with pytest.raises(ValidationError, match="must use the pagila database"):
+def test_database_settings_reject_non_postgresql_dsn() -> None:
+    """PostgreSQL type requires a postgresql:// DSN prefix."""
+    with pytest.raises(ValidationError, match="dsn must be a valid PostgreSQL connection string"):
         DatabaseSettings(
-            dsn="postgresql://reader:secret@127.0.0.1:55432/other"
+            type="postgresql",
+            dsn="mysql://reader:secret@127.0.0.1:3306/other",
         )
 
 

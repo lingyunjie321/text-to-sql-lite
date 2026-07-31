@@ -39,11 +39,13 @@ from app.connectors.metadata_queries import (
 from app.connectors.models import (
     ExecutionResult,
     ResultColumn,
-    normalize_value,
 )
+from app.connectors.types import normalize_value
 
 
 class PostgreSQLConnector:
+    dialect_name: str = "postgres"
+
     def __init__(self, settings: DatabaseSettings) -> None:
         self._settings = settings
         self._retry_count: ContextVar[int] = ContextVar(
@@ -547,7 +549,7 @@ def _execute_from_connection(
         for column in cursor.description
     )
     rows = [
-        [normalize_value(value) for value in row]
+        [normalize_value(value, dialect="postgres") for value in row]
         for row in bounded_rows
     ]
     return ExecutionResult(

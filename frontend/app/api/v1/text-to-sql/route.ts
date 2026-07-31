@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 const BACKEND_URL = process.env.TEXT_TO_SQL_API_URL;
+const API_KEY = process.env.TEXT_TO_SQL_API_KEY;
 
 export async function POST(request: NextRequest) {
   // Check if backend URL is configured
@@ -23,14 +24,24 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
 
+    // Phase 1: Strip model_config and datasource_config — these are frontend-only
+    // fields that the backend does not recognize (extra="forbid" on QueryRequest).
+    const { model_config, datasource_config, ...cleanBody } = body;
+
+    // Phase 4a: Build headers with optional API key injection
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (API_KEY) {
+      headers["Authorization"] = `Bearer ${API_KEY}`;
+    }
+
     const response = await fetch(
       `${BACKEND_URL}/api/v1/text-to-sql`,
       {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(body),
+        headers,
+        body: JSON.stringify(cleanBody),
       },
     );
 

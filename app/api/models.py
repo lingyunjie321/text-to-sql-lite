@@ -28,13 +28,43 @@ type JsonValue = (
 )
 
 
-class QueryRequest(BaseModel):
+class ModelOverride(BaseModel):
+    """单个模型 tier 的请求级覆写"""
+
     model_config = ConfigDict(extra="forbid")
+
+    base_url: str | None = None
+    api_key: str | None = None
+    model_name: str | None = None
+
+
+class DatasourceOverride(BaseModel):
+    """数据源请求级覆写"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    datasource_id: str | None = None
+    type: str | None = None
+    host: str | None = None
+    port: int | None = None
+    database: str | None = None
+    username: str | None = None
+    password: str | None = None
+    schemas: list[str] | None = None
+    allowed_tables: list[str] | None = None
+
+
+class QueryRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
 
     question: StrictStr
     datasource_id: StrictStr = "pagila"
     schemas: tuple[StrictStr, ...] = ()
     debug: StrictBool = False
+
+    # Phase 2: 请求级覆写
+    model_overrides: dict[str, ModelOverride] | None = None
+    datasource_override: DatasourceOverride | None = None
 
     @field_validator("question")
     @classmethod
@@ -85,8 +115,54 @@ class PublicError(BaseModel):
     message: str = Field(min_length=1)
 
 
-class QueryResponse(BaseModel):
+class SchemaCandidate(BaseModel):
+    """Schema 候选表（检索+选择）"""
+
     model_config = ConfigDict(extra="forbid", frozen=True)
+
+    table_name: str
+    schema: str
+    fields: list[str]
+    score: float
+    source: str  # "bm25" | "embedding" | "rerank"
+    selected: bool
+
+
+class SemanticReference(BaseModel):
+    """语义参考（口径/指标/术语/少样本）"""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    type: str  # "caliber" | "metric" | "glossary" | "few_shot"
+    title: str
+    content: str
+    score: float
+
+
+class ComplexityRoute(BaseModel):
+    """复杂度路由决策"""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    level: str  # "simple" | "standard" | "complex"
+    top_k: int
+    model_used: str
+    reason: str
+
+
+class RepairHistoryEntry(BaseModel):
+    """修复历史条目"""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    attempt: int
+    error_type: str
+    fix_strategy: str
+    fingerprint: str
+
+
+class QueryResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore", frozen=True)
 
     request_id: str = Field(min_length=1)
     trace_id: str = Field(min_length=1)
@@ -100,6 +176,12 @@ class QueryResponse(BaseModel):
     repair_count: int = Field(default=0, ge=0, le=3)
     clarification: ResponseClarification | None = None
     error: PublicError | None = None
+
+    # Phase 3 扩展字段（全部可选）
+    schema_candidates: list[SchemaCandidate] | None = Field(default=None)
+    semantic_references: list[SemanticReference] | None = Field(default=None)
+    complexity_route: ComplexityRoute | None = Field(default=None)
+    repair_history: list[RepairHistoryEntry] | None = Field(default=None)
 
     @field_validator("sql")
     @classmethod

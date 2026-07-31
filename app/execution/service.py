@@ -1,7 +1,7 @@
 import math
 from typing import Protocol
 
-from app.connectors.errors import PostgreSQLConnectorError
+from app.connectors.errors import DatabaseConnectorError, PostgreSQLConnectorError
 from app.connectors.metadata import SchemaSnapshot
 from app.connectors.models import ExecutionResult
 from app.execution.models import (
@@ -58,6 +58,7 @@ def execute_validated_sql(
     snapshot: SchemaSnapshot,
     connector: SQLExecutor,
     timeout_seconds: float | None = None,
+    dialect: str = "postgres",
 ) -> ExecutionOutcome:
     if (
         timeout_seconds is not None
@@ -74,6 +75,7 @@ def execute_validated_sql(
         allowed_schemas=allowed_schemas,
         allowed_tables=allowed_tables,
         snapshot=snapshot,
+        dialect=dialect,
     )
     if verified_result != validation_result:
         raise ValueError("execution context is invalid")
@@ -87,5 +89,5 @@ def execute_validated_sql(
             )
         )
         return success_outcome(result)
-    except PostgreSQLConnectorError as error:
+    except (DatabaseConnectorError, PostgreSQLConnectorError) as error:
         return failure_outcome(error.details)

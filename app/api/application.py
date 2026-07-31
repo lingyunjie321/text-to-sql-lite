@@ -67,6 +67,29 @@ def _services_from_request(
     return services
 
 
+def _model_summary(
+    services: ApplicationServices,
+    tier: str,
+) -> dict[str, str]:
+    """从运行时提取非敏感模型元数据（base_url + model_name，不含 api_key）。"""
+    try:
+        registration = (
+            services.context.model_routing.provider_registry.resolve(
+                tier
+            )
+        )
+        provider = registration.provider
+        # 唯一的具体 provider 是 OpenAICompatibleLLMProvider；
+        # 通过私有 _settings 暴露 base_url 和 model_name。
+        settings = provider._settings  # type: ignore[attr-defined]
+        return {
+            "base_url": str(settings.base_url),
+            "model_name": settings.model,
+        }
+    except Exception:
+        return {"base_url": "unknown", "model_name": "unknown"}
+
+
 def _error_response(
     *,
     request_id: str,
@@ -131,6 +154,40 @@ def create_app(
     @app.get("/health")
     async def health() -> dict[str, object]:
         return {"status": "healthy"}
+
+    @app.get("/api/v1/config")
+    async def get_config(
+        active_services: Annotated[
+            ApplicationServices,
+            Depends(_services_from_request),
+        ],
+    ) -> JSONResponse:
+        datasources = {}
+        for ds_id, ctx in active_services.contexts.items():
+            datasources[ds_id] = {
+                "datasource_id": ctx.datasource_id,
+                "schemas": list(ctx.allowed_schemas),
+                "tables": list(ctx.allowed_tables),
+            }
+        return JSONResponse(
+            content={
+                "datasources": datasources,
+                "models": {
+                    "simple": _model_summary(
+                        active_services, "simple"
+                    ),
+                    "standard": _model_summary(
+                        active_services, "standard"
+                    ),
+                    "complex": _model_summary(
+                        active_services, "complex"
+                    ),
+                    "fallback": _model_summary(
+                        active_services, "fallback"
+                    ),
+                },
+            }
+        )
 
     @app.exception_handler(RequestValidationError)
     async def handle_request_validation_error(
@@ -206,10 +263,11 @@ def create_app(
                 datasource_id=query.datasource_id,
                 requested_schemas=query.schemas,
             )
+            ctx = active_services.context_for(query.datasource_id)
             terminal_state = await asyncio.to_thread(
                 active_services.runner,
                 initial_state,
-                context=active_services.context,
+                context=ctx,
             )
             return build_query_response(terminal_state)
         except Exception:

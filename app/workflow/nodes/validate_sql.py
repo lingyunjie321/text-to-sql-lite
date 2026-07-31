@@ -27,6 +27,7 @@ def _validate_sql(
         allowed_schemas=state.allowed_schemas,
         allowed_tables=state.allowed_tables,
         snapshot=state.schema_snapshot,
+        dialect=state.dialect,
     )
     history = record_validation(_attempt_history(state), result)
     update = _history_update(history)

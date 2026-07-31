@@ -658,7 +658,7 @@ class SQLTaskState(BaseModel):
 
     @model_validator(mode="after")
     def validate_workflow_invariants(self) -> Self:
-        if self.dialect != "postgres":
+        if self.dialect not in {"postgresql", "postgres", "mysql", "starrocks"}:
             raise ValueError("workflow dialect is invalid")
         if (
             (self.retrieval_version_id is None)
@@ -904,12 +904,14 @@ def new_task_state(
     question: str,
     datasource_id: str,
     requested_schemas: tuple[str, ...] = (),
+    dialect: str = "postgres",
 ) -> SQLTaskState:
     return SQLTaskState(
         request_id=request_id,
         trace_id=trace_id,
         question=question,
         datasource_id=datasource_id,
+        dialect=dialect,
         requested_schemas=requested_schemas,
     )
 

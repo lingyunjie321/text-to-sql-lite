@@ -32,6 +32,7 @@ def _execute_sql(
         snapshot=state.schema_snapshot,
         connector=context.connector,
         timeout_seconds=database_timeout_seconds,
+        dialect=state.dialect,
     )
     retry_count = _consume_infrastructure_retries(context)
     history = record_execution(_attempt_history(state), outcome)

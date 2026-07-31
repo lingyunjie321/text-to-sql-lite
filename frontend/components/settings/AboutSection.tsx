@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Info, Trash2, ShieldAlert } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { clearModelConfig } from "@/lib/model-config";
 import { clearDbConfig } from "@/lib/datasource-config";
+import { checkBackendHealth } from "@/lib/health";
 
 interface AboutSectionProps {
   onToast: (message: string, type?: "success" | "info" | "error") => void;
@@ -13,6 +14,22 @@ interface AboutSectionProps {
 
 export function AboutSection({ onToast, onConfigCleared }: AboutSectionProps) {
   const [confirming, setConfirming] = useState(false);
+  const [healthStatus, setHealthStatus] = useState<{
+    healthy: boolean | null;
+    message: string;
+  }>({ healthy: null, message: "检测中..." });
+
+  useEffect(() => {
+    let cancelled = false;
+    checkBackendHealth().then((result) => {
+      if (!cancelled) {
+        setHealthStatus(result);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleClear = useCallback(() => {
     if (!confirming) {
@@ -126,6 +143,29 @@ export function AboutSection({ onToast, onConfigCleared }: AboutSectionProps) {
             API Key 和数据库密码存储在 localStorage 中，存在 XSS
             窃取风险。生产环境请使用后端加密存储。
           </p>
+        </div>
+      </div>
+
+      {/* Backend health indicator (Phase 4d) */}
+      <div className="mt-6">
+        <label className="mb-2 block text-sm font-medium text-[var(--color-text-secondary)]">
+          后端状态
+        </label>
+        <div className="rounded-lg border border-[var(--color-border)] bg-white p-5 shadow-sm">
+          <div className="flex items-center gap-3">
+            <span
+              className={`inline-block h-3 w-3 rounded-full ${
+                healthStatus.healthy === null
+                  ? "bg-gray-400"
+                  : healthStatus.healthy
+                    ? "bg-green-500"
+                    : "bg-red-500"
+              }`}
+            />
+            <span className="text-sm text-[var(--color-text-secondary)]">
+              {healthStatus.message}
+            </span>
+          </div>
         </div>
       </div>
     </div>

@@ -35,6 +35,13 @@ from app.validation.policy import (
     WILDCARD_FORBIDDEN,
 )
 
+_SQLGLOT_DIALECT_MAP: dict[str, str] = {
+    "postgresql": "postgres",
+    "postgres": "postgres",
+    "mysql": "mysql",
+    "starrocks": "mysql",  # StarRocks uses MySQL-compatible SQLGlot dialect
+}
+
 
 def validate_sql(
     sql: str,
@@ -42,13 +49,15 @@ def validate_sql(
     allowed_schemas: tuple[str, ...],
     allowed_tables: tuple[str, ...],
     snapshot: SchemaSnapshot,
+    dialect: str = "postgres",
 ) -> ValidationResult:
+    sqlglot_dialect = _SQLGLOT_DIALECT_MAP.get(dialect, dialect)
     try:
         expressions = [
             expression
             for expression in parse(
                 sql,
-                read="postgres",
+                read=sqlglot_dialect,
                 error_level=ErrorLevel.RAISE,
             )
             if expression
@@ -85,7 +94,7 @@ def validate_sql(
 
     resolved_expression = normalize_identifiers(
         expression.copy(),
-        dialect="postgres",
+        dialect=sqlglot_dialect,
     )
     referenced_tables: list[str] = []
     seen_table_nodes: set[int] = set()
@@ -121,7 +130,7 @@ def validate_sql(
     try:
         qualified_expression = qualify(
             resolved_expression,
-            dialect="postgres",
+            dialect=sqlglot_dialect,
             schema=_schema_mapping(snapshot),
             expand_stars=False,
             infer_schema=False,
@@ -143,7 +152,7 @@ def validate_sql(
 
     try:
         normalized_sql = expression.sql(
-            dialect="postgres",
+            dialect=sqlglot_dialect,
             unsupported_level=ErrorLevel.RAISE,
         )
     except UnsupportedError:

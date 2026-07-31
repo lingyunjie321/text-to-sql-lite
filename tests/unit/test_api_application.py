@@ -321,7 +321,7 @@ def test_production_services_reject_non_pagila_datasource_before_open(
         connector_class,
     )
 
-    with pytest.raises(ValueError, match="production datasource"):
+    with pytest.raises(ValueError, match="no configured allowlist"):
         api_bootstrap.build_production_services()
 
     connector_class.assert_not_called()
@@ -495,7 +495,7 @@ def test_production_services_inject_versioned_embedding_runtime(
     assert llm_provider_factory.call_count == 3
     connector.open.assert_called_once_with()
     connector.close.assert_not_called()
-    assert services.close == connector.close
+    assert services.close is not None and callable(services.close)
 
 
 def test_production_lifespan_fails_closed_without_credentials(

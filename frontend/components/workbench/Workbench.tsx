@@ -11,9 +11,8 @@ import { getModelConfig, isModelConfigured } from "@/lib/model-config";
 import { getDbConfig, isDbConfigured } from "@/lib/datasource-config";
 import type {
   QueryResponse,
-  RequestModelConfig,
-  RequestDatasourceConfig,
-  ModelEndpoint,
+  ModelEndpointOverride,
+  DatasourceOverride,
 } from "@/lib/types";
 
 export function Workbench() {
@@ -74,41 +73,43 @@ export function Workbench() {
       setInputValue("");
 
       try {
-        // 读取前端配置（存 localStorage，⚠️ 需后端扩展才能生效）
+        // 读取前端配置（存 localStorage）
         const storedModelConfig = getModelConfig();
         const storedDbConfig = getDbConfig();
 
-        // 转换模型配置：只传 enabled 的模型
-        let modelConfig: RequestModelConfig | undefined;
+        // Phase 2b: 构建 model_overrides（仅传用户覆写的 tier，不含 enabled 字段）
+        let modelOverrides: Record<string, ModelEndpointOverride> | undefined;
         if (isModelConfigured(storedModelConfig)) {
-          const pickEnabled = (ep: ModelEndpoint): ModelEndpoint | undefined =>
-            ep.enabled ? ep : undefined;
-          const mc: RequestModelConfig = {};
-          const simple = pickEnabled(storedModelConfig.models.simple);
-          const standard = pickEnabled(storedModelConfig.models.standard);
-          const complex = pickEnabled(storedModelConfig.models.complex);
-          const fallback = pickEnabled(storedModelConfig.models.fallback);
-          if (simple) mc.simple = simple;
-          if (standard) mc.standard = standard;
-          if (complex) mc.complex = complex;
-          if (fallback) mc.fallback = fallback;
-          if (Object.keys(mc).length > 0) modelConfig = mc;
+          const tiers = ["simple", "standard", "complex", "fallback"] as const;
+          const overrides: Record<string, ModelEndpointOverride> = {};
+          for (const tier of tiers) {
+            const ep = storedModelConfig.models[tier];
+            if (ep?.enabled) {
+              overrides[tier] = {
+                base_url: ep.base_url,
+                api_key: ep.api_key,
+                model_name: ep.model_name,
+              };
+            }
+          }
+          if (Object.keys(overrides).length > 0) {
+            modelOverrides = overrides;
+          }
         }
 
-        // 转换数据源配置：表单模式才传结构化字段
-        let datasourceConfig: RequestDatasourceConfig | undefined;
+        // Phase 2b: 构建 datasource_override（表单模式才传）
+        let datasourceOverride: DatasourceOverride | undefined;
         let datasourceId = "pagila";
         if (isDbConfigured(storedDbConfig)) {
           datasourceId = storedDbConfig.datasource_id || "pagila";
           if (storedDbConfig.connection.mode === "form") {
-            datasourceConfig = {
-              datasource_id: storedDbConfig.datasource_id,
-              type: storedDbConfig.type,
+            datasourceOverride = {
               host: storedDbConfig.connection.host || "",
               port: storedDbConfig.connection.port || 0,
               database: storedDbConfig.connection.database || "",
               username: storedDbConfig.connection.username || "",
               password: storedDbConfig.connection.password || "",
+              type: storedDbConfig.type,
               schemas: storedDbConfig.auth.schemas,
               allowed_tables: storedDbConfig.auth.allowed_tables,
             };
@@ -119,8 +120,8 @@ export function Workbench() {
           question: trimmed,
           datasource_id: datasourceId,
           debug: false,
-          ...(modelConfig && { model_config: modelConfig }),
-          ...(datasourceConfig && { datasource_config: datasourceConfig }),
+          ...(modelOverrides && { model_overrides: modelOverrides }),
+          ...(datasourceOverride && { datasource_override: datasourceOverride }),
         });
 
         // Update the turn with the response
