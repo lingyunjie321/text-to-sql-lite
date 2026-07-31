@@ -4,6 +4,8 @@ from dataclasses import dataclass, replace
 import pytest
 
 import app.workflow.nodes as workflow_nodes
+import app.workflow.nodes.complexity_route as cr_node_module
+import app.workflow.nodes.schema_linking as sl_node_module
 from app.connectors.errors import (
     DatabaseError,
     ErrorType,
@@ -247,7 +249,7 @@ def test_complexity_failure_is_internal_before_model_or_execution(
     provider = Provider("SELECT film_id FROM film LIMIT 1")
     connector = Connector()
     monkeypatch.setattr(
-        workflow_nodes,
+        cr_node_module,
         "decide_complexity",
         lambda *args, **kwargs: (_ for _ in ()).throw(
             RuntimeError("private route failure")
@@ -295,7 +297,7 @@ def test_materialization_mismatch_fails_before_model(
 ) -> None:
     provider = Provider("SELECT film_id FROM film LIMIT 1")
     connector = Connector()
-    original = workflow_nodes.link_schema
+    original = sl_node_module.link_schema
     calls = 0
 
     def mismatched_second_result(*args: object, **kwargs: object):
@@ -309,7 +311,7 @@ def test_materialization_mismatch_fails_before_model(
         return replace(result, schema_version="stale-schema-version")
 
     monkeypatch.setattr(
-        workflow_nodes,
+        sl_node_module,
         "link_schema",
         mismatched_second_result,
     )

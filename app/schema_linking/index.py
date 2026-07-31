@@ -33,7 +33,7 @@ SCHEMA_DOCUMENT_VERSION = "schema-doc-v1"
 FUSION_VERSION = "rrf-v1"
 RERANK_VERSION = "schema-rerank-v2"
 INDEX_MAX_ENTRIES = 32
-INDEX_EMBEDDING_BATCH_SIZE = 64
+INDEX_EMBEDDING_BATCH_SIZE = 10
 
 SchemaDocumentKind = Literal[
     "table",

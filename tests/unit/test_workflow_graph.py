@@ -3,7 +3,11 @@ from dataclasses import dataclass
 
 import pytest
 
+import app.schema_linking.linker as linker_module
+import app.workflow.complexity as complexity_module
 import app.workflow.nodes as workflow_nodes
+import app.workflow.nodes.complexity_route as cr_node_module
+import app.workflow.nodes.schema_linking as sl_node_module
 from app.connectors.errors import (
     DatabaseError,
     ErrorType,
@@ -422,7 +426,7 @@ def test_simple_request_probes_then_materializes_same_snapshot(
         allowed_tables=WIDE_ALLOWED_TABLES,
     )
     calls: list[tuple[SchemaTopK, SchemaSnapshot, int]] = []
-    original = workflow_nodes.link_schema
+    original = sl_node_module.link_schema
 
     def recording_link_schema(
         question: str,
@@ -447,7 +451,7 @@ def test_simple_request_probes_then_materializes_same_snapshot(
         return result
 
     monkeypatch.setattr(
-        workflow_nodes,
+        sl_node_module,
         "link_schema",
         recording_link_schema,
     )
@@ -753,8 +757,8 @@ def test_schema_error_relinks_and_accepts_one_distinct_repair(
 ) -> None:
     top_ks: list[SchemaTopK] = []
     repair_history_flags: list[bool] = []
-    original_link_schema = workflow_nodes.link_schema
-    original_decide_complexity = workflow_nodes.decide_complexity
+    original_link_schema = sl_node_module.link_schema
+    original_decide_complexity = cr_node_module.decide_complexity
 
     def recording_link_schema(*args: object, **kwargs: object):
         top_ks.append(kwargs["top_k"])  # type: ignore[arg-type]
@@ -773,12 +777,12 @@ def test_schema_error_relinks_and_accepts_one_distinct_repair(
         )
 
     monkeypatch.setattr(
-        workflow_nodes,
+        sl_node_module,
         "link_schema",
         recording_link_schema,
     )
     monkeypatch.setattr(
-        workflow_nodes,
+        cr_node_module,
         "decide_complexity",
         recording_decide_complexity,
     )

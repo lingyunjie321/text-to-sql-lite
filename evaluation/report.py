@@ -39,8 +39,8 @@ from evaluation.runner import (
     review_evidence_sha256,
 )
 
-BASELINE_VERSION = "stage10-freeze-v3"
-REPORT_VERSION = "stage10-report-v3"
+BASELINE_VERSION = "stage1-freeze-v1"
+REPORT_VERSION = "stage1-report-v1"
 
 _STAGE1_OBJECT_STAGES: tuple[
     tuple[RetrievalObjectKind, RetrievalStage],

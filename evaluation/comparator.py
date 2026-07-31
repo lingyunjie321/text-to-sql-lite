@@ -11,7 +11,7 @@ from evaluation.models import (
     NumericTolerance,
 )
 
-COMPARATOR_VERSION = "stage10-comparator-v1"
+COMPARATOR_VERSION = "stage1-comparator-v1"
 
 _FLOAT_OIDS = frozenset({700, 701})
 _NUMERIC_OIDS = frozenset({20, 21, 23, 700, 701, 1700})

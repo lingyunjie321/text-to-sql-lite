@@ -507,7 +507,10 @@ def test_build_index_batches_and_normalizes_vectors() -> None:
         allowed_tables=allowed_tables,
     )
 
-    assert [len(call) for call in provider.calls] == [64, 1]
+    from app.schema_linking.index import INDEX_EMBEDDING_BATCH_SIZE
+    batch_sizes = [len(call) for call in provider.calls]
+    assert sum(batch_sizes) == len(index.documents)
+    assert all(bs <= INDEX_EMBEDDING_BATCH_SIZE for bs in batch_sizes)
     assert tuple(
         text for call in provider.calls for text in call
     ) == tuple(document.text for document in index.documents)

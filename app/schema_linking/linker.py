@@ -1,11 +1,7 @@
 import hashlib
 import math
-import re
-import unicodedata
-from collections import Counter, deque
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from itertools import combinations
 from time import monotonic, perf_counter_ns
 from typing import Literal
 
@@ -56,61 +52,32 @@ from app.schema_linking.rerank import (
     find_required_bridge_table_ids,
     rerank_schema_candidates,
 )
-
-BM25_K1 = 1.5
-BM25_B = 0.75
-_FIELD_AGGREGATION_WEIGHT = 0.35
-RETRIEVAL_CANDIDATE_LIMIT = 20
-_CAMEL_BOUNDARY = re.compile(
-    r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])"
+from app.schema_linking._tokenizer import _tokenize
+from app.schema_linking.bm25 import (
+    BM25_B,
+    BM25_K1,
+    _BM25,
+    _DocumentScore,
+    _approved_alias_match_count,
+    _field_document,
+    _table_document,
 )
-_WORD = re.compile(r"\w+", flags=re.UNICODE)
-
+from app.schema_linking.graph_search import (
+    _GraphStep,
+    _distances_from_tables,
+    _foreign_key_graph,
+    _join_paths,
+    _path_order,
+    _select_table_ids,
+    _shortest_path,
+)
 
 def _elapsed_ms(started_ns: int) -> float:
     return max(0.0, (perf_counter_ns() - started_ns) / 1_000_000)
 
 
-def _tokenize(text: str) -> tuple[str, ...]:
-    normalized = unicodedata.normalize("NFKC", text)
-    tokens: list[str] = []
-    for word in _WORD.findall(normalized):
-        folded_word = word.casefold()
-        tokens.append(folded_word)
-        for underscore_part in word.split("_"):
-            if not underscore_part:
-                continue
-            folded_part = underscore_part.casefold()
-            if folded_part != folded_word:
-                tokens.append(folded_part)
-            for camel_part in _CAMEL_BOUNDARY.split(underscore_part):
-                folded_camel_part = camel_part.casefold()
-                if folded_camel_part and folded_camel_part != folded_part:
-                    tokens.append(folded_camel_part)
-    return tuple(tokens)
-
-
-def _weighted_tokens(
-    text: str | None,
-    *,
-    repetitions: int = 1,
-) -> tuple[str, ...]:
-    if not text:
-        return ()
-    return _tokenize(text) * repetitions
-
-
-@dataclass(frozen=True, slots=True)
-class _DocumentScore:
-    score: float
-    matched_tokens: tuple[str, ...]
-
-
-@dataclass(frozen=True, slots=True)
-class _GraphStep:
-    neighbor: str
-    edge: JoinEdge
-
+_FIELD_AGGREGATION_WEIGHT = 0.35
+RETRIEVAL_CANDIDATE_LIMIT = 20
 
 RetrievalFailureCode = Literal[
     "EMBEDDING_INVALID_INPUT",
@@ -185,327 +152,6 @@ class SchemaRetrievalFailure(EmbeddingProviderError):
         self.args = ("Schema retrieval failed.",)
         self.cause = cause
         self.evidence = evidence
-
-
-class _BM25:
-    def __init__(self, documents: Mapping[str, tuple[str, ...]]) -> None:
-        self._documents = dict(documents)
-        self._frequencies = {
-            document_id: Counter(tokens)
-            for document_id, tokens in self._documents.items()
-        }
-        self._document_count = len(self._documents)
-        total_length = sum(
-            len(tokens) for tokens in self._documents.values()
-        )
-        self._average_length = (
-            total_length / self._document_count
-            if self._document_count
-            else 0.0
-        )
-        document_frequency: Counter[str] = Counter()
-        for tokens in self._documents.values():
-            document_frequency.update(set(tokens))
-        self._document_frequency = document_frequency
-
-    def score(self, query_tokens: tuple[str, ...]) -> dict[str, _DocumentScore]:
-        query_terms = tuple(sorted(set(query_tokens)))
-        scores: dict[str, _DocumentScore] = {}
-        for document_id, tokens in self._documents.items():
-            frequencies = self._frequencies[document_id]
-            matched_tokens = tuple(
-                term for term in query_terms if frequencies[term] > 0
-            )
-            score = sum(
-                self._term_score(
-                    frequencies[term],
-                    len(tokens),
-                    self._document_frequency[term],
-                )
-                for term in matched_tokens
-            )
-            scores[document_id] = _DocumentScore(
-                score=round(score, 12),
-                matched_tokens=matched_tokens,
-            )
-        return scores
-
-    def _term_score(
-        self,
-        term_frequency: int,
-        document_length: int,
-        document_frequency: int,
-    ) -> float:
-        if (
-            not self._document_count
-            or not self._average_length
-            or not term_frequency
-        ):
-            return 0.0
-        inverse_document_frequency = math.log(
-            1
-            + (
-                self._document_count
-                - document_frequency
-                + 0.5
-            )
-            / (document_frequency + 0.5)
-        )
-        length_normalization = (
-            1
-            - BM25_B
-            + BM25_B * document_length / self._average_length
-        )
-        return (
-            inverse_document_frequency
-            * term_frequency
-            * (BM25_K1 + 1)
-            / (
-                term_frequency
-                + BM25_K1 * length_normalization
-            )
-        )
-
-
-def _table_document(table: TableMetadata) -> tuple[str, ...]:
-    tokens = list(_weighted_tokens(table.schema_name))
-    tokens.extend(_weighted_tokens(table.table_name, repetitions=3))
-    for alias in table.aliases:
-        tokens.extend(_weighted_tokens(alias, repetitions=2))
-    tokens.extend(_weighted_tokens(table.comment))
-    for column in table.columns:
-        tokens.extend(
-            _weighted_tokens(column.column_name, repetitions=2)
-        )
-        for alias in column.aliases:
-            tokens.extend(_weighted_tokens(alias, repetitions=2))
-        tokens.extend(_weighted_tokens(column.comment))
-    return tuple(tokens)
-
-
-def _field_document(
-    table: TableMetadata,
-    column_name: str,
-) -> tuple[str, ...]:
-    column = next(
-        item for item in table.columns if item.column_name == column_name
-    )
-    tokens = list(_weighted_tokens(table.table_name))
-    tokens.extend(_weighted_tokens(column.column_name, repetitions=3))
-    for alias in column.aliases:
-        tokens.extend(_weighted_tokens(alias, repetitions=2))
-    tokens.extend(_weighted_tokens(column.comment))
-    return tuple(tokens)
-
-
-def _approved_alias_match_count(
-    table: TableMetadata,
-    *,
-    query_tokens: tuple[str, ...],
-) -> int:
-    query_token_set = set(query_tokens)
-    aliases = (
-        *table.aliases,
-        *(
-            alias
-            for column in table.columns
-            for alias in column.aliases
-        ),
-    )
-    return sum(
-        1
-        for alias in aliases
-        if (
-            (alias_tokens := set(_tokenize(alias)))
-            and alias_tokens.issubset(query_token_set)
-        )
-    )
-
-
-def _foreign_key_graph(
-    snapshot: SchemaSnapshot,
-) -> dict[str, tuple[_GraphStep, ...]]:
-    adjacency: dict[str, list[_GraphStep]] = {
-        f"{table.schema_name}.{table.table_name}": []
-        for table in snapshot.tables
-    }
-    for foreign_key in snapshot.foreign_keys:
-        source_table = (
-            f"{foreign_key.source_schema}.{foreign_key.source_table}"
-        )
-        target_table = (
-            f"{foreign_key.target_schema}.{foreign_key.target_table}"
-        )
-        edge = JoinEdge(
-            constraint_name=foreign_key.constraint_name,
-            source_table=source_table,
-            source_columns=foreign_key.source_columns,
-            target_table=target_table,
-            target_columns=foreign_key.target_columns,
-        )
-        adjacency[source_table].append(
-            _GraphStep(neighbor=target_table, edge=edge)
-        )
-        adjacency[target_table].append(
-            _GraphStep(neighbor=source_table, edge=edge)
-        )
-    return {
-        table_id: tuple(
-            sorted(
-                steps,
-                key=lambda step: (
-                    step.neighbor,
-                    step.edge.constraint_name,
-                    step.edge.source_table,
-                    step.edge.target_table,
-                ),
-            )
-        )
-        for table_id, steps in adjacency.items()
-    }
-
-
-def _shortest_path(
-    graph: Mapping[str, tuple[_GraphStep, ...]],
-    start: str,
-    target: str,
-    *,
-    allowed_nodes: set[str] | None = None,
-) -> JoinPath | None:
-    if start == target:
-        return JoinPath(tables=(start,), edges=())
-    if start not in graph or target not in graph:
-        return None
-
-    visited = {start}
-    pending = deque([(start, (start,), ())])
-    while pending:
-        current, tables, edges = pending.popleft()
-        for step in graph[current]:
-            if (
-                step.neighbor in visited
-                or (
-                    allowed_nodes is not None
-                    and step.neighbor not in allowed_nodes
-                )
-            ):
-                continue
-            next_tables = (*tables, step.neighbor)
-            next_edges = (*edges, step.edge)
-            if step.neighbor == target:
-                return JoinPath(
-                    tables=next_tables,
-                    edges=next_edges,
-                )
-            visited.add(step.neighbor)
-            pending.append(
-                (step.neighbor, next_tables, next_edges)
-            )
-    return None
-
-
-def _path_order(path: JoinPath) -> tuple[object, ...]:
-    return (
-        len(path.edges),
-        path.tables,
-        tuple(edge.constraint_name for edge in path.edges),
-    )
-
-
-def _distances_from_tables(
-    graph: Mapping[str, tuple[_GraphStep, ...]],
-    starting_tables: set[str],
-) -> dict[str, int]:
-    distances = {
-        table_id: 0 for table_id in starting_tables
-    }
-    pending = deque(sorted(starting_tables))
-    while pending:
-        current = pending.popleft()
-        for step in graph.get(current, ()):
-            if step.neighbor in distances:
-                continue
-            distances[step.neighbor] = distances[current] + 1
-            pending.append(step.neighbor)
-    return distances
-
-
-def _select_table_ids(
-    ranked_table_ids: list[str],
-    graph: Mapping[str, tuple[_GraphStep, ...]],
-    *,
-    top_k: SchemaTopK,
-) -> list[str]:
-    selected: list[str] = []
-    selected_set: set[str] = set()
-    for candidate in ranked_table_ids:
-        if candidate in selected_set:
-            continue
-        if not selected:
-            selected.append(candidate)
-            selected_set.add(candidate)
-            continue
-
-        connecting_paths = tuple(
-            path
-            for selected_table in selected
-            if (
-                path := _shortest_path(
-                    graph,
-                    candidate,
-                    selected_table,
-                )
-            )
-            is not None
-        )
-        best_path = (
-            min(connecting_paths, key=_path_order)
-            if connecting_paths
-            else None
-        )
-        additions = (
-            tuple(
-                table_id
-                for table_id in best_path.tables
-                if table_id not in selected_set
-            )
-            if best_path is not None
-            else (candidate,)
-        )
-        if len(selected_set) + len(additions) <= top_k:
-            selected.extend(additions)
-            selected_set.update(additions)
-        elif len(selected_set) < top_k:
-            selected.append(candidate)
-            selected_set.add(candidate)
-        if len(selected_set) == top_k:
-            break
-
-    return [
-        table_id
-        for table_id in ranked_table_ids
-        if table_id in selected_set
-    ]
-
-
-def _join_paths(
-    selected_table_ids: list[str],
-    graph: Mapping[str, tuple[_GraphStep, ...]],
-) -> tuple[JoinPath, ...]:
-    selected_set = set(selected_table_ids)
-    paths: list[JoinPath] = []
-    for start, target in combinations(sorted(selected_set), 2):
-        path = _shortest_path(
-            graph,
-            start,
-            target,
-            allowed_nodes=selected_set,
-        )
-        if path is not None:
-            paths.append(path)
-    return tuple(paths)
-
-
 def retrieval_query_sha256(question: str) -> str:
     try:
         encoded = question.encode("utf-8")

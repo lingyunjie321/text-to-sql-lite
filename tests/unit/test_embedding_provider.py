@@ -130,7 +130,7 @@ def test_embedding_settings_load_explicit_env_and_keep_secret_safe(
     assert settings.model == "text-embedding-v4"
     assert settings.dimension == 1024
     assert settings.timeout_seconds == 10
-    assert settings.max_batch_documents == 64
+    assert settings.max_batch_documents == 10
     assert settings.max_response_bytes == 4_194_304
     assert settings.api_key_value == "embedding-test-secret"
     assert "embedding-test-secret" not in repr(settings)
@@ -343,19 +343,21 @@ def test_provider_rejects_invalid_input_before_transport(
 
 
 def test_provider_accepts_the_maximum_batch_size() -> None:
-    texts = tuple(f"document-{index}" for index in range(64))
+    from app.schema_linking.index import INDEX_EMBEDDING_BATCH_SIZE
+    batch = INDEX_EMBEDDING_BATCH_SIZE
+    texts = tuple(f"document-{index}" for index in range(batch))
     provider, transport = _provider(
         body=_response(
             [
                 {"index": index, "embedding": [1, index, 0]}
-                for index in range(64)
+                for index in range(batch)
             ]
         )
     )
 
     result = provider.embed(texts)
 
-    assert len(result) == 64
+    assert len(result) == batch
     assert len(transport.calls) == 1
 
 

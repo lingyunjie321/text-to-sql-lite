@@ -11,6 +11,7 @@ from app.connectors.metadata import (
     build_schema_snapshot,
 )
 from app.generation import GenerationContext, build_generation_messages
+from app.generation.models import PROMPT_VERSION
 from app.schema_linking import (
     CandidateField,
     CandidateTable,
@@ -180,9 +181,7 @@ def test_prompt_serializes_only_candidate_schema_context() -> None:
     payload = json.loads(messages[1].content)
 
     assert payload["question"] == "列出影片标题和语言名称"
-    assert payload["prompt_version"] == (
-        "mvp-v1-projection-alias-view-semantics-v1"
-    )
+    assert payload["prompt_version"] == PROMPT_VERSION
     assert payload["normalized_time"] == "2026-07-28T00:00:00+08:00"
     assert payload["dialect"] == "postgres"
     assert payload["schema_version"] == SNAPSHOT.schema_version

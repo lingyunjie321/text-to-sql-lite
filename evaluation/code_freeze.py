@@ -149,7 +149,7 @@ def _controlled_paths(root: Path) -> tuple[Path, ...]:
 def controlled_code_sha256(root: Path) -> str:
     paths = _controlled_paths(root)
     digest = hashlib.sha256()
-    domain = b"stage10-controlled-code-v1"
+    domain = b"stage1-controlled-code-v1"
     digest.update(len(domain).to_bytes(4, "big"))
     digest.update(domain)
     digest.update(len(paths).to_bytes(8, "big"))
@@ -183,7 +183,7 @@ def evaluation_baseline_id(payload: Mapping[str, object]) -> str:
         raise ValueError(
             "evaluation baseline payload is invalid"
         ) from None
-    domain = b"stage10-evaluation-baseline-v1"
+    domain = b"stage1-evaluation-baseline-v1"
     framed = (
         len(domain).to_bytes(4, "big")
         + domain

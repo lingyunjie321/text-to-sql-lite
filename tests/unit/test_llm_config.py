@@ -215,7 +215,7 @@ def test_llm_settings_allow_http_only_for_loopback(
         ("api_key", "secret-🔒"),
         ("model", "   "),
         ("timeout_seconds", 0),
-        ("timeout_seconds", 31),
+        ("timeout_seconds", 121),
         ("temperature", 0.1),
         ("max_input_tokens", True),
         ("max_output_tokens", False),

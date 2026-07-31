@@ -170,7 +170,7 @@ def test_openapi_exposes_only_the_specified_post_endpoint() -> None:
 
     schema = app.openapi()
 
-    assert set(schema["paths"]) == {"/api/v1/text-to-sql"}
+    assert set(schema["paths"]) == {"/api/v1/text-to-sql", "/health"}
     operation = schema["paths"]["/api/v1/text-to-sql"]["post"]
     assert operation["requestBody"]["required"] is True
     assert operation["responses"]["200"]["content"][
@@ -506,8 +506,17 @@ def test_production_lifespan_fails_closed_without_credentials(
         "LLM_BASE_URL",
         "LLM_API_KEY",
         "LLM_MODEL",
+        "EMBEDDING_BASE_URL",
+        "EMBEDDING_API_KEY",
+        "EMBEDDING_MODEL",
+        "EMBEDDING_DIMENSION",
     ):
         monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(
+        "app.config._resolved_env_file",
+        lambda env_file: env_file if env_file is not None
+        else __import__("pathlib").Path(".env.missing"),
+    )
 
     with pytest.raises(ValidationError):
         with TestClient(create_app()):
@@ -517,7 +526,7 @@ def test_production_lifespan_fails_closed_without_credentials(
 def test_importing_asgi_app_does_not_load_credentials() -> None:
     from app.main import app
 
-    assert app.title == "Text-to-SQL MVP"
+    assert app.title == "Text-to-SQL Agent"
 
 
 def test_production_pagila_allowlist_is_explicit_and_excludes_staff() -> None:

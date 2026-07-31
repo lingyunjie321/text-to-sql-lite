@@ -137,7 +137,7 @@ def _configuration() -> dict[str, object]:
             "fusion_version": "rrf-v1",
             "rrf_k": 60,
             "index_max_entries": 32,
-            "index_embedding_batch_size": 64,
+            "index_embedding_batch_size": 10,
             "semantic_version": "semantic-v1",
         },
         "embedding": {
@@ -146,7 +146,7 @@ def _configuration() -> dict[str, object]:
             "dimension": 1024,
             "endpoint_identity_sha256": "1" * 64,
             "timeout_seconds": 10,
-            "max_batch_documents": 64,
+            "max_batch_documents": 10,
             "max_response_bytes": 4_194_304,
         },
         "rerank": {

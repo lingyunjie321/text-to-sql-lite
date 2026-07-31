@@ -8,6 +8,7 @@ from app.api import (
     create_app,
     default_request_identity,
 )
+from app.api.application import _authenticate
 from app.connectors.errors import ErrorType
 from app.workflow import (
     FinalStatus,
@@ -96,7 +97,7 @@ def test_only_trusted_dependency_can_authorize_debug() -> None:
         ),
         id_factory=_ids(),
     )
-    app.dependency_overrides[default_request_identity] = (
+    app.dependency_overrides[_authenticate] = (
         lambda: RequestIdentity(
             subject="trusted-test-user",
             can_debug=True,

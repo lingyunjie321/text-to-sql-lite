@@ -8,6 +8,7 @@ import pytest
 
 from app.config import LLMSettings
 from app.connectors.errors import ErrorType
+from app.generation.models import PROMPT_VERSION
 from app.generation import (
     LLMMessage,
     LLMProviderError,
@@ -117,9 +118,7 @@ def test_provider_sends_openai_compatible_structured_request() -> None:
     assert result.input_tokens == 12
     assert result.output_tokens == 4
     assert result.model == "model-a"
-    assert result.prompt_version == (
-        "mvp-v1-projection-alias-view-semantics-v1"
-    )
+    assert result.prompt_version == PROMPT_VERSION
     assert len(transport.calls) == 1
     request, timeout = transport.calls[0]
     assert request.full_url == (

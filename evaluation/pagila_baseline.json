@@ -1,5 +1,5 @@
 {
-  "baseline_version": "stage10-freeze-v3",
+  "baseline_version": "stage1-freeze-v1",
   "pagila": {
     "source": "https://github.com/devrimgunduz/pagila",
     "tag": "pagila-v3.1.0",
@@ -62,11 +62,11 @@
       "typing-inspection==0.4.2",
       "xxhash==3.8.1"
     ],
-    "prompt_version": "mvp-v1-projection-alias-view-semantics-v1",
+    "prompt_version": "stage1-retrieval-routing-v1",
     "provider_contract_version": "openai-compatible-json-v1",
-    "comparator_version": "stage10-comparator-v1",
-    "evidence_version": "stage10-evidence-v3",
-    "report_version": "stage10-report-v3"
+    "comparator_version": "stage1-comparator-v1",
+    "evidence_version": "stage1-evidence-v1",
+    "report_version": "stage1-report-v1"
   },
   "database_execution": {
     "datasource_id": "pagila",
@@ -84,5 +84,5 @@
   "model_configuration": {
     "config_sha256": "a76ffcacb889f0bba10aabbe35f81d0e6ad2cfdceb49221a33864c2f89135bf8"
   },
-  "evaluation_baseline_id": "5e4f9ee633cd7d7f753cc3f3667fcaa7030e25619eb059b48f125fb77e6b2d16"
+  "evaluation_baseline_id": "dcadf18ade8f95d99ee5f9d55f89a35962706994d0e64007978585ed5e2e64b9"
 }

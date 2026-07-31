@@ -52,6 +52,34 @@ class DatabaseSettings(BaseSettings):
         return self
 
 
+class AuthSettings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_prefix="TEXT_TO_SQL_",
+        extra="ignore",
+    )
+
+    api_key: SecretStr | None = None
+    debug_key: SecretStr | None = None
+
+    @property
+    def api_key_value(self) -> str | None:
+        if self.api_key is None:
+            return None
+        return self.api_key.get_secret_value()
+
+    @property
+    def debug_key_value(self) -> str | None:
+        if self.debug_key is None:
+            return None
+        return self.debug_key.get_secret_value()
+
+
+def load_auth_settings(
+    env_file: Path | None = None,
+) -> AuthSettings:
+    return AuthSettings(_env_file=_resolved_env_file(env_file))
+
+
 def load_database_settings(
     env_file: Path | None = None,
 ) -> DatabaseSettings:
@@ -69,7 +97,7 @@ class LLMSettings(BaseSettings):
     base_url: HttpUrl
     api_key: SecretStr
     model: str
-    timeout_seconds: float = Field(default=30, ge=1, le=30)
+    timeout_seconds: float = Field(default=30, ge=1, le=120)
     temperature: Literal[0] = 0
     max_input_tokens: int = Field(
         default=32_768,
@@ -407,7 +435,7 @@ class EmbeddingSettings(BaseSettings):
     model: str = Field(repr=False)
     dimension: int = Field(ge=1)
     timeout_seconds: float = Field(default=10, gt=0, le=10)
-    max_batch_documents: Literal[64] = 64
+    max_batch_documents: Literal[10] = 10
     max_response_bytes: Literal[4_194_304] = 4_194_304
 
     @property

@@ -3,6 +3,7 @@ from dataclasses import dataclass
 import pytest
 
 import app.workflow.nodes as workflow_nodes
+import app.workflow.nodes.generate_sql as gen_sql_module
 from app.connectors.errors import ErrorType
 from app.generation import (
     GenerationResult,
@@ -390,7 +391,7 @@ def test_normalization_failure_is_observed_and_sanitized(
         _generation(sql="SELECT title FROM film")
     )
     monkeypatch.setattr(
-        workflow_nodes,
+        gen_sql_module,
         "normalize_generation_result",
         lambda *args, **kwargs: (_ for _ in ()).throw(
             RuntimeError("private normalization detail")

@@ -57,7 +57,7 @@ from evaluation.models import (
     RetrievalStageEvidence,
 )
 
-EVIDENCE_VERSION = "stage10-evidence-v3"
+EVIDENCE_VERSION = "stage1-evidence-v1"
 _FIXTURE_PROMPT_VERSION = "evaluation-fixture-v1"
 
 _RETRIEVAL_STAGE_KS = (5, 10, 20)
@@ -911,7 +911,7 @@ def review_evidence_sha256(evidence_sha256: str) -> str:
     if re.fullmatch(r"[0-9a-f]{64}", evidence_sha256) is None:
         raise ValueError("evaluation evidence digest is invalid")
     return hashlib.sha256(
-        b"stage10-review-v3\0" + evidence_sha256.encode("ascii")
+        b"stage1-review-v1\0" + evidence_sha256.encode("ascii")
     ).hexdigest()
 
 

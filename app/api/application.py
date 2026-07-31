@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 from contextlib import asynccontextmanager
 from typing import Annotated
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.api.bootstrap import (
     ApplicationServices,
@@ -21,6 +23,7 @@ from app.api.models import (
     QueryResponse,
 )
 from app.api.response import build_query_response
+from app.config import AuthSettings, load_auth_settings
 from app.connectors.errors import ErrorType
 from app.workflow import (
     FinalStatus,
@@ -29,6 +32,30 @@ from app.workflow import (
 
 API_PATH = "/api/v1/text-to-sql"
 IdFactory = Callable[[], str]
+_bearer_scheme = HTTPBearer(auto_error=False)
+
+
+def _authenticate(
+    credentials: Annotated[
+        HTTPAuthorizationCredentials | None,
+        Depends(_bearer_scheme),
+    ],
+) -> RequestIdentity:
+    auth = load_auth_settings()
+    if auth.api_key_value is None:
+        return default_request_identity()
+    if credentials is None:
+        raise HTTPException(status_code=401, detail="API key required")
+    if credentials.credentials != auth.api_key_value:
+        raise HTTPException(status_code=403, detail="Invalid API key")
+    can_debug = (
+        auth.debug_key_value is not None
+        and credentials.credentials == auth.debug_key_value
+    )
+    return RequestIdentity(
+        subject="api-key-user",
+        can_debug=can_debug,
+    )
 
 
 def _services_from_request(
@@ -96,10 +123,14 @@ def create_app(
                 active_services.close()
 
     app = FastAPI(
-        title="Text-to-SQL MVP",
+        title="Text-to-SQL Agent",
         version="0.1.0",
         lifespan=lifespan,
     )
+
+    @app.get("/health")
+    async def health() -> dict[str, object]:
+        return {"status": "healthy"}
 
     @app.exception_handler(RequestValidationError)
     async def handle_request_validation_error(
@@ -128,7 +159,7 @@ def create_app(
             500: {"model": QueryResponse},
         },
     )
-    def query_text_to_sql(
+    async def query_text_to_sql(
         query: QueryRequest,
         active_services: Annotated[
             ApplicationServices,
@@ -136,7 +167,7 @@ def create_app(
         ],
         identity: Annotated[
             RequestIdentity,
-            Depends(default_request_identity),
+            Depends(_authenticate),
         ],
     ) -> QueryResponse | JSONResponse:
         request_id = str(uuid4())
@@ -175,7 +206,8 @@ def create_app(
                 datasource_id=query.datasource_id,
                 requested_schemas=query.schemas,
             )
-            terminal_state = active_services.runner(
+            terminal_state = await asyncio.to_thread(
+                active_services.runner,
                 initial_state,
                 context=active_services.context,
             )
