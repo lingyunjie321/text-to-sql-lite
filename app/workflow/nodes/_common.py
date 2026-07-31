@@ -1,3 +1,5 @@
+"""节点共用工具：节点间共享的状态读取、deadline 计算与错误映射辅助。"""
+
 from __future__ import annotations
 
 from collections.abc import Callable

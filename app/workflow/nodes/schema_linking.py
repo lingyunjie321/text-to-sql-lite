@@ -1,3 +1,5 @@
+"""Schema Linking 节点：在授权范围内检索候选表/字段/FK 路径（探测与物化两次）。"""
+
 from __future__ import annotations
 
 from app.connectors.errors import PostgreSQLConnectorError

@@ -7,10 +7,21 @@ StarRocks is MySQL-protocol compatible but has limitations:
 
 All queries accept two positional parameters for schema and table
 filtering (``%s`` placeholders, matching the pymysql driver).
+
+Only the dialect-specific SQL templates are declared below; the shared
+rendering machinery and the primary-key template (identical to MySQL)
+live in :mod:`app.connectors.metadata_queries_mysql_family`.
 """
 
-# ── Raw SQL templates (placeholder count resolved at runtime) ─────
+from app.connectors.metadata_queries_mysql_family import (
+    MYSQL_PRIMARY_KEYS_RAW,
+    build_family_queries,
+)
 
+# ── StarRocks 方言差异模板 ─────────────────────────────────────
+
+# 与 MySQL 模板的差异：JOIN ``TABLES`` 并过滤 ``BASE TABLE``，
+# 仅暴露基表列（StarRocks 的 COLUMNS 还包含视图等对象）。
 _TABLE_COLUMNS_RAW = """
 SELECT
     c.TABLE_SCHEMA AS schema_name,
@@ -31,25 +42,6 @@ JOIN INFORMATION_SCHEMA.TABLES AS t
 WHERE c.TABLE_SCHEMA IN ({schema_placeholders})
   AND c.TABLE_NAME IN ({table_placeholders})
 ORDER BY c.TABLE_SCHEMA, c.TABLE_NAME, c.ORDINAL_POSITION
-"""
-
-_PRIMARY_KEYS_RAW = """
-SELECT
-    k.CONSTRAINT_NAME AS constraint_name,
-    'PRIMARY KEY' AS constraint_type,
-    k.TABLE_SCHEMA AS schema_name,
-    k.TABLE_NAME AS table_name,
-    k.COLUMN_NAME AS column_name,
-    k.ORDINAL_POSITION AS column_position
-FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE AS k
-JOIN INFORMATION_SCHEMA.TABLE_CONSTRAINTS AS tc
-  ON tc.CONSTRAINT_NAME = k.CONSTRAINT_NAME
- AND tc.TABLE_SCHEMA = k.TABLE_SCHEMA
- AND tc.TABLE_NAME = k.TABLE_NAME
- AND tc.CONSTRAINT_TYPE = 'PRIMARY KEY'
-WHERE k.TABLE_SCHEMA IN ({schema_placeholders})
-  AND k.TABLE_NAME IN ({table_placeholders})
-ORDER BY k.TABLE_SCHEMA, k.TABLE_NAME, k.CONSTRAINT_NAME, k.ORDINAL_POSITION
 """
 
 # StarRocks does **not** support traditional foreign-key constraints.
@@ -91,38 +83,16 @@ ORDER BY tc.TABLE_SCHEMA, tc.TABLE_NAME, tc.CONSTRAINT_NAME
 """
 
 
-def _build_in_clause(count: int) -> str:
-    """Return ``%s, %s, ...`` with *count* placeholders."""
-    return ", ".join(["%s"] * max(count, 1))
-
-
-def _finalise_sql(count: int) -> dict[str, str]:
-    placeholders_schema = _build_in_clause(count)
-    placeholders_table = _build_in_clause(count)
-    return {
-        "table_columns": _TABLE_COLUMNS_RAW.format(
-            schema_placeholders=placeholders_schema,
-            table_placeholders=placeholders_table,
-        ),
-        "primary_keys": _PRIMARY_KEYS_RAW.format(
-            schema_placeholders=placeholders_schema,
-            table_placeholders=placeholders_table,
-        ),
-        "foreign_keys": _FOREIGN_KEYS_RAW.format(
-            schema_placeholders=placeholders_schema,
-            table_placeholders=placeholders_table,
-        ),
-        "unique_indexes": _UNIQUE_INDEXES_RAW.format(
-            schema_placeholders=placeholders_schema,
-            table_placeholders=placeholders_table,
-        ),
-    }
-
-
 def build_metadata_queries(count: int) -> dict[str, str]:
     """Build parameterised metadata queries for StarRocks with *count*
     schema/table placeholders."""
-    return _finalise_sql(count)
+    return build_family_queries(
+        count,
+        table_columns_raw=_TABLE_COLUMNS_RAW,
+        primary_keys_raw=MYSQL_PRIMARY_KEYS_RAW,
+        foreign_keys_raw=_FOREIGN_KEYS_RAW,
+        unique_indexes_raw=_UNIQUE_INDEXES_RAW,
+    )
 
 
 # ── Default queries (single schema / single table) ──────────────

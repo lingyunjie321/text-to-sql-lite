@@ -1,3 +1,11 @@
+"""连接器错误模型与驱动异常规范化。
+
+把 psycopg（PostgreSQL）与 pymysql（MySQL / StarRocks）抛出的驱动
+异常统一转换为 :class:`DatabaseConnectorError`：按 SQLSTATE 或 MySQL
+错误码分类为稳定的 :class:`ErrorType`，并附带可对外展示的安全消息
+（不泄露 DSN、密码等敏感信息）。
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -12,6 +20,11 @@ if TYPE_CHECKING:
 
 
 class ErrorType(str, Enum):
+    """稳定的错误分类，贯穿连接器、校验与工作流各层。
+
+    取值与具体数据库无关，供 API 层映射为对外的错误类型。
+    """
+
     SYNTAX_ERROR = "SYNTAX_ERROR"
     SCHEMA_ERROR = "SCHEMA_ERROR"
     DIALECT_ERROR = "DIALECT_ERROR"
@@ -27,6 +40,13 @@ class ErrorType(str, Enum):
 
 @dataclass(frozen=True, slots=True)
 class DatabaseError:
+    """单次数库错误的结构化细节。
+
+    ``sqlstate`` 为原始 SQLSTATE（MySQL 为 ``MY-<errno>`` 形式）；
+    ``code`` 为对外的稳定错误码；``retryable`` 标记是否值得重试；
+    ``public_message`` 为可安全对外展示的消息。
+    """
+
     sqlstate: str | None
     error_type: ErrorType
     code: str

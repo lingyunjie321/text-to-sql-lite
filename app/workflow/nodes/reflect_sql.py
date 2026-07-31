@@ -1,3 +1,5 @@
+"""反思修复节点：按错误类型路由到 Schema 重新探测或语法/方言重新生成（最多三次）。"""
+
 from __future__ import annotations
 
 from app.reflection import (

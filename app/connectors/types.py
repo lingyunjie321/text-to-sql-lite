@@ -1,3 +1,10 @@
+"""连接器共享类型：JSON 安全值、方言名称与驱动返回值规范化。
+
+:func:`normalize_value` 把各数据库驱动返回的 Python 值（Decimal、
+日期时间、字节串等）转换为可 JSON 序列化的表示，保证执行结果可以
+安全地写入 API 响应与审计证据。
+"""
+
 from __future__ import annotations
 
 from collections.abc import Mapping

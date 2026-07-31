@@ -1,3 +1,5 @@
+"""SQL 执行节点：在只读事务中执行已校验 SQL，30 秒超时，最多 1000 行。"""
+
 from __future__ import annotations
 
 from app.execution import execute_validated_sql

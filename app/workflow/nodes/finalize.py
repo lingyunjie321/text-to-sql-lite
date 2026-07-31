@@ -1,3 +1,5 @@
+"""终结节点：形成唯一 FinalStatus 并组装公开响应与错误脱敏。"""
+
 from __future__ import annotations
 
 from dataclasses import replace

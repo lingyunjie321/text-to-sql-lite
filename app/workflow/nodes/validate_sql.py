@@ -1,3 +1,5 @@
+"""SQL 校验节点：SQLGlot AST、单语句、只读、授权对象与函数 allowlist 策略校验。"""
+
 from __future__ import annotations
 
 from app.validation import validate_sql

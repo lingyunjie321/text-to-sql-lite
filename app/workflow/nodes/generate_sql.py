@@ -1,3 +1,5 @@
+"""SQL 生成节点：按路由选定的模型与上下文生成目标方言 SQL 或澄清请求。"""
+
 from __future__ import annotations
 
 import json

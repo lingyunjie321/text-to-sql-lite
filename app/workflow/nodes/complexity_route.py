@@ -1,3 +1,5 @@
+"""复杂度路由节点：基于候选与 JOIN Path 判定 simple/medium/complex 与 Top-K 预算。"""
+
 from __future__ import annotations
 
 from app.workflow.complexity import decide_complexity

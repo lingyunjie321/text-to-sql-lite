@@ -128,6 +128,9 @@ def test_post_endpoint_runs_workflow_and_returns_contract() -> None:
         )
 
     assert response.status_code == 200
+    # Phase 3 响应扩展字段（schema_candidates / semantic_references /
+    # complexity_route / repair_history）属契约一部分；本用例的 workflow
+    # 不产生候选与路由数据，因此均为 None。
     assert response.json() == {
         "request_id": "req-1",
         "trace_id": "trace-1",
@@ -141,6 +144,10 @@ def test_post_endpoint_runs_workflow_and_returns_contract() -> None:
         "repair_count": 0,
         "clarification": None,
         "error": None,
+        "schema_candidates": None,
+        "semantic_references": None,
+        "complexity_route": None,
+        "repair_history": None,
     }
     assert len(runner.calls) == 1
     state, context = runner.calls[0]
@@ -170,7 +177,13 @@ def test_openapi_exposes_only_the_specified_post_endpoint() -> None:
 
     schema = app.openapi()
 
-    assert set(schema["paths"]) == {"/api/v1/text-to-sql", "/health"}
+    # POST /api/v1/text-to-sql 是核心契约；GET /health 与 GET /api/v1/config
+    # 是有意的只读辅助端点（健康检查与配置查询），不含写操作或敏感数据。
+    assert set(schema["paths"]) == {
+        "/api/v1/text-to-sql",
+        "/api/v1/config",
+        "/health",
+    }
     operation = schema["paths"]["/api/v1/text-to-sql"]["post"]
     assert operation["requestBody"]["required"] is True
     assert operation["responses"]["200"]["content"][

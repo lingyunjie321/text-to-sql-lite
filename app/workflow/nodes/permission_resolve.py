@@ -1,3 +1,5 @@
+"""权限解析节点：根据可信身份解析授权 Schema/表 allowlist。"""
+
 from __future__ import annotations
 
 from app.workflow.models import (

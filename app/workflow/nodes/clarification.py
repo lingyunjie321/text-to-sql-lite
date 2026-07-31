@@ -1,3 +1,5 @@
+"""澄清节点：业务对象不唯一时不生成 SQL，返回结构化澄清请求。"""
+
 from __future__ import annotations
 
 from app.connectors.errors import ErrorType

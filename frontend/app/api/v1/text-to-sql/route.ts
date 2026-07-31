@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { sanitizeQueryRequest } from "@/lib/query-request";
 
 const BACKEND_URL = process.env.TEXT_TO_SQL_API_URL;
 const API_KEY = process.env.TEXT_TO_SQL_API_KEY;
@@ -21,12 +22,33 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Parse request body — malformed JSON gets a 400 instead of a misleading
+  // "backend unreachable" error.
+  let body: unknown;
   try {
-    const body = await request.json();
+    body = await request.json();
+  } catch {
+    return NextResponse.json(
+      {
+        request_id: "unknown",
+        trace_id: "unknown",
+        status: "FAILED_INTERNAL",
+        error: {
+          error_type: "UNKNOWN",
+          code: "INVALID_JSON_BODY",
+          message: "请求体不是合法的 JSON。",
+        },
+      },
+      { status: 400 },
+    );
+  }
 
-    // Phase 1: Strip model_config and datasource_config — these are frontend-only
-    // fields that the backend does not recognize (extra="forbid" on QueryRequest).
-    const { model_config, datasource_config, ...cleanBody } = body;
+  try {
+    // Whitelist-strip the body: only the six fields declared by the backend
+    // QueryRequest contract survive (question, datasource_id, schemas, debug,
+    // model_overrides, datasource_override). Everything else — including legacy
+    // model_config / datasource_config — is dropped to avoid 422 (extra="forbid").
+    const cleanBody = sanitizeQueryRequest(body);
 
     // Phase 4a: Build headers with optional API key injection
     const headers: Record<string, string> = {

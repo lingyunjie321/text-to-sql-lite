@@ -1,3 +1,5 @@
+"""工作流包装器：组装 LangGraph 状态图并暴露同步运行入口。"""
+
 from __future__ import annotations
 
 from collections.abc import Callable

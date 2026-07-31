@@ -79,13 +79,21 @@ class ApplicationServices:
     compatibility, the ``context`` keyword maps to a single-entry dict
     keyed by ``"default"``.
 
+    ``llm_route_settings`` 保存原始路由配置，供请求级 model_overrides
+    覆盖重建使用（可选；测试中可省略）。
+
     Constructor (keyword-only)::
 
         ApplicationServices(context=ctx)           # single datasource
         ApplicationServices(contexts={"a": ctx1})  # multi-datasource
     """
 
-    __slots__ = ("contexts", "runner", "close")
+    __slots__ = (
+        "contexts",
+        "runner",
+        "close",
+        "llm_route_settings",
+    )
 
     def __init__(
         self,
@@ -94,6 +102,7 @@ class ApplicationServices:
         contexts: dict[str, WorkflowContext] | None = None,
         runner: WorkflowRunner = run_workflow,
         close: Callable[[], None] | None = None,
+        llm_route_settings: object | None = None,
     ) -> None:
         if context is None and contexts is None:
             raise ValueError("either 'context' or 'contexts' is required")
@@ -117,6 +126,7 @@ class ApplicationServices:
         object.__setattr__(self, "contexts", resolved)
         object.__setattr__(self, "runner", runner)
         object.__setattr__(self, "close", close)
+        object.__setattr__(self, "llm_route_settings", llm_route_settings)
 
     @property
     def context(self) -> WorkflowContext:
@@ -431,4 +441,5 @@ def build_production_services() -> ApplicationServices:
         contexts=contexts,
         runner=default_traced_runner(),
         close=registry.close_all,
+        llm_route_settings=llm_route_settings,
     )

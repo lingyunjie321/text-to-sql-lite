@@ -1,3 +1,9 @@
+"""连接器注册表：按数据源 ID 登记与检索连接器实例。
+
+注册表是工作流运行时解析 ``datasource_id`` 到具体连接器的唯一入口，
+并负责统一关闭所有已登记连接器。
+"""
+
 from __future__ import annotations
 
 from app.connectors.base import DatabaseConnector

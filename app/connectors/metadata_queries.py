@@ -1,3 +1,10 @@
+"""PostgreSQL 元数据查询：基于 ``pg_catalog`` 的参数化 SQL。
+
+所有查询通过 ``AUTHORIZED_CTE`` 把授权范围（schema 列表、表列表）
+作为数组参数注入，只读取授权范围内的表列、键约束、外键与唯一索引
+元数据。占位符为 psycopg 的 ``%s`` 风格。
+"""
+
 AUTHORIZED_CTE = """
 WITH authorized(schema_name, table_name) AS (
     SELECT *

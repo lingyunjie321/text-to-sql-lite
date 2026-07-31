@@ -1,3 +1,9 @@
+"""视图语义清单的冻结锁定常量。
+
+记录当前冻结的视图语义清单路径及其 SHA-256 摘要、Pagila 数据库
+结构摘要，用于在加载清单时校验内容未被篡改（代码冻结契约的一部分）。
+"""
+
 from pathlib import Path
 
 VIEW_SEMANTIC_MANIFEST_PATH = (

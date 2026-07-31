@@ -1,3 +1,9 @@
+"""连接器协议定义：所有可插拔数据库连接器必须满足的接口契约。
+
+本模块只包含 :class:`DatabaseConnector` 协议，连接器实现采用鸭子类型，
+无需继承；工作流与执行层只依赖本协议，不感知具体数据库方言。
+"""
+
 from __future__ import annotations
 
 from contextlib import contextmanager

@@ -55,7 +55,14 @@ class DatasourceOverride(BaseModel):
 
 
 class QueryRequest(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    """POST /api/v1/text-to-sql 的请求契约。
+
+    安全规格要求拒绝一切未声明字段（extra="forbid"）：客户端不能注入
+    模型、复杂度、Top-K、allowlist 或依赖覆写等未声明键。请求级覆写只能
+    通过显式声明的 model_overrides / datasource_override 字段进行。
+    """
+
+    model_config = ConfigDict(extra="forbid")
 
     question: StrictStr
     datasource_id: StrictStr = "pagila"
@@ -92,6 +99,19 @@ class QueryRequest(BaseModel):
             raise ValueError("schemas are invalid")
         return stripped
 
+    @model_validator(mode="after")
+    def validate_override_tier_keys(self) -> Self:
+        """拒绝 model_overrides 中的未知 tier 键。"""
+        if self.model_overrides is not None:
+            allowed = {"simple", "standard", "complex"}
+            unknown = set(self.model_overrides) - allowed
+            if unknown:
+                raise ValueError(
+                    f"model_overrides keys must be one of "
+                    f"{sorted(allowed)}; got: {sorted(unknown)}"
+                )
+        return self
+
 
 class ResponseColumn(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -116,12 +136,20 @@ class PublicError(BaseModel):
 
 
 class SchemaCandidate(BaseModel):
-    """Schema 候选表（检索+选择）"""
+    """Schema 候选表（检索+选择）。
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    内部字段名使用 schema_name 以避免遮蔽 BaseModel.schema；
+    JSON 契约键名保持为 "schema"（前端依赖）。
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+        populate_by_name=True,
+    )
 
     table_name: str
-    schema: str
+    schema_name: str = Field(alias="schema", serialization_alias="schema")
     fields: list[str]
     score: float
     source: str  # "bm25" | "embedding" | "rerank"
@@ -162,7 +190,9 @@ class RepairHistoryEntry(BaseModel):
 
 
 class QueryResponse(BaseModel):
-    model_config = ConfigDict(extra="ignore", frozen=True)
+    """查询响应的严格联合契约；未声明字段一律拒绝。"""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     request_id: str = Field(min_length=1)
     trace_id: str = Field(min_length=1)

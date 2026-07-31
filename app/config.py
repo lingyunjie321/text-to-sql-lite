@@ -232,6 +232,12 @@ def load_datasources_from_file(
 
 
 class AuthSettings(BaseSettings):
+    """应用级安全与请求级覆写策略配置。
+
+    ``allow_adhoc_datasources`` 控制是否允许请求体内联数据源连接信息。
+    生产环境必须保持 ``false``（默认）；仅在受控调试环境显式开启。
+    """
+
     model_config = SettingsConfigDict(
         env_prefix="TEXT_TO_SQL_",
         extra="ignore",
@@ -239,6 +245,7 @@ class AuthSettings(BaseSettings):
 
     api_key: SecretStr | None = None
     debug_key: SecretStr | None = None
+    allow_adhoc_datasources: bool = False
 
     @property
     def api_key_value(self) -> str | None:

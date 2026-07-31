@@ -41,21 +41,24 @@ export type ErrorType =
 // Model / Datasource Override types (Phase 2)
 // ========================
 
+// 与后端 ModelOverride 一致：全部可选，extra="forbid"
 export interface ModelEndpointOverride {
-  base_url: string;
-  api_key: string;
-  model_name: string;
+  base_url?: string;
+  api_key?: string;
+  model_name?: string;
 }
 
+// 与后端 DatasourceOverride 一致：全部可选，extra="forbid"
 export interface DatasourceOverride {
-  host: string;
-  port: number;
-  database: string;
-  username: string;
-  password: string;
-  type: string;
-  schemas: string[];
-  allowed_tables: string[];
+  datasource_id?: string;
+  type?: string;
+  host?: string;
+  port?: number;
+  database?: string;
+  username?: string;
+  password?: string;
+  schemas?: string[];
+  allowed_tables?: string[];
 }
 
 export interface QueryRequest {
@@ -143,25 +146,6 @@ export interface ModelEndpoint {
   api_key: string;
   model_name: string;
   enabled: boolean;
-}
-
-export interface RequestModelConfig {
-  simple?: ModelEndpoint;
-  standard?: ModelEndpoint;
-  complex?: ModelEndpoint;
-  fallback?: ModelEndpoint;
-}
-
-export interface RequestDatasourceConfig {
-  datasource_id: string;
-  type: "postgresql" | "mysql" | "starrocks";
-  host: string;
-  port: number;
-  database: string;
-  username: string;
-  password: string;
-  schemas: string[];
-  allowed_tables: string[];
 }
 
 // ========================

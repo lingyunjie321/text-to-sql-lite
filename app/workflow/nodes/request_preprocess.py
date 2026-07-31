@@ -1,3 +1,5 @@
+"""请求预处理节点：规范化问题、解析时间表达式、初始化 SQLTaskState。"""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone

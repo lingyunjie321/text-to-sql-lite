@@ -19,6 +19,7 @@ dependencies = [
 test = [
   "httpx2==2.9.1",
   "pytest==9.1.1",
+  "pytest-cov==7.1.0",
 ]
 
 [tool.setuptools.packages.find]
@@ -28,4 +29,20 @@ include = ["app*", "tools*"]
 testpaths = ["tests"]
 markers = [
   "integration: requires the pinned PostgreSQL/Pagila service",
+]
+
+[tool.coverage.run]
+source = ["app", "evaluation", "tools"]
+branch = true
+omit = [
+  "*/__pycache__/*",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+exclude_also = [
+  "if TYPE_CHECKING:",
+  "raise NotImplementedError",
+  "@overload",
 ]

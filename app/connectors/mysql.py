@@ -1,3 +1,11 @@
+"""MySQL 连接器：基于 pymysql 的 :class:`DatabaseConnector` 实现。
+
+提供连接池、只读事务快照、语句超时（``max_execution_time``）、
+结果截断与 ``information_schema`` 元数据读取；所有驱动异常经
+:func:`normalize_database_error` 规范化后抛出。StarRocks 连接器
+在本类基础上做方言特化。
+"""
+
 from __future__ import annotations
 
 import math
@@ -109,6 +117,7 @@ class MySQLConnector:
     # ── Connection lifecycle ────────────────────────────────────
 
     def open(self) -> None:
+        """建立连接池并验证连通性；重复调用幂等。"""
         if self._pool is not None and not self._pool.closed:
             return
         self.check_connection()
@@ -121,6 +130,7 @@ class MySQLConnector:
         self._pool.open()
 
     def close(self) -> None:
+        """关闭连接池并释放全部连接；之后可重新 ``open``。"""
         if self._pool is not None:
             self._pool.close()
             self._pool = None
@@ -138,6 +148,10 @@ class MySQLConnector:
         self.close()
 
     def check_connection(self) -> None:
+        """执行轻量连通性检查（``SELECT 1``）。
+
+        失败时抛出规范化后的 :class:`DatabaseConnectorError`。
+        """
         try:
             conn = self._connect()
             try:
@@ -166,6 +180,12 @@ class MySQLConnector:
 
     @contextmanager
     def read_only_snapshot(self):
+        """进入只读快照事务上下文。
+
+        上下文内的 ``execute`` / ``read_metadata`` 复用同一连接，
+        会话设置为只读事务并应用语句超时；退出时回滚并归还连接。
+        不允许嵌套。
+        """
         if self._snapshot_connection.get() is not None:
             raise ValueError("read-only snapshot is already active")
         body_error: BaseException | None = None
@@ -207,6 +227,12 @@ class MySQLConnector:
         *,
         timeout_seconds: float | None = None,
     ) -> ExecutionResult:
+        """在只读事务中执行 *sql* 并返回截断受控的结果集。
+
+        *timeout_seconds* 缺省时使用连接器的 ``statement_timeout_seconds``；
+        可重试的连接错误按 ``connection_retry_count`` 重试，其余错误
+        规范化后直接抛出。
+        """
         operation_started_at, timeout = _operation_timeout(timeout_seconds)
         self._retry_count.set(0)
         for retry_index in range(self._connection_retry_count + 1):
@@ -237,6 +263,12 @@ class MySQLConnector:
         *,
         timeout_seconds: float | None = None,
     ) -> SchemaSnapshot:
+        """读取授权范围内的 schema 元数据并构建快照。
+
+        只读取 ``allowed_schemas`` / ``allowed_tables``（``schema.table``
+        形式）覆盖的表、列、主键、外键与唯一索引；范围为空时返回空
+        快照。重试与超时语义同 :meth:`execute`。
+        """
         operation_started_at, timeout = _operation_timeout(timeout_seconds)
         self._retry_count.set(0)
         scope = normalize_metadata_scope(allowed_schemas, allowed_tables)
@@ -377,6 +409,7 @@ class _ConnectionPool:
         self.closed = False
 
     def open(self) -> None:
+        """预建 ``min_size`` 个连接放入池中；已关闭的池不再打开。"""
         if self.closed:
             return
         for _ in range(self._min):
@@ -424,6 +457,7 @@ class _ConnectionPool:
                 pass
 
     def close(self) -> None:
+        """标记池已关闭并关闭池中全部空闲连接。"""
         self.closed = True
         while True:
             try:

@@ -1,3 +1,11 @@
+"""元数据模型与 schema 快照构建。
+
+定义表、列、主键、外键、唯一约束/索引等不可变元数据结构，以及把
+授权范围规范化为 :class:`MetadataScope`、把元数据组装为带内容摘要
+（``schema_version``）的 :class:`SchemaSnapshot` 的构建函数。快照是
+SQL 校验与 schema linking 的唯一元数据来源。
+"""
+
 from __future__ import annotations
 
 import hashlib
@@ -7,6 +15,8 @@ from dataclasses import asdict, dataclass, replace
 
 @dataclass(frozen=True, slots=True)
 class ColumnMetadata:
+    """单个列的元数据：名称、序号位置、类型、可空性与注释。"""
+
     schema_name: str
     table_name: str
     column_name: str
@@ -20,6 +30,8 @@ class ColumnMetadata:
 
 @dataclass(frozen=True, slots=True)
 class TableMetadata:
+    """单张表/视图的元数据：关系类型、注释与有序列集合。"""
+
     schema_name: str
     table_name: str
     relation_kind: str
@@ -30,6 +42,8 @@ class TableMetadata:
 
 @dataclass(frozen=True, slots=True)
 class PrimaryKeyMetadata:
+    """主键约束：约束名、所属表与有序列名。"""
+
     constraint_name: str
     schema_name: str
     table_name: str
@@ -38,6 +52,8 @@ class PrimaryKeyMetadata:
 
 @dataclass(frozen=True, slots=True)
 class ForeignKeyMetadata:
+    """外键约束：源表列与目标表列的有序对应关系。"""
+
     constraint_name: str
     source_schema: str
     source_table: str
@@ -49,6 +65,8 @@ class ForeignKeyMetadata:
 
 @dataclass(frozen=True, slots=True)
 class UniqueConstraintMetadata:
+    """唯一约束：约束名、所属表与有序列名。"""
+
     constraint_name: str
     schema_name: str
     table_name: str
@@ -57,6 +75,8 @@ class UniqueConstraintMetadata:
 
 @dataclass(frozen=True, slots=True)
 class UniqueIndexMetadata:
+    """唯一索引：索引名、有序列名、定义文本与可选谓词。"""
+
     index_name: str
     schema_name: str
     table_name: str
@@ -67,6 +87,12 @@ class UniqueIndexMetadata:
 
 @dataclass(frozen=True, slots=True)
 class SchemaSnapshot:
+    """授权范围内数据库结构的不可变快照。
+
+    ``schema_version`` 为全部元数据的规范化 SHA-256 摘要，任何结构
+    变化都会改变该值，用于缓存失效与检索版本契约校验。
+    """
+
     schemas: tuple[str, ...]
     tables: tuple[TableMetadata, ...]
     primary_keys: tuple[PrimaryKeyMetadata, ...]
@@ -78,19 +104,29 @@ class SchemaSnapshot:
 
 @dataclass(frozen=True, slots=True)
 class MetadataScope:
+    """规范化后的元数据读取范围。
+
+    ``schemas`` 为去重排序后的 schema 列表；``table_pairs`` 为授权
+    范围内实际存在的 ``(schema, table)`` 对（已过滤掉不在授权
+    schema 中的表）。
+    """
+
     schemas: tuple[str, ...]
     table_pairs: tuple[tuple[str, str], ...]
 
     @property
     def is_empty(self) -> bool:
+        """范围为真（无任何可读取的表对）时为 ``True``。"""
         return not self.schemas or not self.table_pairs
 
     @property
     def schema_parameters(self) -> list[str]:
+        """与 ``table_pairs`` 对齐的 schema 参数序列（用于 SQL 占位符）。"""
         return [schema for schema, _ in self.table_pairs]
 
     @property
     def table_parameters(self) -> list[str]:
+        """与 ``table_pairs`` 对齐的表名参数序列（用于 SQL 占位符）。"""
         return [table for _, table in self.table_pairs]
 
 
@@ -98,6 +134,11 @@ def normalize_metadata_scope(
     allowed_schemas: tuple[str, ...],
     allowed_tables: tuple[str, ...],
 ) -> MetadataScope:
+    """把授权 schema/表列表规范化为 :class:`MetadataScope`。
+
+    ``allowed_tables`` 必须为 ``schema.table`` 形式；不在授权 schema
+    中的表会被丢弃。空标识符或未限定表名抛出 :class:`ValueError`。
+    """
     if any(not schema.strip() for schema in allowed_schemas):
         raise ValueError("metadata scope contains an empty identifier")
     if not allowed_schemas or not allowed_tables:
@@ -134,6 +175,11 @@ def build_schema_snapshot(
     unique_constraints: tuple[UniqueConstraintMetadata, ...],
     unique_indexes: tuple[UniqueIndexMetadata, ...],
 ) -> SchemaSnapshot:
+    """把各类元数据组装为规范化 :class:`SchemaSnapshot`。
+
+    所有集合按固定规则排序（表按名称、列按序号位置），随后对规范化
+    JSON 取 SHA-256 得到确定性的 ``schema_version``。
+    """
     canonical_tables = tuple(
         replace(
             table,
@@ -232,6 +278,7 @@ def build_schema_snapshot(
 
 
 def empty_schema_snapshot() -> SchemaSnapshot:
+    """返回不含任何表的空快照（用于授权范围为空的场景）。"""
     return build_schema_snapshot(
         tables=(),
         primary_keys=(),

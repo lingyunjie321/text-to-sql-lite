@@ -1,3 +1,11 @@
+"""StarRocks 连接器：在 MySQL 连接器之上的方言特化。
+
+StarRocks 使用 MySQL 协议，因此复用 :class:`MySQLConnector` 的连接池、
+执行与映射逻辑，仅覆盖以下差异：超时改为 ``SET query_timeout``、
+不支持只读事务声明、元数据查询使用 StarRocks 方言模板（外键与唯一
+索引恒为空结果）。
+"""
+
 from __future__ import annotations
 
 import math
@@ -60,6 +68,12 @@ class StarRocksConnector(MySQLConnector):
 
     @contextmanager
     def read_only_snapshot(self):
+        """进入快照事务上下文（StarRocks 版）。
+
+        与 MySQL 版的差异：不发送 ``SET TRANSACTION READ ONLY``
+        （StarRocks 不支持），仅设置 ``query_timeout`` 并复用同一
+        连接。不允许嵌套。
+        """
         if self._snapshot_connection.get() is not None:
             raise ValueError("read-only snapshot is already active")
         body_error: BaseException | None = None

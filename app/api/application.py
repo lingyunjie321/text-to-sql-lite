@@ -22,6 +22,7 @@ from app.api.models import (
     QueryRequest,
     QueryResponse,
 )
+from app.api.overrides import OverrideError, resolve_request_context
 from app.api.response import build_query_response
 from app.config import AuthSettings, load_auth_settings
 from app.connectors.errors import ErrorType
@@ -118,7 +119,7 @@ def _json_response(
 ) -> JSONResponse:
     return JSONResponse(
         status_code=status_code,
-        content=response.model_dump(mode="json"),
+        content=response.model_dump(mode="json", by_alias=True),
     )
 
 
@@ -212,6 +213,7 @@ def create_app(
         API_PATH,
         response_model=QueryResponse,
         responses={
+            400: {"model": QueryResponse},
             403: {"model": QueryResponse},
             500: {"model": QueryResponse},
         },
@@ -263,13 +265,25 @@ def create_app(
                 datasource_id=query.datasource_id,
                 requested_schemas=query.schemas,
             )
-            ctx = active_services.context_for(query.datasource_id)
+            ctx = resolve_request_context(query, active_services)
             terminal_state = await asyncio.to_thread(
                 active_services.runner,
                 initial_state,
                 context=ctx,
             )
             return build_query_response(terminal_state)
+        except OverrideError as override_error:
+            return _json_response(
+                _error_response(
+                    request_id=request_id,
+                    trace_id=trace_id,
+                    status=FinalStatus.REJECTED_SECURITY,
+                    error_type=ErrorType.PERMISSION_DENIED,
+                    code="OVERRIDE_REJECTED",
+                    message=override_error.message,
+                ),
+                status_code=400,
+            )
         except Exception:
             return _json_response(
                 _error_response(

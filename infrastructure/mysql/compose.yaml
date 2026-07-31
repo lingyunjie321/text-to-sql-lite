@@ -1,0 +1,23 @@
+name: text-to-sql-mysql
+
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: text-to-sql-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?required}
+      MYSQL_DATABASE: test
+      MYSQL_USER: ${MYSQL_APP_USER:-reader}
+      MYSQL_PASSWORD: ${MYSQL_APP_PASSWORD:?required}
+    ports:
+      - "${MYSQL_HOST_PORT:-3306}:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  mysql-data:

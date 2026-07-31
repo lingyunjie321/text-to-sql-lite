@@ -1,0 +1,20 @@
+name: text-to-sql-starrocks
+
+services:
+  starrocks:
+    image: starrocks/allin1-ubuntu:3.3
+    container_name: text-to-sql-starrocks
+    ports:
+      - "${STARROCKS_FE_PORT:-8030}:8030"
+      - "${STARROCKS_QUERY_PORT:-9030}:9030"
+    volumes:
+      - starrocks-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8030/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 30s
+
+volumes:
+  starrocks-data:

@@ -155,6 +155,9 @@ server；以下以 Uvicorn 为例：
 Uvicorn 只是启动示例，未写入 `pyproject.toml`，也不属于当前资格冻结；正式
 部署应自行固定和验证 ASGI server 版本。
 
+生产容器化部署（含 `Dockerfile` 构建、环境契约、升级与回滚预案）见
+[部署与回滚](docs/部署与回滚.md)。
+
 启动时会加载 `.env`、连接数据库、读取授权元数据、校验锁定语义 manifest，
 并创建 LLM/Embedding runtime。缺少必需配置时进程会 fail closed。
 
@@ -312,5 +315,4 @@ Checkpoint / Memory、多数据库与跨源查询、缓存与生产治理属于�
 
 ## License
 
-仓库当前尚未包含开源许可证。在维护者选择并提交 `LICENSE` 前，代码不会因公开
-可见而自动获得开源使用许可。
+本项目以 [MIT License](LICENSE) 开源。

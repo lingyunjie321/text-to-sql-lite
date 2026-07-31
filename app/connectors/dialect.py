@@ -1,3 +1,9 @@
+"""方言档案：按数据库方言聚合元数据查询 SQL、连接默认值与驱动信息。
+
+每个受支持的方言（PostgreSQL / MySQL / StarRocks）对应一个工厂函数，
+返回不可变的 :class:`DialectProfile`，供连接器层与校验层按需取用。
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

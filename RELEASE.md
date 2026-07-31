@@ -2,7 +2,7 @@
 
 ## 当前快照
 
-- 记录日期：2026-07-30
+- 记录日期：2026-08-01
 - 包版本：`0.1.0`
 - 当前分支：`main`
 - 定位：工程预览，不是生产发布
@@ -10,6 +10,7 @@
 - MVP Stage 10 发布资格：`not_passed`
 - 增强 Stage 1 总体资格：`not_passed`
 - Stage 2～5：尚未开始实现
+- 交付前改进：安全回归已修复，全量 1264 测试通过，Override 接线完成
 
 本文件记录当前版本的完成情况和后续建设计划。安装、配置和 API 用法请阅读
 [README.md](README.md)；精确行为与验收门禁以仓库主规格和测试规格为准。
@@ -50,12 +51,15 @@
 
 ### 确定性与本地集成
 
-- 单元与安全回归：`1161 passed`
-- 完整 Pagila integration：`91 passed in 7.42s`
+- 单元与安全回归：`1173 passed`（含 12 项 Override 接线测试）
+- 完整 Pagila integration：`91 passed`（真实 Pagila + 临时只读角色）
+- 全量合计：`1264 passed, 0 failed`
 - Stage 1 synthetic development：`6/6` 通过
 - Stage 1 synthetic calibration：`6/6` 通过
-- Calibration 的组合检索相对 BM25 有 9 个分桶提升，比较分桶无回退
-- `compileall`、`pip check` 和 `git diff --check` 通过
+- 前端：typecheck 0 错误、vitest 49 测试通过、next build 成功
+- 覆盖率基线：unit+security 分支覆盖 **81%**（31 文件 100%）
+- 依赖漏洞扫描：`pip-audit` **0 漏洞**
+- `compileall`、`pip check` 通过
 
 完整 Pagila integration 使用临时随机只读角色，测试后撤销授权并删除角色；
 清理后 `codex_stage1_%` 残留角色数为 `0`。
@@ -95,6 +99,27 @@ OpenAI-compatible 服务执行且仅执行一次真实调用：
 质量、多模型路由或整个 Workflow 已完成真实环境验证。
 
 ## 未完成与已知限制
+
+### 交付前改进（2026-08-01）
+
+本次改进已修复的安全回归与工程缺口：
+
+- `QueryRequest`/`QueryResponse` 恢复 `extra="forbid"`，未知字段重新被 422 拒绝。
+- `ModelOverride`/`DatasourceOverride` 后端接线完成（含 SSRF/凭据安全约束）。
+- `SchemaCandidate.schema` 遮蔽告警消除。
+- Stage 1 校准冻结已重建（匹配当前受控代码哈希）。
+- 后端 Dockerfile、部署与回滚文档、GitHub Actions CI、覆盖率配置就绪。
+- MySQL/StarRocks 契约测试套件（无实例时 skip）与 compose 模板就绪。
+- pip-audit 0 漏洞；workflow 节点 docstring 覆盖从 0% 提升至全量。
+
+仍需解决的阻塞项：
+
+- **P0-3 正式候选**：Stage 1 契约版本迁移（`stage10-*-v3` → `stage1-*`）未完成，
+  `stage1_selected_configuration.json` 的 `public_configuration` 与当前 `.env`
+  派生配置不匹配，正式 Pagila 18 Case 候选无法运行。需设计决策：重建
+  selected configuration 或升级契约版本。
+- 双模型路由已验证配置正确（simple=deepseek-v4-flash / standard=deepseek-chat-v4
+  / complex=deepseek-reasoner），但尚未在正式候选中验证端到端质量。
 
 ### MVP 历史资格
 
