@@ -998,6 +998,14 @@ Record exact versions, hashes, counts, failures, and whether
 `13/18`。修复 003/010/011；剩余失败 002/005/008/009/012（模型输出波动、
 列类型检查、`||` 白名单），独立逐条审核待执行；历史 11 条 verified 未改动。
 
+第三次正式候选记录（2026-08-01）：按用户决定，003/010/011 已在候选 2 报告
+approve 并 verify（主 Gold 现 14 verified，002 保留第一轮 verified，005/008/
+009/012 保持 draft）。比较器升级 `stage1-comparator-v3`（仅 text/varchar/
+bpchar 类型族等价，其余检查不变），重建冻结与 Pagila baseline（ID
+`0b658f083b685cf93938689d109007a9916550e4c78d7a93aa12b17aaa5d1df4`）后
+重跑：自动证据 `14/18`。005/012 修复为通过；失败 002（波动，保留历史
+verified）、008/014（越权输出）、009（`||`）。独立逐条审核待执行。
+
 - [ ] **Step 3: Independent review**
 
 Provide the complete focused diff and this plan to an independent reviewer.

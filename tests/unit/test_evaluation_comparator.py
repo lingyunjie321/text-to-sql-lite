@@ -468,3 +468,60 @@ def test_truncated_result_cannot_be_verified() -> None:
 
     assert result.passed is False
     assert result.code == "COMPARATOR_TRUNCATED_RESULT"
+
+
+def test_string_type_family_accepts_text_varchar_and_bpchar() -> None:
+    cases = (
+        ((25, 1043), "text-vs-varchar"),
+        ((25, 1042), "text-vs-bpchar"),
+        ((1042, 1043), "bpchar-vs-varchar"),
+    )
+    for (gold_oid, predicted_oid), label in cases:
+        result = compare_results(
+            _result([("name", predicted_oid)], [["English"]]),
+            _result([("name", gold_oid)], [["English"]]),
+            mode=ComparisonMode.MULTISET,
+            order_sensitive=False,
+            numeric_tolerances={},
+        )
+        assert result.passed is True, label
+
+
+def test_string_type_family_keeps_value_normalization() -> None:
+    result = compare_results(
+        _result([("name", 1042)], [["English   "]]),
+        _result([("name", 25)], [["English"]]),
+        mode=ComparisonMode.MULTISET,
+        order_sensitive=False,
+        numeric_tolerances={},
+    )
+
+    assert result.passed is True
+
+
+def test_string_type_family_does_not_relax_other_types() -> None:
+    varchar_vs_integer = compare_results(
+        _result([("value", 1043)], [["1"]]),
+        _result([("value", 23)], [[1]]),
+        mode=ComparisonMode.MULTISET,
+        order_sensitive=False,
+        numeric_tolerances={},
+    )
+    timestamptz_vs_text = compare_results(
+        _result([("value", 25)], [["2026-01-01T00:00:00Z"]]),
+        _result([("value", 1184)], [["2026-01-01T00:00:00Z"]]),
+        mode=ComparisonMode.MULTISET,
+        order_sensitive=False,
+        numeric_tolerances={},
+    )
+    internal_char_vs_text = compare_results(
+        _result([("value", 25)], [["a"]]),
+        _result([("value", 18)], [["a"]]),
+        mode=ComparisonMode.MULTISET,
+        order_sensitive=False,
+        numeric_tolerances={},
+    )
+
+    assert varchar_vs_integer.passed is False
+    assert timestamptz_vs_text.passed is False
+    assert internal_char_vs_text.passed is False

@@ -12,8 +12,8 @@
 - Stage 2～5：尚未开始实现
 - 交付前改进：安全回归已修复，全量 1264 测试通过，Override 接线完成
 - Stage 1 正式配置：用户已确认三模型组合，选定配置与校准冻结已重建并验证
-- Stage 1 正式候选：候选 1 自动证据 `11/18`；候选 2（模型配置修复 + 比较器
-  v2）自动证据 `13/18`（均等待审核）
+- Stage 1 正式候选：候选 1 `11/18`；候选 2（模型配置修复 + 比较器 v2）
+  `13/18`；候选 3（比较器 v3）`14/18`（均等待审核）
 
 本文件记录当前版本的完成情况和后续建设计划。安装、配置和 API 用法请阅读
 [README.md](README.md)；精确行为与验收门禁以仓库主规格和测试规格为准。
@@ -76,9 +76,9 @@
 | development 规范化 | `c1746bea22d588578929b25afb1a3a29d13c7e978f5687e2b6352b7029668dd7` |
 | calibration 原始文件 | `07070687fb39592e26b02fb21891b5108b38bc0f5337240de25a4df3ac638845` |
 | calibration 规范化 | `d7e7d7d60a157ec78e00ba16fbf722dddd5552eb833863310a8d9ed95797b8bd` |
-| 受控代码 | `f6bc0c0f827790f8de99f01cce95c410ed90e9e90499040c2ffd096f49c1aab4` |
-| calibration baseline | `ec8b3978b211b4772f9f620c8e3d45659fb6a721b44cb66c7b7f76e16354a8c8` |
-| 当前 Pagila baseline | `67deb833144f7811d1351943f9531a06f29d33ce40290c69c5a5b1f1e313b62f` |
+| 受控代码 | `fed90d9f70253259401ac3329edf713cef74ff141e4adf249f2871accb69a5fb` |
+| calibration baseline | `88500f742ba765c6d277c8d9943a965687f02762b37e56d2c1f867920df54d3f` |
+| 当前 Pagila baseline | `0b658f083b685cf93938689d109007a9916550e4c78d7a93aa12b17aaa5d1df4` |
 
 这些摘要属于本次工程快照。契约标识已完成 Stage 1 迁移
 （`baseline_version=stage1-freeze-v1`、`PROMPT_VERSION=stage1-retrieval-routing-v1`、
@@ -142,6 +142,23 @@ OpenAI-compatible 服务执行且仅执行一次真实调用：
   `evaluation/cases/pagila_mvp_all_draft.jsonl`；主 Gold 文件已 verified 的
   11 条历史记录未改动。
 
+### Stage 1 正式候选 3（2026-08-01）
+
+比较器窄范围升级为 `stage1-comparator-v3`（仅 text/varchar/bpchar 归入同一
+字符串类型族；列名、顺序、值、大小写、前导/中间空格及数字/日期类型检查
+不变），按规则重建冻结后重跑：
+
+- 自动证据：`14/18` 通过；失败 `4` 条：
+  - PG-MVP-002：模型输出波动（列不一致；保留第一轮 verified）；
+  - PG-MVP-008/014：模型生成越权 SQL 被安全门拒绝（输出不稳定）；
+  - PG-MVP-009：仍使用 `\|\|`，白名单不放开，维持未通过。
+- PG-MVP-005 由失败修复为通过（v3 类型族生效）；PG-MVP-012 本轮通过。
+- baseline ID：
+  `0b658f083b685cf93938689d109007a9916550e4c78d7a93aa12b17aaa5d1df4`
+- 报告：
+  [pagila_mvp_stage1_candidate3.json](evaluation/reports/pagila_mvp_stage1_candidate3.json)
+  与 [pagila_mvp_stage1_candidate3_review.md](evaluation/reports/pagila_mvp_stage1_candidate3_review.md)。
+
 ## 未完成与已知限制
 
 ### 交付前改进（2026-08-01）
@@ -156,8 +173,8 @@ OpenAI-compatible 服务执行且仅执行一次真实调用：
 - Task 1 的三项 complexity mutation checks 已执行（3/3 被测试拦截）并恢复，
   `functional_complete=true`。
 - 后端 Dockerfile、部署与回滚文档、GitHub Actions CI、覆盖率配置就绪。
-- 比较器升级为 `stage1-comparator-v2`：字符串仅做尾部空格归一化，保留
-  大小写、前导/中间空格与列类型检查。
+- 比较器升级：v2 增加字符串尾部空格归一化；v3 仅将 text/varchar/bpchar
+  归入同一字符串类型族，其余类型与值检查不变。
 - standard 档模型改为端点支持的 `deepseek-v4-flash`（用户指示 v4-pro，
   实际 `.env` 为 flash；两者均为端点支持模型），010/011 在候选 2 通过。
 - MySQL/StarRocks 契约测试套件（无实例时 skip）与 compose 模板就绪。
@@ -165,10 +182,11 @@ OpenAI-compatible 服务执行且仅执行一次真实调用：
 
 仍需解决的阻塞项：
 
-- **P0-3 正式候选 2 已完成**：自动证据 `13/18`。剩余 5 条需要决策：
-  - 002/008/012：模型输出波动/写法差异，诊断重跑均通过，是否接受复核证据；
-  - 005：varchar vs text 列类型检查是否放宽（值已归一化）；
+- **P0-3 正式候选 3 已完成**：自动证据 `14/18`。剩余 4 条：
+  - 002：模型输出波动（保留第一轮 verified，不重新审核）；
+  - 008/014：模型输出不稳定，安全门正确拦截，保持 draft；
   - 009：`\|\|` 白名单不放开，维持未通过。
+- 候选 3 中 005/012 已通过，待用户确认后执行审核更新。
 - Stage 1 focused diff 的独立 blocking/high 清零审查尚未形成完成记录。
 
 ### MVP 历史资格

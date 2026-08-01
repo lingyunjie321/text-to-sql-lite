@@ -11,7 +11,9 @@ from evaluation.models import (
     NumericTolerance,
 )
 
-COMPARATOR_VERSION = "stage1-comparator-v2"
+COMPARATOR_VERSION = "stage1-comparator-v3"
+
+_STRING_TYPE_OIDS = frozenset({25, 1042, 1043})  # text, bpchar, varchar
 
 _FLOAT_OIDS = frozenset({700, 701})
 _NUMERIC_OIDS = frozenset({20, 21, 23, 700, 701, 1700})
@@ -72,6 +74,15 @@ def _normalize_string(value: JsonValue) -> JsonValue:
     if isinstance(value, str):
         return value.rstrip()
     return value
+
+
+def _column_type_equal(left_oid: int, right_oid: int) -> bool:
+    if (
+        left_oid in _STRING_TYPE_OIDS
+        and right_oid in _STRING_TYPE_OIDS
+    ):
+        return True
+    return left_oid == right_oid
 
 
 def _strict_equal(left: JsonValue, right: JsonValue) -> bool:
@@ -372,7 +383,10 @@ def compare_results(
     if (
         predicted_indices.keys() != {name for name in gold_names}
         or any(
-            predicted_columns[predicted_indices[name]][1] != type_oid
+            not _column_type_equal(
+                predicted_columns[predicted_indices[name]][1],
+                type_oid,
+            )
             for name, type_oid in gold_columns
         )
     ):
