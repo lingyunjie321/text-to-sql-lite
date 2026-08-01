@@ -90,9 +90,9 @@
   },
   "evaluation_baseline_id": "67deb833144f7811d1351943f9531a06f29d33ce40290c69c5a5b1f1e313b62f",
   "model_config_hash": "a1b38442cb37785a8b2366f87cbda0d3379411ab3125ed3cf77055a1e2b534ac",
-  "cases_file_sha256": "049e048b821e949936c1793d441f7adcda4660f10f8d0acf63e4f766a9726c22",
+  "cases_file_sha256": "4d60390e0eb6c18aab4a88d4b70d052e4d3b187f15637a1d2c90b9055051eebf",
   "status_neutral_sha256": "a00a8ec7496fc4e1533b2773e0267d555357a80be435a02dd70981d76ddb40d7",
-  "verified_case_count": 0,
+  "verified_case_count": 3,
   "evaluations": [
     {
       "case_id": "PG-MVP-001",
@@ -199,8 +199,8 @@
       "passed": true,
       "code": "EVALUATION_PASS",
       "evidence_sha256": "650917165b94b92bce3e123f22a31c8f8c70d343c08c5e4d8ca75a38861f26d3",
-      "audit_status": "pending",
-      "review_evidence_sha256": null
+      "audit_status": "approved",
+      "review_evidence_sha256": "a5b95b3463c123143fd093531b4151ad64065327d22ea8dd670752ea09c8cae9"
     },
     {
       "case_id": "PG-MVP-004",
@@ -439,8 +439,8 @@
       "passed": true,
       "code": "EVALUATION_PASS",
       "evidence_sha256": "7e023a10c18a77f6af37ed4366c8dbf7152069e05997556a75138e2c557bd80c",
-      "audit_status": "pending",
-      "review_evidence_sha256": null
+      "audit_status": "approved",
+      "review_evidence_sha256": "4a253f82e627cadd6ef78008352255539adba093f13f6509880d3043df66c469"
     },
     {
       "case_id": "PG-MVP-011",
@@ -475,8 +475,8 @@
       "passed": true,
       "code": "EVALUATION_PASS",
       "evidence_sha256": "9fc333b1484b4d4715cc4d2d1944f15e8fa4c4b27b0cda81a3ddb4a0f2b87cbb",
-      "audit_status": "pending",
-      "review_evidence_sha256": null
+      "audit_status": "approved",
+      "review_evidence_sha256": "1ec16d08b40c3f2ff4b471a4b966ee16a6f26a855b3ef789564c8f78fbfa8918"
     },
     {
       "case_id": "PG-MVP-012",
@@ -718,9 +718,9 @@
     "executable_cases": 15,
     "security_cases": 3,
     "automated_passed": 13,
-    "audit_approved": 0,
+    "audit_approved": 3,
     "audit_rejected": 0,
-    "verified_case_count": 0,
+    "verified_case_count": 3,
     "first_pass_passed": 9,
     "repaired_passed": 1,
     "gold_result_passed": 10,

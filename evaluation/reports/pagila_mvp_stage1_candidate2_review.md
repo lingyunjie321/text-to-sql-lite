@@ -104,3 +104,21 @@
 - 历史 11 条审核记录（候选 1）未改动；本轮新报告
   `pagila_mvp_stage1_candidate2.json` 的 `verified_case_count=0`。
 - Pagila 容器继续运行，等待你确认后续处理（逐条审核或进一步决策）。
+
+## 五、审核决定（2026-08-01，用户确认）
+
+- PG-MVP-003、010、011：**approve + verify**，已在候选 2 报告与主 Gold 文件
+  中更新为 `verified`（主文件现为 14 verified）。
+- PG-MVP-002：保留第一轮 `verified` 状态，不撤销、不重新审核；第二轮失败
+  记录为模型输出波动，不以诊断重跑结果替代正式候选结果。
+- PG-MVP-008：**不 approve**。两次正式候选均失败；诊断重跑成功只证明题目
+  可解，不作为正式通过依据。安全策略与允许表配置保持不变，记录为模型输出
+  不稳定问题，保持 `draft`。
+- PG-MVP-012：**不 approve**。`COUNT(*)` 与 `COUNT(inventory_id)` 在当前
+  数据下结果一致，但正式候选未满足字段召回契约；不以诊断结果手工放行，
+  不修改字段召回规则，保持 `draft`。
+- PG-MVP-005：**暂不 approve**。比较器做窄范围调整（text/varchar/bpchar
+  归入同一字符串类型族），作为独立修改另行处理。
+- PG-MVP-009：维持未通过，不放宽 `||` 安全白名单。
+- standard 档继续使用当前可用的 `deepseek-v4-flash`，不改回 v4-pro。
+- Pagila 容器继续保留。
