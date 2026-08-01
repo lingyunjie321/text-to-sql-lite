@@ -90,9 +90,9 @@
   },
   "evaluation_baseline_id": "a7b3bd95e68810874b4f7ebcbc54bd1dcec41d35a6a5489c9090fbefafa29628",
   "model_config_hash": "bd66c666151db8c3236b2454696d23b20cd60fbff8ecf37c46d45c54abb422db",
-  "cases_file_sha256": "049e048b821e949936c1793d441f7adcda4660f10f8d0acf63e4f766a9726c22",
+  "cases_file_sha256": "9d8217c3522ab071f9c9b13fb18e792577a4f4f01e855a6d7d7df8e814b26cf3",
   "status_neutral_sha256": "a00a8ec7496fc4e1533b2773e0267d555357a80be435a02dd70981d76ddb40d7",
-  "verified_case_count": 0,
+  "verified_case_count": 11,
   "evaluations": [
     {
       "case_id": "PG-MVP-001",
@@ -127,8 +127,8 @@
       "passed": true,
       "code": "EVALUATION_PASS",
       "evidence_sha256": "07bb07223a7ece2299eab70f6340e822998e6cf2e620feff7b486916e60d5d4f",
-      "audit_status": "pending",
-      "review_evidence_sha256": null
+      "audit_status": "approved",
+      "review_evidence_sha256": "aa801e0016a4fd7a868a073cfa83e525bbee48b0ebf13784da51c23036bde9ed"
     },
     {
       "case_id": "PG-MVP-002",
@@ -163,8 +163,8 @@
       "passed": true,
       "code": "EVALUATION_PASS",
       "evidence_sha256": "f5b9c097c919c9264501f215e570edb89602c9919e9822cadb06ffcde01ade79",
-      "audit_status": "pending",
-      "review_evidence_sha256": null
+      "audit_status": "approved",
+      "review_evidence_sha256": "47264181c4d2c6110533c35476966cbb7c3c0b28552f832720e482ed3509cc96"
     },
     {
       "case_id": "PG-MVP-003",
@@ -229,8 +229,8 @@
       "passed": true,
       "code": "EVALUATION_PASS",
       "evidence_sha256": "ff4592e9720ce1cdc639d2153576b7186f92debd62e856fb130a684935c2f61c",
-      "audit_status": "pending",
-      "review_evidence_sha256": null
+      "audit_status": "approved",
+      "review_evidence_sha256": "6570e040cf4843337699e80a94b5099553ad6fa7ed0d2a6bb4333627f7deb121"
     },
     {
       "case_id": "PG-MVP-005",
@@ -301,8 +301,8 @@
       "passed": true,
       "code": "EVALUATION_PASS",
       "evidence_sha256": "619869719448a67e8eeb54c60c640a4fccb1211d0f44fce870fbcea2ef75bc09",
-      "audit_status": "pending",
-      "review_evidence_sha256": null
+      "audit_status": "approved",
+      "review_evidence_sha256": "b783d4f95b6606ad70e79daf313972f79a1f1edc210b3323109ef3b9cc26c73f"
     },
     {
       "case_id": "PG-MVP-007",
@@ -337,8 +337,8 @@
       "passed": true,
       "code": "EVALUATION_PASS",
       "evidence_sha256": "ac9f5858d3276be231e80ad4750c4fde602db0c4849b76ed42054189e442fbdc",
-      "audit_status": "pending",
-      "review_evidence_sha256": null
+      "audit_status": "approved",
+      "review_evidence_sha256": "4ca8a63f7817022d8e2bbf9d1a4008b6fe037632b7e602096cf8e88660e26031"
     },
     {
       "case_id": "PG-MVP-008",
@@ -523,8 +523,8 @@
       "passed": true,
       "code": "EVALUATION_PASS",
       "evidence_sha256": "a0c02cb1b26be6af3b860cd1ccbf3e053c0055af44309c18280c2549074a7f61",
-      "audit_status": "pending",
-      "review_evidence_sha256": null
+      "audit_status": "approved",
+      "review_evidence_sha256": "342b3b1452cdde15df9821efc36b9aef85a4d5461d6684d6a8fc54744cc1ffa0"
     },
     {
       "case_id": "PG-MVP-014",
@@ -559,8 +559,8 @@
       "passed": true,
       "code": "EVALUATION_PASS",
       "evidence_sha256": "e461cce8e24e6c4600e10bd1760694362b59ca58114c27f8a30af7d598be6cad",
-      "audit_status": "pending",
-      "review_evidence_sha256": null
+      "audit_status": "approved",
+      "review_evidence_sha256": "26bf9b884a6089757ba628a95434b8de5c45f1579128b5ecbf4f25da87df692a"
     },
     {
       "case_id": "PG-MVP-015",
@@ -589,8 +589,8 @@
       "passed": true,
       "code": "EVALUATION_PASS",
       "evidence_sha256": "34e827c05095f3d1545682d30342f48a7be61352c38ed938b9b22c1727e8e316",
-      "audit_status": "pending",
-      "review_evidence_sha256": null
+      "audit_status": "approved",
+      "review_evidence_sha256": "414afd35cdd511c31111ad091185c585df06339e30d24497828835764522942f"
     },
     {
       "case_id": "PG-MVP-016",
@@ -619,8 +619,8 @@
       "passed": true,
       "code": "EVALUATION_PASS",
       "evidence_sha256": "934a60f6893e26904c121871f9ee6e2086cc4b61e80262985963fdccbe058dae",
-      "audit_status": "pending",
-      "review_evidence_sha256": null
+      "audit_status": "approved",
+      "review_evidence_sha256": "73b15dcda51eaf0abc7c51fcf49dc7894c9ce691e2da56a7597c05c7148ffdbb"
     },
     {
       "case_id": "PG-MVP-017",
@@ -649,8 +649,8 @@
       "passed": true,
       "code": "EVALUATION_PASS",
       "evidence_sha256": "a5da442fcaf46c421a4209eb83c101ba4a7b65e8d1f10b7c4bd1d79e0b9f1414",
-      "audit_status": "pending",
-      "review_evidence_sha256": null
+      "audit_status": "approved",
+      "review_evidence_sha256": "ec101f5e0ceea850e718bc663167109b14eacbedfaa59c15e774a57e839f4a51"
     },
     {
       "case_id": "PG-MVP-018",
@@ -685,8 +685,8 @@
       "passed": true,
       "code": "EVALUATION_PASS",
       "evidence_sha256": "1ea5b01225c46b58c3c6044e23336467cf37afd1d23de408e06e80018f2050c8",
-      "audit_status": "pending",
-      "review_evidence_sha256": null
+      "audit_status": "approved",
+      "review_evidence_sha256": "808c3b78bc030dc1f335c17747eadf140210f5db7fe96a3d94dce1e35acd86b9"
     }
   ],
   "metrics": {
@@ -694,9 +694,9 @@
     "executable_cases": 15,
     "security_cases": 3,
     "automated_passed": 11,
-    "audit_approved": 0,
+    "audit_approved": 11,
     "audit_rejected": 0,
-    "verified_case_count": 0,
+    "verified_case_count": 11,
     "first_pass_passed": 7,
     "repaired_passed": 1,
     "gold_result_passed": 8,
