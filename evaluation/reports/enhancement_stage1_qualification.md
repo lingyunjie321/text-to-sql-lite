@@ -48,6 +48,31 @@ Embedding Provider 的单项通过不得解释为授权索引、混合检索、R
 `BASELINE_VERSION=stage1-freeze-v1`、report 契约
 `stage1-report-v1`，均已完成 Stage 1 迁移。
 
+## 2026-08-01 更新（二）：正式候选
+
+在用户批准的真实环境上执行唯一正式候选（18 条 Pagila Gold）：
+
+- 真实 Pagila 容器（PostgreSQL 16.14 + Pagila 3.1.0，`film`=1000）已启动，
+  baseline 已重建并绑定新 config/受控代码摘要：
+  `a7b3bd95e68810874b4f7ebcbc54bd1dcec41d35a6a5489c9090fbefafa29628`。
+- 自动证据：`11/18` 通过；失败 `7` 条：
+  - PG-MVP-010/011/012：standard route 真实调用返回 `LLM_HTTP_ERROR`
+    （外部模型服务瞬时失败；工作流按设计 `FAILED_INTERNAL`，不盲重试）；
+  - PG-MVP-003/008：生成 SQL 超出授权范围，被安全门正确拒绝（零执行）；
+  - PG-MVP-005：已执行（6/6 行），结果列与 Gold 不一致。
+- 未发现可由非 Gold 测试证明的通用 blocking/high 实现缺陷，按两次运行终局
+  规则不启动第二次运行；未按失败 Case 修改 Prompt、Comparator、后处理或
+  语义元数据；失败 Case 保持 `draft`。
+- 完整逐 Case 报告：
+  `evaluation/reports/pagila_mvp_stage1.md` /
+  `evaluation/reports/pagila_mvp_stage1.json`。
+- 真实 Pagila 集成回归：`78 passed / 9 skipped / 0 failed`；测试后
+  `codex_stage1_%` 残留角色数为 `0`。
+
+本次候选证明了真实 Embedding 索引构建、混合检索、三模型路由与真实 Pagila
+闭环可达；但自动证据未达 `18/18`，且 18 条 Case 独立逐条审核未完成，因此
+`integration_complete` 与 `real_environment_validated` 保持 `false`。
+
 ## 已取得的确定性证据
 
 最终确定性回归结果：
@@ -83,7 +108,7 @@ integration 结果为 `91 passed in 7.42s`；清理后残留的
 | calibration 规范化 | `d7e7d7d60a157ec78e00ba16fbf722dddd5552eb833863310a8d9ed95797b8bd` |
 | 受控代码 | `1f9e93e6749c2c8e081e54ab5c16679c4c7c3860fbea063159c9257c52b3a921` |
 | calibration baseline | `70f424307045b748b82e71c5b22707da14ad7d7da53c4143bf427dae62c8a4d6` |
-| 当前 Pagila baseline | `5e4f9ee633cd7d7f753cc3f3667fcaa7030e25619eb059b48f125fb77e6b2d16` |
+| 当前 Pagila baseline | `a7b3bd95e68810874b4f7ebcbc54bd1dcec41d35a6a5489c9090fbefafa29628` |
 
 正式 Pagila 入口现在要求实际 Embedding、完整 route runtime、selected
 configuration、上述 calibration freeze 和当前受控代码摘要全部一致；缺失或漂移
@@ -140,9 +165,9 @@ Stage 1 三层状态分别还有未闭环项：
    被测试拦截；单元/安全与 synthetic 回归全绿。
 2. Integration：形成新的 Stage 1 report/evidence 契约，并完成完整 focused
    diff 的独立 blocking/high 清零审查。
-3. Real environment：使用真实 Embedding 服务构建并验证授权、版本隔离的
-   Schema 索引；让至少两个不同真实生成模型通过不同复杂度 route；对 18 个
-   Pagila Gold Case 运行一次新的正式候选并独立审核证据。
+3. Real environment：正式候选已运行（自动 `11/18`，真实 Embedding 索引、
+   混合检索与三模型路由均已实际执行），但未达到 `18/18` 自动证据，且 18 个
+   Pagila Gold Case 的独立逐条审核证据未完成。
 
 上述门禁全部满足并记录前：
 

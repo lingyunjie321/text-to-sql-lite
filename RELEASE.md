@@ -12,6 +12,7 @@
 - Stage 2～5：尚未开始实现
 - 交付前改进：安全回归已修复，全量 1264 测试通过，Override 接线完成
 - Stage 1 正式配置：用户已确认三模型组合，选定配置与校准冻结已重建并验证
+- Stage 1 正式候选：自动证据 `11/18`（等待独立逐条审核）
 
 本文件记录当前版本的完成情况和后续建设计划。安装、配置和 API 用法请阅读
 [README.md](README.md)；精确行为与验收门禁以仓库主规格和测试规格为准。
@@ -100,6 +101,24 @@ OpenAI-compatible 服务执行且仅执行一次真实调用：
 只证明 Embedding Provider 的协议兼容性，不能证明授权 Schema 索引、混合检索
 质量、多模型路由或整个 Workflow 已完成真实环境验证。
 
+### Stage 1 正式候选（2026-08-01）
+
+在冻结的配置、代码与真实 Pagila 环境上运行唯一正式候选：
+
+- 自动证据：`11/18` 通过；失败 `7` 条：
+  - PG-MVP-010/011/012：standard route 真实调用返回 `LLM_HTTP_ERROR`
+    （外部模型服务瞬时失败，工作流按设计 `FAILED_INTERNAL` 收尾）；
+  - PG-MVP-003/008：生成 SQL 超出授权范围，被安全门正确拒绝；
+  - PG-MVP-005：已执行但结果列与 Gold 不一致。
+- 未发现可由非 Gold 测试证明的通用 blocking/high 实现缺陷，按两次运行终局
+  规则不启动第二次运行；未按失败 Case 修改任何策略。
+- baseline ID：
+  `a7b3bd95e68810874b4f7ebcbc54bd1dcec41d35a6a5489c9090fbefafa29628`
+- 完整逐 Case 结果见
+  [pagila_mvp_stage1.md](evaluation/reports/pagila_mvp_stage1.md)。
+- 真实 Pagila 集成回归：`78 passed / 9 skipped / 0 failed`；测试后
+  `codex_stage1_%` 残留角色数为 `0`。
+
 ## 未完成与已知限制
 
 ### 交付前改进（2026-08-01）
@@ -119,11 +138,9 @@ OpenAI-compatible 服务执行且仅执行一次真实调用：
 
 仍需解决的阻塞项：
 
-- **P0-3 正式候选**：配置冻结已对齐；仍需在真实 Pagila 容器上重建
-  `evaluation/pagila_baseline.json`（当前仍绑定旧 config/受控代码摘要），随后
-  运行正式 18 Case 候选并生成 Stage 1 report/evidence。需用户批准真实环境执行。
-- 三模型路由配置已确认（simple=deepseek-v4-flash / standard=deepseek-chat-v4
-  / complex=deepseek-reasoner），但尚未在正式候选中验证端到端质量。
+- **P0-3 正式候选已完成**：自动证据 `11/18`。当前阻塞为 18 条 Case 的独立
+  逐条审核（approve/reject）与 `verify-case` 更新 Gold 状态；只有
+  `18/18` 自动证据且 `18/18` 独立审核通过才可宣称 Stage 1 完成。
 - Stage 1 focused diff 的独立 blocking/high 清零审查尚未形成完成记录。
 
 ### MVP 历史资格
@@ -155,10 +172,12 @@ stage1.real_environment_validated=false
   Stage 1 标识；三项 mutation checks 已执行并被测试拦截；单元与安全
   `1173 passed`、synthetic development/calibration 质量门通过。
 - `integration_complete=false`：尚无新的 Stage 1 正式报告契约与证据（report
-  契约已定义但未生成正式报告）；完整 Stage 1 focused diff 的独立
+  已生成 `stage1-report-v1` 正式候选报告，但 18 条 Case 独立逐条审核未完成）；
+  完整 Stage 1 focused diff 的独立
   blocking/high 清零审查也没有形成完成记录。
-- `real_environment_validated=false`：真实授权 Schema 索引、至少两个真实生成
-  模型经不同 route 的正式候选、新 18 Case 正式候选与独立审核均未完成。
+- `real_environment_validated=false`：正式候选已在真实 Pagila + 真实
+  Embedding + 三模型路由上运行（自动 `11/18`），但未达到 `18/18` 自动证据，
+  且独立审核未完成。
 
 当前冻结的选定配置中三条 route 已绑定三个不同真实生成模型
 （deepseek-v4-flash / deepseek-chat-v4 / deepseek-reasoner），确定性测试证明

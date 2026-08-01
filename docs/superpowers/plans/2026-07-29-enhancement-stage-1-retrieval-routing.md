@@ -979,6 +979,15 @@ With explicitly approved endpoints and credentials:
 Record exact versions, hashes, counts, failures, and whether
 `real_environment_validated` is true.
 
+执行记录（2026-08-01）：用户批准真实环境后，重建
+`evaluation/pagila_baseline.json`（ID
+`a7b3bd95e68810874b4f7ebcbc54bd1dcec41d35a6a5489c9090fbefafa29628`），
+运行唯一正式候选：自动证据 `11/18`。失败 7 条：3 条
+`LLM_HTTP_ERROR`（standard route 外部瞬时失败）、2 条安全门拒绝、1 条结果列
+不一致。未发现可由非 Gold 测试证明的通用实现缺陷，按两次运行终局规则不
+重跑；18 条 Case 独立逐条审核与 `verify-case` 待执行，
+`real_environment_validated` 保持 `false`。
+
 - [ ] **Step 3: Independent review**
 
 Provide the complete focused diff and this plan to an independent reviewer.

@@ -36,7 +36,7 @@
     "review_file_sha256": "7378023921e8f78c152e41b6bb4eb047d6f9d2da0ae13009fa145ad4b2a3b1b6"
   },
   "software": {
-    "controlled_code_sha256": "e02e79d4f4dcb5ac847bd5f35153ed89076793b0c63c43c856a8a8b80081655a",
+    "controlled_code_sha256": "1f9e93e6749c2c8e081e54ab5c16679c4c7c3860fbea063159c9257c52b3a921",
     "python_implementation": "CPython",
     "python_version": "3.12.7",
     "installed_distributions": [
@@ -82,7 +82,7 @@
     "connection_retry_count": 1
   },
   "model_configuration": {
-    "config_sha256": "a76ffcacb889f0bba10aabbe35f81d0e6ad2cfdceb49221a33864c2f89135bf8"
+    "config_sha256": "bd66c666151db8c3236b2454696d23b20cd60fbff8ecf37c46d45c54abb422db"
   },
-  "evaluation_baseline_id": "dcadf18ade8f95d99ee5f9d55f89a35962706994d0e64007978585ed5e2e64b9"
+  "evaluation_baseline_id": "a7b3bd95e68810874b4f7ebcbc54bd1dcec41d35a6a5489c9090fbefafa29628"
 }
