@@ -216,12 +216,12 @@ PostgreSQL Connector 必测：
 | 整数、ID、布尔、枚举 | 精确相等 |
 | Decimal/金额 | 默认精确；Case 可声明 Decimal 容差 |
 | 浮点、平均值、比例 | Case 必须显式声明容差 |
-| 文本 | 默认大小写和尾空格敏感 |
+| 文本 | 先执行 `rstrip()`；随后大小写、前导/中间空格精确比较。PostgreSQL `text`、`varchar`、`bpchar` 视为同一字符串类型族 |
 | 日期 | 精确相等 |
 | 时间戳 | 转为 Case 时区和精度后比较 |
 | 无 ORDER BY | multiset，不依赖物理顺序 |
 
-Comparator 自测必须覆盖重复数不同、NULL 与空字符串、容差边界、时区等价、缺列、多列和 grain 不同但总值偶然一致。
+其余值规范化、类型、列、重复次数和 grain 规则不变。Comparator 自测必须覆盖重复数不同、NULL 与空字符串、容差边界、时区等价、缺列、多列和 grain 不同但总值偶然一致。
 
 ## 8. 反思、错误路由和循环终止
 
@@ -282,7 +282,10 @@ Endpoint：`POST /api/v1/text-to-sql`。
 
 Case 文件：`evaluation/cases/pagila_mvp.jsonl`
 
-Schema 字段依据 [Pagila 官方仓库](https://github.com/devrimgunduz/pagila)当前 `pagila-schema.sql` 编写。由于具体 commit 尚未锁定，所有 Case 标记为 `draft`，不能作为已经验证的 Gold。
+Schema 字段依据已锁定的 Pagila 3.1.0、commit
+`fef9675714cfba1756df4719b5e36075a7ddf90e` 的 `pagila-schema.sql` 编写。
+当前主 Gold 状态为 `16 verified / 2 draft`；该状态只记录逐 Case 审核结果，不能
+把仍为 draft 的 Case 计入通过，也不代表整体发布资格已经通过。
 
 | 分类 | 数量 |
 |---|---:|

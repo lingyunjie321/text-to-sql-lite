@@ -29,6 +29,8 @@ from tests.unit.test_workflow_graph import (
     _generation,
 )
 
+pytestmark = pytest.mark.integration
+
 
 @dataclass
 class RoutingProvider:

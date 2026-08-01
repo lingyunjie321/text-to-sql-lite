@@ -5,6 +5,6 @@
   "calibration_file_sha256": "07070687fb39592e26b02fb21891b5108b38bc0f5337240de25a4df3ac638845",
   "calibration_normalized_sha256": "d7e7d7d60a157ec78e00ba16fbf722dddd5552eb833863310a8d9ed95797b8bd",
   "stage1_config_sha256": "a1b38442cb37785a8b2366f87cbda0d3379411ab3125ed3cf77055a1e2b534ac",
-  "controlled_code_sha256": "fed90d9f70253259401ac3329edf713cef74ff141e4adf249f2871accb69a5fb",
-  "stage1_calibration_baseline_id": "88500f742ba765c6d277c8d9943a965687f02762b37e56d2c1f867920df54d3f"
+  "controlled_code_sha256": "7cfebcd348be0b1511795e83fed6aa61c9dad992bc83c3b6885006e11423b1b4",
+  "stage1_calibration_baseline_id": "32bab041292abd226e410ecf8e85c1c618055062f849679d95dc67d71ec841e6"
 }

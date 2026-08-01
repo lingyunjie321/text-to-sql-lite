@@ -524,7 +524,7 @@ def test_embedding_provider_preserves_input_order() -> None:
 
 Cover count mismatch, duplicate/missing index, bool/non-number, NaN/Inf,
 dimension mismatch, zero norm, oversized response, redirects, timeout,
-connection, HTTP error, malformed JSON, empty document, batch >64, and HTTPS/
+connection, HTTP error, malformed JSON, empty document, batch >10, and HTTPS/
 loopback validation.
 
 - [x] **Step 2: Run tests and verify RED**

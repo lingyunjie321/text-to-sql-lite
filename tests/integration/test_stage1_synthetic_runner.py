@@ -133,6 +133,7 @@ def test_calibration_suite_runs_quality_gate() -> None:
     assert result.quality_gate.improved_bucket_count >= 1
 
 
+@pytest.mark.integration
 def test_runner_rejects_suite_freeze_mismatch_before_workflow() -> None:
     from evaluation.stage1_runner import (
         run_stage1_synthetic_suite,

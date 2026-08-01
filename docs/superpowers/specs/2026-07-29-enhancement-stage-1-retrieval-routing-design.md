@@ -560,7 +560,7 @@ embedding:
   model: text-embedding-v4
   dimension: 1024
   timeout_seconds: 10
-  max_batch_documents: 64
+  max_batch_documents: 10
   max_response_bytes: 4194304
 
 context:

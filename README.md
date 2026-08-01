@@ -9,6 +9,13 @@ PostgreSQL 16.14、Pagila 3.1.0、`public` Schema 和 13 张授权表；它尚�
 任意数据库即插即用的生产服务。当前成熟度、验证证据和后续路线图见
 [RELEASE.md](RELEASE.md)。
 
+Next.js 前端已存在，但本地模型/数据源配置与查询的 Profile 闭环尚未完成；当前
+不能把设置页视为可持久化配置任意本地数据库并立即查询的产品能力。
+
+PostgreSQL/Pagila 是当前正式基线。MySQL 仅部分接入，尚未完成真实验证，且只读
+事务设置失败后继续执行是 P0 风险；StarRocks 保持实验状态。两者均不能据此宣称
+已正式支持。
+
 ## 主要能力
 
 - **完整请求闭环**：自然语言问题 → 权限解析 → Schema Linking → SQL 生成 →
@@ -17,8 +24,9 @@ PostgreSQL 16.14、Pagila 3.1.0、`public` Schema 和 13 张授权表；它尚�
   可解释 Rerank，以及显式 `ComplexityRouteNode` 驱动的动态 Top-K
   （5/10/20）。
 - **服务端模型路由**：按 `simple`、`standard`、`complex` 路由选择模型和
-  上下文预算，可为批准的数据边界配置受限 fallback；客户端不能指定模型、
-  复杂度或 Top-K。
+  上下文预算，可为批准的数据边界配置受限 fallback；阶段 1 仍允许客户端通过
+  受限的 `model_overrides` 过渡字段覆盖三个 tier 的模型配置，但不能指定复杂度
+  或 Top-K。该字段不是最终 Profile 接口。
 - **SQL 安全门**：只接受单条只读 `SELECT` 或受控 CTE；校验授权对象、字段、
   函数、通配符和危险 AST；模型输出、修复 SQL 都必须重新校验。
 - **数据库执行边界**：PostgreSQL 只读账号和只读事务、最长 30 秒、最多
@@ -198,13 +206,14 @@ curl --fail-with-body \
 | `LLM_SIMPLE_*` / `STANDARD_*` / `COMPLEX_*` | 路由级模型覆盖 | 未设置的路由完整继承基础配置 |
 | `LLM_FALLBACK_*` | 可选备用模型 | 必须与启用开关、上下文预算和数据边界一致 |
 | `MODEL_ROUTING_*` | 数据边界和 fallback 策略 | 只由服务端配置，客户端不能覆盖 |
-| `EMBEDDING_*` | Embedding Provider、维数和批量限制 | 当前批量上限 64，响应上限 4 MiB，超时 ≤ 10 秒 |
+| `EMBEDDING_*` | Embedding Provider、维数和批量限制 | 当前批量上限 10，响应上限 4 MiB，超时 ≤ 10 秒 |
 
 完整变量和默认值见 [.env.example](.env.example)。
 
 ## API 约束
 
-`POST /api/v1/text-to-sql` 的请求字段：
+当前后端公开三个端点：`GET /health`、`GET /api/v1/config` 与
+`POST /api/v1/text-to-sql`。查询端点接受六个字段：
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
@@ -212,13 +221,18 @@ curl --fail-with-body \
 | `datasource_id` | string | 默认 `pagila`；生产 Bootstrap 只接受 `pagila` |
 | `schemas` | string[] | 可缩小服务端授权 Schema，不能扩大权限 |
 | `debug` | boolean | 默认 `false`；当前固定身份没有 debug 权限 |
+| `model_overrides` | object \| null | 阶段 1 的请求级过渡兼容字段；仅允许 `simple`、`standard`、`complex` tier，后续 Profile 路线会替代它 |
+| `datasource_override` | object \| null | 阶段 1 的请求级过渡兼容字段；内联数据源默认仍拒绝，不能作为本地配置闭环 |
 
-API 不接受 SQL、表 allowlist、复杂度、Top-K、模型、Prompt 或超时参数。这些
-都属于服务端可信上下文。
+除上述兼容字段外，API 不接受 SQL、复杂度、Top-K、Prompt 或超时参数。允许
+范围与实际运行资源仍由服务端可信上下文决定；override 不表示后续 Profile API
+已经实现。
 
 业务成功、澄清和业务失败通常都以 HTTP 200 返回，并由响应内的 `status`
 区分；未授权 `debug=true` 返回 403，请求体校验失败返回 422，未处理的服务
-边界异常返回 500。当前没有独立的认证、Session 或健康检查端点。
+边界异常返回 500。`/health` 与 `/api/v1/config` 是只读端点；当前没有 Session
+或 Profile CRUD 端点。未设置 API Key 时使用固定身份，设置 API Key 后查询端点
+要求 Bearer token。
 
 ## 安全边界
 
@@ -252,6 +266,15 @@ PYTHONDONTWRITEBYTECODE=1 \
 export TEXT_TO_SQL_DATABASE_DSN='postgresql://text_to_sql_reader:replace-with-local-reader-password@127.0.0.1:55432/pagila'
 PYTHONDONTWRITEBYTECODE=1 \
   .venv/bin/pytest -q -p no:cacheprovider tests/integration
+```
+
+`integration` marker 表示跨组件测试；其外部依赖由各 fixture 或测试说明决定。
+它包含进程内、回环 HTTP、Pagila 以及可选 MySQL/StarRocks 场景，不能把 marker
+收集到的全部测试表述为真实数据库验证。可检查目录与 marker 收集是否一致：
+
+```bash
+.venv/bin/python -m pytest --collect-only -q tests/integration
+.venv/bin/python -m pytest --collect-only -q -m integration tests/integration
 ```
 
 其他静态检查：

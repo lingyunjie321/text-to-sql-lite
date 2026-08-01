@@ -10,8 +10,11 @@
 - MVP Stage 10 发布资格：`not_passed`
 - 增强 Stage 1 总体资格：`not_passed`
 - Stage 2～5：尚未开始实现
-- 交付前改进：安全回归已修复，全量 1264 测试通过，Override 接线完成
-- Stage 1 正式配置：用户已确认三模型组合，选定配置与校准冻结已重建并验证
+- 阶段 1 结构整理：已完成配置、工厂/Bootstrap、API 路由、依赖与公开模型摘要的
+  模块化；资格仍为 `not_passed`
+- 当前 Gold：`16 verified / 2 draft`；旧正式冻结不能作为当前代码的资格证据
+- 增强 Stage 1 历史正式配置：用户已确认三模型组合；本次只将非 Gold 校准冻结
+  重新绑定到当前受控代码，未重建 Pagila 正式 baseline
 - Stage 1 收尾完成：主 Gold `16 verified / 2 draft`（008/009），发布资格
   `not_passed`；最终总结见
   [stage1_final_summary.md](evaluation/reports/stage1_final_summary.md)
@@ -53,7 +56,25 @@
 
 ## 当前验证证据
 
-### 确定性与本地集成
+### 当前结构整理回归
+
+- 实际执行的单元回归：`1053 passed`。
+- 实际执行的安全回归：`162 passed`。
+- unit+security 分支覆盖：**83%**。
+- 锁定 Pagila 集成：`91 passed, 9 skipped`；9 项仍是未配置真实 MySQL/
+  StarRocks DSN 的既有条件跳过。
+- Python 全量：`1306 passed, 9 skipped`。
+- 前端 Vitest：`49 passed`；typecheck 与 production build 通过；lint 保持阶段 0
+  的 `15 errors / 5 warnings`，未新增问题。
+- `compileall`、`pip check`、Compose config、`git diff --check` 与临时干净 venv
+  安装/导入/unit+security 均通过。
+- PyMySQL 已作为直接依赖固定为 `1.2.0`；integration marker 只表示跨组件测试，
+  不等同于真实数据库验证。
+
+这些是阶段 1 结构整理的当前回归记录，不是新的正式候选或发布资格。Pagila 回归
+不等于重建正式 baseline；真实 MySQL/StarRocks 与完整前端端到端验证仍未完成。
+
+### 历史确定性与本地集成
 
 - 单元与安全回归：`1173 passed`（含 12 项 Override 接线测试）
 - 完整 Pagila integration：`91 passed`（真实 Pagila + 临时只读角色）
@@ -68,7 +89,7 @@
 完整 Pagila integration 使用临时随机只读角色，测试后撤销授权并删除角色；
 清理后 `codex_stage1_%` 残留角色数为 `0`。
 
-### Stage 1 冻结摘要
+### Stage 1 非 Gold 校准冻结与历史正式 baseline
 
 | 冻结项 | SHA-256 / ID |
 |---|---|
@@ -77,16 +98,23 @@
 | development 规范化 | `c1746bea22d588578929b25afb1a3a29d13c7e978f5687e2b6352b7029668dd7` |
 | calibration 原始文件 | `07070687fb39592e26b02fb21891b5108b38bc0f5337240de25a4df3ac638845` |
 | calibration 规范化 | `d7e7d7d60a157ec78e00ba16fbf722dddd5552eb833863310a8d9ed95797b8bd` |
-| 受控代码 | `fed90d9f70253259401ac3329edf713cef74ff141e4adf249f2871accb69a5fb` |
-| calibration baseline | `88500f742ba765c6d277c8d9943a965687f02762b37e56d2c1f867920df54d3f` |
-| 当前 Pagila baseline | `0b658f083b685cf93938689d109007a9916550e4c78d7a93aa12b17aaa5d1df4` |
+| 当前受控代码 | `7cfebcd348be0b1511795e83fed6aa61c9dad992bc83c3b6885006e11423b1b4` |
+| 当前非 Gold calibration baseline | `32bab041292abd226e410ecf8e85c1c618055062f849679d95dc67d71ec841e6` |
+| 历史 Pagila baseline（候选 3） | `0b658f083b685cf93938689d109007a9916550e4c78d7a93aa12b17aaa5d1df4` |
 
-这些摘要属于本次工程快照。契约标识已完成 Stage 1 迁移
+表中选定配置、development、calibration、当前受控代码与 calibration baseline
+属于本次非 Gold 确定性校准冻结；该冻结只用于让固定合成回归与当前代码保持
+fail-closed 绑定，不表示真实环境资格通过。历史 Pagila baseline 仍原样保留，
+没有在本次结构整理中重建。契约标识已完成增强 Stage 1 迁移
 （`baseline_version=stage1-freeze-v1`、`PROMPT_VERSION=stage1-retrieval-routing-v1`、
-report 契约 `stage1-report-v1`）。`evaluation/pagila_baseline.json` 已绑定本轮
-（候选 2）配置、受控代码与比较器 v2；候选 1 的冻结值为历史记录，以 git 为准。
+report 契约 `stage1-report-v1`）。`evaluation/pagila_baseline.json` 仍绑定历史
+候选 3 的配置、受控代码与比较器 v3；更早候选的冻结值以 git 和历史报告为准。
 任何受控代码、配置、依赖、数据或语义 manifest 变化后，都必须重新建立相应
 冻结，不能跨版本复用。
+
+阶段 1 的结构整理已改变受控代码与依赖元数据。上述候选、baseline 和其通过数量
+均是历史候选事实，不能作为当前代码的新资格证据；当前版本如需资格结论，必须按
+完整门禁重新冻结并在真实环境运行。
 
 ### 真实 Embedding
 
@@ -169,8 +197,8 @@ OpenAI-compatible 服务执行且仅执行一次真实调用：
 - `QueryRequest`/`QueryResponse` 恢复 `extra="forbid"`，未知字段重新被 422 拒绝。
 - `ModelOverride`/`DatasourceOverride` 后端接线完成（含 SSRF/凭据安全约束）。
 - `SchemaCandidate.schema` 遮蔽告警消除。
-- Stage 1 选定配置与校准冻结已按用户确认的三模型组合重建（匹配当前受控代码
-  哈希），env 派生配置与冻结配置完全一致。
+- Stage 1 选定配置与当时的校准冻结已按用户确认的三模型组合重建（匹配候选 3
+  当时的受控代码哈希），env 派生配置与冻结配置在该历史候选中完全一致。
 - Task 1 的三项 complexity mutation checks 已执行（3/3 被测试拦截）并恢复，
   `functional_complete=true`。
 - 后端 Dockerfile、部署与回滚文档、GitHub Actions CI、覆盖率配置就绪。
@@ -178,7 +206,8 @@ OpenAI-compatible 服务执行且仅执行一次真实调用：
   归入同一字符串类型族，其余类型与值检查不变。
 - standard 档模型改为端点支持的 `deepseek-v4-flash`（用户指示 v4-pro，
   实际 `.env` 为 flash；两者均为端点支持模型），010/011 在候选 2 通过。
-- MySQL/StarRocks 契约测试套件（无实例时 skip）与 compose 模板就绪。
+- MySQL/StarRocks 契约测试套件（无实例时 skip）与 compose 模板就绪；这不等同于
+  正式数据库支持。
 - pip-audit 0 漏洞；workflow 节点 docstring 覆盖从 0% 提升至全量。
 
 仍需解决的阻塞项：
@@ -234,14 +263,16 @@ stage1.real_environment_validated=false
   和固定 13 张表。
 - API 是同步单轮接口；没有 `session_id`、Checkpoint 或长期 Memory。
 - 固定请求身份只适合本地演示；尚无完整认证、用户级隔离或多租户数据模型。
-- 没有 MySQL、StarRocks、跨数据源 QueryPlan 或受限结果合并。
+- MySQL Connector 仅部分接入：方言链路和真实 E2E 尚未完成，且只读事务设置失败
+  后仍继续执行是 P0 风险，不能标为正式支持。StarRocks 维持实验状态；二者均没有
+  跨数据源 QueryPlan 或受限结果合并。
 - 没有动态 Few-shot、业务指标知识库、业务 RAG 或参考 SQL 审批生命周期。
 - 没有结果缓存、异步导出、Dashboard、告警、限流、熔断、资源组、Secret
   轮换、部署升级回滚和数据保留演练。
 - Python 包不固定 ASGI server；部署方需要自行选择运行服务器。
 - 当前 wheel 不携带 `evaluation/`、`infrastructure/` 和语义 manifest，生产
   Bootstrap 依赖完整仓库检出。
-- 仓库尚未包含 `LICENSE`，公开可见不等于已授予开源使用许可。
+- 仓库包含 [MIT License](LICENSE)；仍应遵循其中的使用与免责条款。
 
 ## 后续建设顺序
 
