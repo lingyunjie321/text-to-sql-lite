@@ -1006,6 +1006,12 @@ bpchar 类型族等价，其余检查不变），重建冻结与 Pagila baseline
 重跑：自动证据 `14/18`。005/012 修复为通过；失败 002（波动，保留历史
 verified）、008/014（越权输出）、009（`||`）。独立逐条审核待执行。
 
+Stage 1 收尾记录（2026-08-01）：005/012 已在候选 3 approve + verify，主 Gold
+最终为 `16 verified / 2 draft`（008/009 保持 draft）。002/014 保留第一轮
+verified；不撤销、不重新审核。按用户决定不再为 18/18 放宽 `||` 白名单、
+字段召回规则或评测标准。最终总结见
+`evaluation/reports/stage1_final_summary.md`；Pagila 容器已停止。
+
 - [ ] **Step 3: Independent review**
 
 Provide the complete focused diff and this plan to an independent reviewer.

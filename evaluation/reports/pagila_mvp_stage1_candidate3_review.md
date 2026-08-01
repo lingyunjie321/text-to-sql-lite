@@ -62,4 +62,7 @@
   失败，按"不撤销历史审核"原则保留。
 - 候选 3 自动证据 `14/18`；失败 002（历史 verified，波动记录）、008/009/014
   （模型输出问题）、以及 002 的正式候选失败记录。
-- 待用户确认候选 3 结果后，再决定是否对 005/012（本轮通过）执行审核更新。
+- 收尾决定（2026-08-01）：PG-MVP-005、012 已 approve + verify 并同步主 Gold
+  文件（现 16 verified / 2 draft）；008/009 保持 draft；014 保留第一轮
+  verified。Pagila 容器已停止，详见
+  `evaluation/reports/stage1_final_summary.md`。
