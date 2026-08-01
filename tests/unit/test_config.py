@@ -1,9 +1,14 @@
+import importlib
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
-from app.config import DatabaseSettings, load_database_settings
+from app.config import (
+    DatabaseSettings,
+    load_database_settings,
+    load_datasources_from_file,
+)
 
 
 def test_database_settings_load_valid_pagila_dsn() -> None:
@@ -83,3 +88,36 @@ def test_load_database_settings_reads_explicit_env_file(tmp_path: Path) -> None:
 
     assert settings.datasource_id == "pagila"
     assert "secret" not in repr(settings)
+
+
+def test_datasource_file_uses_explicit_allowlist_fields_and_config_package(
+    tmp_path: Path,
+) -> None:
+    database_config = importlib.import_module("app.config.database")
+    datasource_file = tmp_path / "datasources.json"
+    datasource_file.write_text(
+        """
+        {
+          "datasources": {
+            "mysql_analytics": {
+              "type": "mysql",
+              "host": "127.0.0.1",
+              "port": 3306,
+              "database": "analytics",
+              "username": "reader",
+              "password": "secret",
+              "allowed_schemas": ["analytics"],
+              "allowed_tables": ["analytics.orders"]
+            }
+          }
+        }
+        """,
+        encoding="utf-8",
+    )
+
+    settings = load_datasources_from_file(datasource_file)["mysql_analytics"]
+
+    assert database_config.DatabaseSettings is DatabaseSettings
+    assert settings.allowed_schemas == ("analytics",)
+    assert settings.allowed_tables == ("analytics.orders",)
+    assert not hasattr(settings, "_extra")

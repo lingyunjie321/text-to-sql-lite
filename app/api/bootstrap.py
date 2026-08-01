@@ -188,7 +188,7 @@ def _get_datasource_allowed_config(
 
     Resolution order:
     1. If datasource_id == "pagila" → hardcoded Pagila allowlist
-    2. If extra_configs has this datasource with _extra → use those
+    2. If extra_configs has this datasource with an explicit allowlist → use it
     3. Fall back to env vars (TEXT_TO_SQL_ALLOWED_SCHEMAS/TABLES)
     """
     # Pagila: hardcoded security boundary
@@ -199,11 +199,10 @@ def _get_datasource_allowed_config(
     if extra_configs:
         cfg = extra_configs.get(datasource_id)
         if cfg is not None:
-            extra = getattr(cfg, "_extra", None)
-            if extra and extra.get("allowed_schemas") and extra.get("allowed_tables"):
+            if cfg.allowed_schemas and cfg.allowed_tables:
                 return (
-                    extra["allowed_schemas"],
-                    extra["allowed_tables"],
+                    cfg.allowed_schemas,
+                    cfg.allowed_tables,
                     cfg.type,
                 )
 
