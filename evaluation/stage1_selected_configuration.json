@@ -18,7 +18,7 @@
       "fusion_version": "rrf-v1",
       "rrf_k": 60,
       "index_max_entries": 32,
-      "index_embedding_batch_size": 64,
+      "index_embedding_batch_size": 10,
       "semantic_version": "738588b193a776966a301f6f995883faa6e94ac2f909e3dddf45ddb112a35b0c"
     },
     "embedding": {
@@ -27,7 +27,7 @@
       "dimension": 1024,
       "endpoint_identity_sha256": "5891aed827c4e67b2d7c0c73ea819327ce3f2b6ef72213cd79669486a26b1ead",
       "timeout_seconds": 10.0,
-      "max_batch_documents": 64,
+      "max_batch_documents": 10,
       "max_response_bytes": 4194304
     },
     "rerank": {
@@ -44,9 +44,9 @@
         {
           "route_id": "simple_route",
           "primary": {
-            "model_config_sha256": "d61d29d422e963aee4aa2d629a2775a39a1c4d8c617917902626b4e9c4b1989f",
+            "model_config_sha256": "5b01a70bf8c10e416cfc2dd9c01d9f4a4d96186766afeb2ffae691a2784d1359",
             "max_input_tokens": 32768,
-            "max_output_tokens": 2048,
+            "max_output_tokens": 1024,
             "timeout_seconds": 30.0,
             "data_boundary_sha256": "06c65598fa221066f9c76a39f8e9df5b15622b415a576433ca7c8cf7305b4456",
             "output_contract_version": "openai-compatible-json-v1"
@@ -56,7 +56,7 @@
         {
           "route_id": "standard_route",
           "primary": {
-            "model_config_sha256": "d61d29d422e963aee4aa2d629a2775a39a1c4d8c617917902626b4e9c4b1989f",
+            "model_config_sha256": "a1b7fe8fcc7a6a4b3de674532a725110baa4c4af0f968b54bc816dca0cd3befa",
             "max_input_tokens": 32768,
             "max_output_tokens": 2048,
             "timeout_seconds": 30.0,
@@ -68,10 +68,10 @@
         {
           "route_id": "complex_route",
           "primary": {
-            "model_config_sha256": "d61d29d422e963aee4aa2d629a2775a39a1c4d8c617917902626b4e9c4b1989f",
+            "model_config_sha256": "90df2a564ec5092de31f00027851f8bea2db0a9609679692496a5d19a32a8a56",
             "max_input_tokens": 32768,
             "max_output_tokens": 2048,
-            "timeout_seconds": 30.0,
+            "timeout_seconds": 120.0,
             "data_boundary_sha256": "06c65598fa221066f9c76a39f8e9df5b15622b415a576433ca7c8cf7305b4456",
             "output_contract_version": "openai-compatible-json-v1"
           },
@@ -80,5 +80,5 @@
       ]
     }
   },
-  "stage1_config_sha256": "a76ffcacb889f0bba10aabbe35f81d0e6ad2cfdceb49221a33864c2f89135bf8"
+  "stage1_config_sha256": "bd66c666151db8c3236b2454696d23b20cd60fbff8ecf37c46d45c54abb422db"
 }

@@ -3,17 +3,50 @@
 ## 报告状态
 
 - 记录日期：2026-07-30
+- 更新日期：2026-08-01
 - 阶段：增强阶段 1——检索与路由增强
 - 资格结论：`not_passed`
 - 报告性质：进行中的资格快照，不是发布证明
 
 | 范围 | `functional_complete` | `integration_complete` | `real_environment_validated` | 结论 |
 |---|---:|---:|---:|---|
-| Stage 1 总体 | `false` | `false` | `false` | 尚未通过整阶段门禁 |
+| Stage 1 总体 | `true` | `false` | `false` | 功能完成；集成与真实环境验证未完成 |
 | Embedding Provider 单项 | `true` | `true` | `true` | Provider 契约与单次真实调用通过 |
 
 Embedding Provider 的单项通过不得解释为授权索引、混合检索、RRF、Rerank、
 上下文裁剪、多模型路由或 Pagila E2E 已完成真实环境验证。
+
+## 2026-08-01 更新：正式配置确认与冻结重建
+
+用户确认当前 `.env` 的三模型组合即为正式验收配置：
+
+- simple：`deepseek-v4-flash`
+- standard：`deepseek-chat-v4`
+- complex：`deepseek-reasoner`
+
+据此已完成：
+
+1. 从当前 `.env` 派生配置重建
+   `evaluation/stage1_selected_configuration.json`，三条 route 现在分别绑定
+   三个不同的模型配置摘要（不再共享同一模型）；Embedding batch 同步为当前
+   配置值。
+2. 重建 `evaluation/stage1_calibration_freeze.json`，并验证
+   env-derived `public_configuration == selected.public_configuration`、
+   `freeze.stage1_config_sha256 == selected.stage1_config_sha256`、
+   `freeze.controlled_code_sha256 == 当前工作树受控代码摘要`。
+3. 完成计划 Task 1 缺失的三项 complexity mutation checks，每项均被测试
+   拦截：
+   - MEDIUM Top-K 从 10 改为 20 → 3 个测试失败；
+   - 任意 fallback JOIN 视为相关 → 1 个测试失败；
+   - 理由码乱序返回 → 5 个测试失败；
+   - 恢复后 `tests/unit/test_complexity_routing.py` 24 项全过。
+4. 全量回归：单元与安全 `1173 passed, 0 failed`；synthetic development /
+   calibration 完整 Workflow 与质量门 `3 passed`（6/6 + 6/6）；
+   `compileall`、`pip check`、`git diff --check` 通过。
+
+契约版本确认：`PROMPT_VERSION=stage1-retrieval-routing-v1`、
+`BASELINE_VERSION=stage1-freeze-v1`、report 契约
+`stage1-report-v1`，均已完成 Stage 1 迁移。
 
 ## 已取得的确定性证据
 
@@ -43,24 +76,24 @@ integration 结果为 `91 passed in 7.42s`；清理后残留的
 
 | 冻结项 | 摘要 |
 |---|---|
-| Stage 1 配置 | `a76ffcacb889f0bba10aabbe35f81d0e6ad2cfdceb49221a33864c2f89135bf8` |
+| Stage 1 配置 | `bd66c666151db8c3236b2454696d23b20cd60fbff8ecf37c46d45c54abb422db` |
 | development 原始文件 | `0ce763b3122b09a6b6718975789122918e4594b455b35d51197a37b359b595f0` |
 | development 规范化 | `c1746bea22d588578929b25afb1a3a29d13c7e978f5687e2b6352b7029668dd7` |
 | calibration 原始文件 | `07070687fb39592e26b02fb21891b5108b38bc0f5337240de25a4df3ac638845` |
 | calibration 规范化 | `d7e7d7d60a157ec78e00ba16fbf722dddd5552eb833863310a8d9ed95797b8bd` |
-| 受控代码 | `e02e79d4f4dcb5ac847bd5f35153ed89076793b0c63c43c856a8a8b80081655a` |
-| calibration baseline | `2b53e182b3b472fa75d92f931591d0d5feea5137e69f4e3b47698ddcb4e44782` |
+| 受控代码 | `1f9e93e6749c2c8e081e54ab5c16679c4c7c3860fbea063159c9257c52b3a921` |
+| calibration baseline | `70f424307045b748b82e71c5b22707da14ad7d7da53c4143bf427dae62c8a4d6` |
 | 当前 Pagila baseline | `5e4f9ee633cd7d7f753cc3f3667fcaa7030e25619eb059b48f125fb77e6b2d16` |
 
 正式 Pagila 入口现在要求实际 Embedding、完整 route runtime、selected
 configuration、上述 calibration freeze 和当前受控代码摘要全部一致；缺失或漂移
 会在执行 Case 前失败。旧 Stage 10 报告仍不能作为 Stage 1 证据。
 
-当前 Pagila baseline 虽已绑定 Stage 1 code/config，但
-`baseline_version`、report 和 evidence 契约标识仍沿用 `stage10-*-v3`，
-`PROMPT_VERSION` 也仍沿用旧 MVP 标识。设计要求这些契约分别升级，因此在明确
-兼容依据或完成版本迁移、漂移测试和重新冻结前，它不能作为 Stage 1 正式候选
-发布契约。
+契约标识已完成 Stage 1 迁移（`baseline_version=stage1-freeze-v1`、
+`PROMPT_VERSION=stage1-retrieval-routing-v1`、report
+`stage1-report-v1`）。`evaluation/pagila_baseline.json` 目前仍绑定上一份
+selected configuration 与受控代码摘要，正式候选前必须用真实容器重建
+Pagila baseline，使其与新的 config/受控代码摘要一致。
 
 ## 真实 Embedding 调用证据
 
@@ -93,17 +126,18 @@ PostgreSQL Connector 同时约束连接池等待和 statement timeout。无安�
 路径时的标准 Embedding 致命失败会生成脱敏 Retrieval Trace，记录冻结版本、
 失败码、候选计数与阶段耗时，不记录请求、Schema 标识或 Provider 私有详情。
 
-当前选定配置中三条 route 的模型配置摘要相同，因此只证明路由行为可达，不证明
-至少两个真实生成模型已经运行。本地真实 Pagila integration 已完成；真实授权
-Schema Embedding 索引、正式候选和 Gold 独立审核仍未完成，因此本报告不把
-Stage 1 标记为功能完成、集成完成或真实环境验证完成。
+2026-08-01 起选定配置中三条 route 分别绑定三个不同真实生成模型，路由行为
+可达已由确定性测试证明；但仍未在正式候选中运行这些真实模型。本地真实
+Pagila integration 已完成；真实授权 Schema Embedding 索引、正式候选和 Gold
+独立审核仍未完成，因此本报告不把 Stage 1 标记为集成完成或真实环境验证完成。
 
 ## 尚未通过的门禁
 
 Stage 1 三层状态分别还有未闭环项：
 
-1. Functional：升级或以明确兼容证据确认 Prompt、baseline、report 和 evidence
-   的 Stage 1 契约版本；完成计划中尚无记录的 complexity mutation checks。
+1. Functional：已完成（2026-08-01）。Prompt、baseline、report 和 evidence
+   契约版本已迁移到 Stage 1 标识；三项 complexity mutation checks 已执行并
+   被测试拦截；单元/安全与 synthetic 回归全绿。
 2. Integration：形成新的 Stage 1 report/evidence 契约，并完成完整 focused
    diff 的独立 blocking/high 清零审查。
 3. Real environment：使用真实 Embedding 服务构建并验证授权、版本隔离的
@@ -113,7 +147,7 @@ Stage 1 三层状态分别还有未闭环项：
 上述门禁全部满足并记录前：
 
 ```text
-stage1.functional_complete=false
+stage1.functional_complete=true
 stage1.integration_complete=false
 stage1.real_environment_validated=false
 ```

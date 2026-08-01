@@ -11,6 +11,7 @@
 - 增强 Stage 1 总体资格：`not_passed`
 - Stage 2～5：尚未开始实现
 - 交付前改进：安全回归已修复，全量 1264 测试通过，Override 接线完成
+- Stage 1 正式配置：用户已确认三模型组合，选定配置与校准冻结已重建并验证
 
 本文件记录当前版本的完成情况和后续建设计划。安装、配置和 API 用法请阅读
 [README.md](README.md)；精确行为与验收门禁以仓库主规格和测试规格为准。
@@ -68,20 +69,21 @@
 
 | 冻结项 | SHA-256 / ID |
 |---|---|
-| Stage 1 选定配置 | `a76ffcacb889f0bba10aabbe35f81d0e6ad2cfdceb49221a33864c2f89135bf8` |
+| Stage 1 选定配置 | `bd66c666151db8c3236b2454696d23b20cd60fbff8ecf37c46d45c54abb422db` |
 | development 原始文件 | `0ce763b3122b09a6b6718975789122918e4594b455b35d51197a37b359b595f0` |
 | development 规范化 | `c1746bea22d588578929b25afb1a3a29d13c7e978f5687e2b6352b7029668dd7` |
 | calibration 原始文件 | `07070687fb39592e26b02fb21891b5108b38bc0f5337240de25a4df3ac638845` |
 | calibration 规范化 | `d7e7d7d60a157ec78e00ba16fbf722dddd5552eb833863310a8d9ed95797b8bd` |
-| 受控代码 | `e02e79d4f4dcb5ac847bd5f35153ed89076793b0c63c43c856a8a8b80081655a` |
-| calibration baseline | `2b53e182b3b472fa75d92f931591d0d5feea5137e69f4e3b47698ddcb4e44782` |
+| 受控代码 | `1f9e93e6749c2c8e081e54ab5c16679c4c7c3860fbea063159c9257c52b3a921` |
+| calibration baseline | `70f424307045b748b82e71c5b22707da14ad7d7da53c4143bf427dae62c8a4d6` |
 | 当前 Pagila baseline | `5e4f9ee633cd7d7f753cc3f3667fcaa7030e25619eb059b48f125fb77e6b2d16` |
 
-这些摘要属于本次工程快照。当前 Pagila baseline 已绑定 Stage 1 的 code/config，
-但其 `baseline_version`、report 和 evidence 契约标识仍沿用
-`stage10-*-v3`；这是一项尚未完成的契约迁移，不得据此生成或宣称 Stage 1
-正式候选。任何受控代码、配置、依赖、数据或语义 manifest 变化后，都必须重新
-建立相应冻结，不能跨版本复用。
+这些摘要属于本次工程快照。契约标识已完成 Stage 1 迁移
+（`baseline_version=stage1-freeze-v1`、`PROMPT_VERSION=stage1-retrieval-routing-v1`、
+report 契约 `stage1-report-v1`）。`evaluation/pagila_baseline.json` 目前仍绑定
+上一份 selected configuration 与受控代码摘要，正式候选前必须用真实 Pagila
+容器重建 baseline。任何受控代码、配置、依赖、数据或语义 manifest 变化后，
+都必须重新建立相应冻结，不能跨版本复用。
 
 ### 真实 Embedding
 
@@ -107,19 +109,22 @@ OpenAI-compatible 服务执行且仅执行一次真实调用：
 - `QueryRequest`/`QueryResponse` 恢复 `extra="forbid"`，未知字段重新被 422 拒绝。
 - `ModelOverride`/`DatasourceOverride` 后端接线完成（含 SSRF/凭据安全约束）。
 - `SchemaCandidate.schema` 遮蔽告警消除。
-- Stage 1 校准冻结已重建（匹配当前受控代码哈希）。
+- Stage 1 选定配置与校准冻结已按用户确认的三模型组合重建（匹配当前受控代码
+  哈希），env 派生配置与冻结配置完全一致。
+- Task 1 的三项 complexity mutation checks 已执行（3/3 被测试拦截）并恢复，
+  `functional_complete=true`。
 - 后端 Dockerfile、部署与回滚文档、GitHub Actions CI、覆盖率配置就绪。
 - MySQL/StarRocks 契约测试套件（无实例时 skip）与 compose 模板就绪。
 - pip-audit 0 漏洞；workflow 节点 docstring 覆盖从 0% 提升至全量。
 
 仍需解决的阻塞项：
 
-- **P0-3 正式候选**：Stage 1 契约版本迁移（`stage10-*-v3` → `stage1-*`）未完成，
-  `stage1_selected_configuration.json` 的 `public_configuration` 与当前 `.env`
-  派生配置不匹配，正式 Pagila 18 Case 候选无法运行。需设计决策：重建
-  selected configuration 或升级契约版本。
-- 双模型路由已验证配置正确（simple=deepseek-v4-flash / standard=deepseek-chat-v4
+- **P0-3 正式候选**：配置冻结已对齐；仍需在真实 Pagila 容器上重建
+  `evaluation/pagila_baseline.json`（当前仍绑定旧 config/受控代码摘要），随后
+  运行正式 18 Case 候选并生成 Stage 1 report/evidence。需用户批准真实环境执行。
+- 三模型路由配置已确认（simple=deepseek-v4-flash / standard=deepseek-chat-v4
   / complex=deepseek-reasoner），但尚未在正式候选中验证端到端质量。
+- Stage 1 focused diff 的独立 blocking/high 清零审查尚未形成完成记录。
 
 ### MVP 历史资格
 
@@ -139,24 +144,25 @@ MVP Stage 10 的正式候选结果为：
 当前必须保持：
 
 ```text
-stage1.functional_complete=false
+stage1.functional_complete=true
 stage1.integration_complete=false
 stage1.real_environment_validated=false
 ```
 
 三层状态有各自尚未闭环的依据：
 
-- `functional_complete=false`：设计要求的 Prompt 及 Stage 1 契约版本迁移尚未
-  完成；Prompt payload 已包含动态 K / selected fields，但 `PROMPT_VERSION`
-  仍沿用旧 MVP 标识。Task 1 的三项 mutation check 也没有完成记录。
-- `integration_complete=false`：baseline/report/evidence 仍使用 Stage 10
-  契约标识，尚无新的 Stage 1 正式报告契约；完整 Stage 1 focused diff 的独立
+- `functional_complete=true`：Prompt/baseline/report/evidence 契约已迁移到
+  Stage 1 标识；三项 mutation checks 已执行并被测试拦截；单元与安全
+  `1173 passed`、synthetic development/calibration 质量门通过。
+- `integration_complete=false`：尚无新的 Stage 1 正式报告契约与证据（report
+  契约已定义但未生成正式报告）；完整 Stage 1 focused diff 的独立
   blocking/high 清零审查也没有形成完成记录。
 - `real_environment_validated=false`：真实授权 Schema 索引、至少两个真实生成
-  模型的不同 route、新 18 Case 正式候选与独立审核均未完成。
+  模型经不同 route 的正式候选、新 18 Case 正式候选与独立审核均未完成。
 
-当前冻结的选定配置中三条主 route 的模型配置摘要相同，能证明路由行为可达，
-但不能满足“至少两个真实生成模型”的验收门禁。
+当前冻结的选定配置中三条 route 已绑定三个不同真实生成模型
+（deepseek-v4-flash / deepseek-chat-v4 / deepseek-reasoner），确定性测试证明
+路由行为可达；真实环境端到端验证尚未完成，不能因此宣称真实环境门禁通过。
 
 ### 当前产品边界
 

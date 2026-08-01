@@ -166,11 +166,15 @@ positive-score candidates.
 
 Run the Step 2 command. Expected: all selected tests pass with no warnings.
 
-- [ ] **Step 5: Run mutation checks**
+- [x] **Step 5: Run mutation checks**
 
 Temporarily verify that changing `MEDIUM` from 10 to 20, treating any fallback
 JOIN as relevant, or returning unsorted reasons fails at least one test.
 Restore production code and rerun Step 2 green.
+
+执行记录（2026-08-01）：MEDIUM 10→20 被 3 个测试拦截；任意 fallback JOIN 视为
+相关被 1 个测试拦截；理由码乱序被 5 个测试拦截；恢复后
+`tests/unit/test_complexity_routing.py` 24 项全过。
 
 ### Task 2: Parameterize authorized Schema Linking with 5/10/20
 
@@ -944,7 +948,7 @@ invalidates the calibration evidence.
 - Consumes: Tasks 1–11.
 - Produces: exact three-level status, verification evidence, one focused Stage 1 commit only when gates permit, and `origin main` push.
 
-- [ ] **Step 1: Run all locally available tests**
+- [x] **Step 1: Run all locally available tests**
 
 ```bash
 ./.venv/bin/pytest -q tests/unit tests/security
@@ -956,6 +960,11 @@ git diff --check
 
 If a real Pagila DSN is absent, report the integration subset that could not
 run; do not describe it as passing.
+
+执行记录（2026-08-01）：单元与安全 `1173 passed`；synthetic development /
+calibration 完整 Workflow 与质量门 `3 passed`；`compileall`、`pip check`、
+`git diff --check` 通过。真实 Pagila 容器未运行，完整 integration 子集待
+真实环境步骤执行。
 
 - [ ] **Step 2: Run real Stage 1 environment**
 
