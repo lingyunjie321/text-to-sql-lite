@@ -1,6 +1,7 @@
 import json
 import socket
 from http.client import BadStatusLine, IncompleteRead
+from types import SimpleNamespace
 from urllib.error import HTTPError, URLError
 from urllib.request import Request
 
@@ -75,6 +76,56 @@ def _messages() -> tuple[LLMMessage, ...]:
         LLMMessage(role="system", content="system rules"),
         LLMMessage(role="user", content='{"question":"films"}'),
     )
+
+
+def test_provider_exposes_read_only_public_model_metadata() -> None:
+    provider = OpenAICompatibleLLMProvider(
+        _settings(),
+        transport=FakeTransport(),
+    )
+
+    assert provider.model_id == "model-a"
+    assert provider.endpoint_summary == "https://models.example.test/v1"
+    with pytest.raises(AttributeError):
+        provider.model_id = "other"  # type: ignore[misc]
+    with pytest.raises(AttributeError):
+        provider.endpoint_summary = "https://private.example.test"  # type: ignore[misc]
+
+
+@pytest.mark.parametrize(
+    ("base_url", "expected"),
+    (
+        (
+            "https://user:password@models.example.test:8443/"
+            "v1/private?api_key=secret#fragment",
+            "https://models.example.test:8443/v1/private",
+        ),
+        (
+            "https://user:password@[2001:db8::1]:8443/"
+            "v1/private?api_key=secret#fragment",
+            "https://[2001:db8::1]:8443/v1/private",
+        ),
+    ),
+)
+def test_endpoint_summary_keeps_only_scheme_host_port_and_path(
+    base_url: str,
+    expected: str,
+) -> None:
+    provider = object.__new__(OpenAICompatibleLLMProvider)
+    object.__setattr__(
+        provider,
+        "_settings",
+        SimpleNamespace(
+            model="public-model",
+            base_url=base_url,
+        ),
+    )
+
+    assert provider.endpoint_summary == expected
+    assert provider.model_id == "public-model"
+    rendered = provider.endpoint_summary
+    for secret in ("user", "password", "api_key", "secret", "fragment"):
+        assert secret not in rendered
 
 
 def _response(

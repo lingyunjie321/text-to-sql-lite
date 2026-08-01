@@ -5,6 +5,7 @@ from collections.abc import Sequence
 from http.client import HTTPException, IncompleteRead
 from typing import Protocol
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlsplit, urlunsplit
 from urllib.request import Request
 
 from pydantic import ValidationError
@@ -122,6 +123,23 @@ class OpenAICompatibleLLMProvider:
     ) -> None:
         self._settings = settings
         self._transport = transport or UrllibHTTPTransport()
+
+    @property
+    def model_id(self) -> str:
+        return self._settings.model
+
+    @property
+    def endpoint_summary(self) -> str:
+        parsed = urlsplit(str(self._settings.base_url))
+        host = parsed.hostname or ""
+        if ":" in host and not host.startswith("["):
+            host = f"[{host}]"
+        netloc = host
+        if parsed.port is not None:
+            netloc = f"{host}:{parsed.port}"
+        return urlunsplit(
+            (parsed.scheme, netloc, parsed.path, "", "")
+        )
 
     def generate(
         self,

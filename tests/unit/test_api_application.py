@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Sequence
 from unittest.mock import Mock
 
@@ -22,6 +23,7 @@ from app.connectors.errors import ErrorType
 from app.connectors.metadata import empty_schema_snapshot
 from app.connectors.models import ExecutionResult, ResultColumn
 from app.execution import success_outcome
+from app.generation import build_configured_model_routing_runtime
 from app.reflection import (
     record_execution,
     record_validation,
@@ -101,6 +103,83 @@ def _services(runner: Runner) -> ApplicationServices:
             clock=lambda: 0.0,
         ),
         runner=runner,
+    )
+
+
+class _PublicSummaryProvider:
+    model_id = "public-model"
+    endpoint_summary = "https://models.example.test/v1"
+
+    @property
+    def _settings(self) -> object:
+        raise AssertionError("API must not read provider private settings")
+
+    def generate(
+        self,
+        messages,
+        *,
+        timeout_seconds=None,
+    ):  # type: ignore[no-untyped-def]
+        raise AssertionError("generation is outside config endpoint tests")
+
+
+class _ProviderWithoutSummary:
+    def generate(
+        self,
+        messages,
+        *,
+        timeout_seconds=None,
+    ):  # type: ignore[no-untyped-def]
+        raise AssertionError("generation is outside config endpoint tests")
+
+
+class _ProviderWithBrokenSummary:
+    @property
+    def endpoint_summary(self) -> str:
+        raise RuntimeError("secret getter failure")
+
+    @property
+    def model_id(self) -> str:
+        return "model"
+
+    def generate(
+        self,
+        messages,
+        *,
+        timeout_seconds=None,
+    ):  # type: ignore[no-untyped-def]
+        raise AssertionError("generation is outside config endpoint tests")
+
+
+def _config_services(provider: object) -> ApplicationServices:
+    settings = LLMSettings(
+        base_url="https://models.example.test/v1",
+        api_key="test-secret",
+        model="model",
+    )
+    route_settings = LLMRouteSettings(
+        simple=settings,
+        standard=settings,
+        complex=settings,
+        data_boundary_id="test-boundary",
+    )
+    routing = build_configured_model_routing_runtime(
+        settings=route_settings,
+        providers={
+            "simple": provider,
+            "standard": provider,
+            "complex": provider,
+        },
+    )
+    return ApplicationServices(
+        context=WorkflowContext(
+            connector=Mock(),
+            model_routing=routing,
+            datasource_id="pagila",
+            allowed_schemas=("public",),
+            allowed_tables=("public.film",),
+        ),
+        runner=Runner(),
     )
 
 
@@ -184,7 +263,27 @@ def test_openapi_exposes_only_the_specified_post_endpoint() -> None:
         "/api/v1/config",
         "/health",
     }
+    assert set(schema["paths"]["/health"]) == {"get"}
+    assert set(schema["paths"]["/api/v1/config"]) == {"get"}
+    assert set(schema["paths"]["/api/v1/text-to-sql"]) == {"post"}
+    assert schema["paths"]["/health"]["get"]["operationId"] == (
+        "health_health_get"
+    )
+    assert schema["paths"]["/api/v1/config"]["get"]["operationId"] == (
+        "get_config_api_v1_config_get"
+    )
+    assert set(schema["paths"]["/health"]["get"]["responses"]) == {"200"}
+    assert set(schema["paths"]["/api/v1/config"]["get"]["responses"]) == {
+        "200"
+    }
+    assert "security" not in schema["paths"]["/health"]["get"]
+    assert "security" not in schema["paths"]["/api/v1/config"]["get"]
     operation = schema["paths"]["/api/v1/text-to-sql"]["post"]
+    assert operation["operationId"] == (
+        "query_text_to_sql_api_v1_text_to_sql_post"
+    )
+    assert operation["security"] == [{"HTTPBearer": []}]
+    assert set(operation["responses"]) == {"200", "400", "403", "422", "500"}
     assert operation["requestBody"]["required"] is True
     assert operation["responses"]["200"]["content"][
         "application/json"
@@ -195,7 +294,154 @@ def test_openapi_exposes_only_the_specified_post_endpoint() -> None:
     assert rows_schema["items"]["items"]
 
 
-def test_identifier_failure_returns_structured_internal_error() -> None:
+def test_config_uses_public_provider_metadata_without_private_settings() -> None:
+    app = create_app(services=_config_services(_PublicSummaryProvider()))
+
+    with TestClient(app) as client:
+        response = client.get("/api/v1/config")
+
+    assert response.status_code == 200
+    assert response.json()["models"]["simple"] == {
+        "base_url": "https://models.example.test/v1",
+        "model_name": "public-model",
+    }
+    assert response.json()["models"]["standard"] == {
+        "base_url": "https://models.example.test/v1",
+        "model_name": "public-model",
+    }
+    assert response.json()["models"]["complex"] == {
+        "base_url": "https://models.example.test/v1",
+        "model_name": "public-model",
+    }
+    assert response.json()["models"]["fallback"] == {
+        "base_url": "unknown",
+        "model_name": "unknown",
+    }
+
+
+def test_config_returns_unknown_for_provider_without_public_summary() -> None:
+    app = create_app(services=_config_services(_ProviderWithoutSummary()))
+
+    with TestClient(app) as client:
+        response = client.get("/api/v1/config")
+
+    assert response.status_code == 200
+    assert response.json()["models"]["simple"] == {
+        "base_url": "unknown",
+        "model_name": "unknown",
+    }
+
+
+def test_broken_public_getter_is_not_silently_reported_as_unknown() -> None:
+    from app.api.routes.system import _model_summary
+
+    with pytest.raises(RuntimeError, match="secret getter failure"):
+        _model_summary(_config_services(_ProviderWithBrokenSummary()), "simple")
+
+
+def test_route_modules_expose_the_existing_api_contract() -> None:
+    from app.api.routes import create_query_router, system_router
+
+    assert {route.path for route in create_query_router(lambda: "id").routes} == {
+        "/api/v1/text-to-sql"
+    }
+    assert {route.path for route in system_router.routes} == {
+        "/health",
+        "/api/v1/config",
+    }
+
+
+def test_unexpected_api_error_logs_only_whitelisted_context(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    def failing_runner(state, *, context):  # type: ignore[no-untyped-def]
+        del state, context
+        raise RuntimeError(
+            "postgresql://reader:secret@db/pagila SELECT private"
+        )
+
+    app = create_app(
+        services=ApplicationServices(
+            context=_services(Runner()).context,
+            runner=failing_runner,
+        ),
+        id_factory=_id_factory(("req-log", "trace-log")),
+    )
+    caplog.set_level(logging.WARNING, logger="app.api.routes.query")
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.post(
+            "/api/v1/text-to-sql",
+            json={"question": "private question"},
+        )
+
+    assert response.status_code == 500
+    assert response.json()["error"]["code"] == "API_INTERNAL_ERROR"
+    assert [record.getMessage() for record in caplog.records] == [
+        "api_query_unexpected_error"
+    ]
+    record = caplog.records[0]
+    assert record.request_id == "req-log"
+    assert record.trace_id == "trace-log"
+    assert record.error_category == "unexpected"
+    assert record.exc_info is None
+    rendered = caplog.text
+    for secret in ("secret", "postgresql", "private", "RuntimeError"):
+        assert secret not in rendered
+
+
+def test_application_import_reexports_the_same_auth_dependency() -> None:
+    from app.api.dependencies import authenticate
+
+    assert api_application._authenticate is authenticate
+
+
+def test_two_app_factories_keep_their_id_factories_isolated() -> None:
+    first_runner = Runner()
+    second_runner = Runner()
+    first_app = create_app(
+        services=_services(first_runner),
+        id_factory=_id_factory(("first-request", "first-trace")),
+    )
+    second_app = create_app(
+        services=_services(second_runner),
+        id_factory=_id_factory(("second-request", "second-trace")),
+    )
+
+    with TestClient(first_app) as first_client:
+        first_response = first_client.post(
+            "/api/v1/text-to-sql",
+            json={"question": "return one"},
+        )
+    with TestClient(second_app) as second_client:
+        second_response = second_client.post(
+            "/api/v1/text-to-sql",
+            json={"question": "return one"},
+        )
+
+    assert first_response.json()["request_id"] == "first-request"
+    assert first_response.json()["trace_id"] == "first-trace"
+    assert second_response.json()["request_id"] == "second-request"
+    assert second_response.json()["trace_id"] == "second-trace"
+
+
+def test_injected_services_are_not_closed_after_lifespan() -> None:
+    close = Mock()
+    services = ApplicationServices(
+        context=_services(Runner()).context,
+        runner=Runner(),
+        close=close,
+    )
+
+    with TestClient(create_app(services=services)):
+        pass
+
+    close.assert_not_called()
+
+
+def test_identifier_failure_returns_structured_internal_error(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     runner = Runner()
 
     def failing_id_factory() -> str:
@@ -205,6 +451,7 @@ def test_identifier_failure_returns_structured_internal_error() -> None:
         services=_services(runner),
         id_factory=failing_id_factory,
     )
+    caplog.set_level(logging.WARNING, logger="app.api.routes.query")
 
     with TestClient(app, raise_server_exceptions=False) as client:
         response = client.post(
@@ -220,6 +467,11 @@ def test_identifier_failure_returns_structured_internal_error() -> None:
     assert body["trace_id"]
     assert "secret" not in response.text
     assert runner.calls == []
+    assert [record.getMessage() for record in caplog.records] == [
+        "api_query_unexpected_error"
+    ]
+    assert caplog.records[0].exc_info is None
+    assert "secret" not in caplog.text
 
 
 def test_non_json_workflow_result_returns_structured_internal_error() -> None:
