@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+import logging
 from pathlib import Path
-from typing import Protocol
+from typing import Literal, Protocol
 
 from app.config import (
     DatabaseSettings,
@@ -14,9 +15,8 @@ from app.config import (
     load_llm_route_settings,
 )
 from app.connectors.base import DatabaseConnector
-from app.connectors.postgresql import PostgreSQLConnector
-from app.connectors.mysql import MySQLConnector
-from app.connectors.starrocks import StarRocksConnector
+from app.connectors.errors import DatabaseConnectorError
+from app.connectors.factory import ConnectorFactory
 from app.connectors.registry import ConnectorRegistry
 from app.connectors.view_semantics import (
     FrozenSemanticConnector,
@@ -27,21 +27,15 @@ from app.connectors.view_semantics_lock import (
     VIEW_SEMANTIC_MANIFEST_PATH,
     VIEW_SEMANTIC_MANIFEST_SHA256,
 )
-from app.generation import (
-    OpenAICompatibleLLMProvider,
-    build_configured_model_routing_runtime,
-)
+from app.generation.factory import ModelProviderFactory
 from app.observability import default_traced_runner
-from app.schema_linking import (
-    EmbeddingIndexRegistry,
-    OpenAICompatibleEmbeddingProvider,
-    RetrievalRuntime,
-)
+from app.schema_linking import OpenAICompatibleEmbeddingProvider
 from app.workflow import (
     SQLTaskState,
     WorkflowContext,
     run_workflow,
 )
+from app.api.context_factory import WorkflowContextFactory
 
 PAGILA_MVP_ALLOWED_SCHEMAS = ("public",)
 PAGILA_MVP_ALLOWED_TABLES = (
@@ -61,6 +55,28 @@ PAGILA_MVP_ALLOWED_TABLES = (
 )
 
 _DEFAULT_DATASOURCES_JSON = Path("datasources.json")
+logger = logging.getLogger(__name__)
+
+BootstrapStage = Literal[
+    "configuration",
+    "connector",
+    "model",
+    "embedding",
+    "context",
+    "runner",
+    "services",
+]
+
+
+class ApplicationBootstrapError(RuntimeError):
+    """Public-safe error returned when generic startup work fails."""
+
+    code = "APP_BOOTSTRAP_FAILED"
+    public_message = "Application startup failed."
+
+    def __init__(self, stage: BootstrapStage) -> None:
+        super().__init__(self.public_message)
+        self.stage = stage
 
 
 class WorkflowRunner(Protocol):
@@ -207,14 +223,11 @@ def _get_datasource_allowed_config(
                 )
 
     # Fallback: env-based allowlist
-    try:
-        schemas, tables = load_datasource_allowlist()
-        if schemas and tables:
-            return schemas, tables, (
-                db_settings.type if db_settings else "mysql"
-            )
-    except Exception:
-        pass
+    schemas, tables = load_datasource_allowlist()
+    if schemas and tables:
+        return schemas, tables, (
+            db_settings.type if db_settings else "mysql"
+        )
 
     raise ValueError(
         f"Datasource '{datasource_id}' has no configured allowlist. "
@@ -230,49 +243,8 @@ def _get_datasource_allowed_config(
 def _create_raw_connector(
     db_settings: DatabaseSettings,
 ) -> DatabaseConnector:
-    """Create a raw connector based on database type."""
-    db_type = db_settings.type
-
-    if db_type == "postgresql":
-        return PostgreSQLConnector(db_settings)
-    elif db_type == "mysql":
-        return MySQLConnector(
-            host=db_settings.host,
-            port=db_settings.port,
-            user=db_settings.username,
-            password=(
-                db_settings.password_value
-                if db_settings.password_value
-                else ""
-            ),
-            database=db_settings.database,
-            min_pool_size=db_settings.min_pool_size,
-            max_pool_size=db_settings.max_pool_size,
-            pool_timeout_seconds=db_settings.pool_timeout_seconds,
-            statement_timeout_seconds=db_settings.statement_timeout_seconds,
-            max_result_rows=db_settings.max_result_rows,
-            connection_retry_count=db_settings.connection_retry_count,
-        )
-    elif db_type == "starrocks":
-        return StarRocksConnector(
-            host=db_settings.host,
-            port=db_settings.port,
-            user=db_settings.username,
-            password=(
-                db_settings.password_value
-                if db_settings.password_value
-                else ""
-            ),
-            database=db_settings.database,
-            min_pool_size=db_settings.min_pool_size,
-            max_pool_size=db_settings.max_pool_size,
-            pool_timeout_seconds=db_settings.pool_timeout_seconds,
-            statement_timeout_seconds=db_settings.statement_timeout_seconds,
-            max_result_rows=db_settings.max_result_rows,
-            connection_retry_count=db_settings.connection_retry_count,
-        )
-    else:
-        raise ValueError(f"Unsupported database type: {db_type!r}")
+    """Backward-compatible wrapper for the explicit connector factory."""
+    return ConnectorFactory().create(db_settings)
 
 
 # ── Context builder ──────────────────────────────────────────────
@@ -284,7 +256,7 @@ def _setup_pagila_connector(
     datasource_id: str,
     allowed_schemas: tuple[str, ...],
     allowed_tables: tuple[str, ...],
-) -> tuple[WorkflowContext, str]:
+) -> tuple[DatabaseConnector, str]:
     """Wrap a raw connector in FrozenSemanticConnector for Pagila.
 
     Returns (connector, semantic_version).  This reads metadata and loads
@@ -308,137 +280,135 @@ def _setup_pagila_connector(
 # ── Production bootstrap ─────────────────────────────────────────
 
 
-def build_production_services() -> ApplicationServices:
-    """Bootstrap all configured datasources into an ApplicationServices.
+class ApplicationBootstrap:
+    """Coordinate configuration, connection, model and context startup."""
 
-    Loads the primary datasource from env vars (TEXT_TO_SQL_DATABASE_*),
-    optionally loads extra datasources from ``datasources.json``, and
-    builds a WorkflowContext for each.
-    """
-    registry = ConnectorRegistry()
-    contexts: dict[str, WorkflowContext] = {}
+    def __init__(self) -> None:
+        self._connector_factory = ConnectorFactory()
+        self._model_factory = ModelProviderFactory()
+        self._context_factory = WorkflowContextFactory()
 
-    # ── Phase 1: Load & connect to all datasources ─────────────
-    # Pagila manifest is validated here (before LLM credentials).
-    pending: list[
-        tuple[
-            str,  # datasource_id
-            object,  # connector (raw or FrozenSemanticConnector)
-            tuple[str, ...],  # allowed_schemas
-            tuple[str, ...],  # allowed_tables
-            str,  # semantic_version
-        ]
-    ] = []
-
-    try:
-        primary_settings = load_database_settings()
-        primary_ds_id = primary_settings.datasource_id
-
-        allowed_schemas, allowed_tables, _ = _get_datasource_allowed_config(
-            primary_ds_id, db_settings=primary_settings
-        )
-        raw_conn = _create_raw_connector(primary_settings)
-        raw_conn.open()
-        registry.register(primary_ds_id, raw_conn)
-
-        if primary_ds_id == "pagila":
-            wrapped_conn, sem_ver = _setup_pagila_connector(
-                raw_conn,
-                datasource_id=primary_ds_id,
-                allowed_schemas=allowed_schemas,
-                allowed_tables=allowed_tables,
-            )
-            pending.append(
-                (primary_ds_id, wrapped_conn, allowed_schemas, allowed_tables, sem_ver)
-            )
-        else:
-            pending.append(
-                (primary_ds_id, raw_conn, allowed_schemas, allowed_tables, "0.0.0")
-            )
-    except Exception:
-        registry.close_all()
-        raise
-
-    # Extra datasources from datasources.json (optional)
-    extra_configs: dict[str, DatabaseSettings] = {}
-    try:
-        extra_configs = load_datasources_from_file(_DEFAULT_DATASOURCES_JSON)
-    except Exception:
-        pass
-
-    registered_ids = {item[0] for item in pending}
-    for ds_id, ds_settings in extra_configs.items():
-        if ds_id in registered_ids:
-            continue
+    def build(self) -> ApplicationServices:
+        registry = ConnectorRegistry()
+        owned_connectors: list[tuple[str, DatabaseConnector]] = []
+        pending: list[
+            tuple[
+                str,
+                DatabaseConnector,
+                tuple[str, ...],
+                tuple[str, ...],
+                str,
+            ]
+        ] = []
+        stage: BootstrapStage = "configuration"
         try:
-            allowed_schemas, allowed_tables, _ = _get_datasource_allowed_config(
-                ds_id, db_settings=ds_settings, extra_configs=extra_configs
+            primary_settings = load_database_settings()
+            extra_configs = load_datasources_from_file(
+                _DEFAULT_DATASOURCES_JSON
             )
-            raw_conn = _create_raw_connector(ds_settings)
-            raw_conn.open()
-            registry.register(ds_id, raw_conn)
+            configured_datasources = [
+                (primary_settings.datasource_id, primary_settings),
+                *extra_configs.items(),
+            ]
+            configured_ids: set[str] = set()
+            for datasource_id, settings in configured_datasources:
+                stage = "configuration"
+                if datasource_id in configured_ids:
+                    raise ValueError("duplicate datasource_id is configured")
+                configured_ids.add(datasource_id)
+                allowed_schemas, allowed_tables, _ = (
+                    _get_datasource_allowed_config(
+                        datasource_id,
+                        db_settings=settings,
+                        extra_configs=extra_configs,
+                    )
+                )
+                stage = "connector"
+                raw_connector = self._connector_factory.create(settings)
+                owned_connectors.append((datasource_id, raw_connector))
+                registry.register(datasource_id, raw_connector)
+                raw_connector.open()
+                if datasource_id == "pagila":
+                    connector, semantic_version = _setup_pagila_connector(
+                        raw_connector,
+                        datasource_id=datasource_id,
+                        allowed_schemas=allowed_schemas,
+                        allowed_tables=allowed_tables,
+                    )
+                else:
+                    connector = raw_connector
+                    semantic_version = "0.0.0"
+                pending.append(
+                    (
+                        datasource_id,
+                        connector,
+                        allowed_schemas,
+                        allowed_tables,
+                        semantic_version,
+                    )
+                )
 
-            if ds_id == "pagila":
-                wrapped_conn, sem_ver = _setup_pagila_connector(
-                    raw_conn,
-                    datasource_id=ds_id,
+            stage = "model"
+            llm_route_settings = load_llm_route_settings()
+            model_routing = self._model_factory.create(llm_route_settings)
+            stage = "embedding"
+            embedding_provider = OpenAICompatibleEmbeddingProvider(
+                load_embedding_settings()
+            )
+            stage = "context"
+            contexts = {
+                datasource_id: self._context_factory.create(
+                    connector=connector,
+                    model_routing=model_routing,
+                    datasource_id=datasource_id,
                     allowed_schemas=allowed_schemas,
                     allowed_tables=allowed_tables,
+                    embedding_provider=embedding_provider,
+                    semantic_version=semantic_version,
                 )
-                pending.append(
-                    (ds_id, wrapped_conn, allowed_schemas, allowed_tables, sem_ver)
-                )
-            else:
-                pending.append(
-                    (ds_id, raw_conn, allowed_schemas, allowed_tables, "0.0.0")
-                )
-        except Exception:
-            registry.close_all()
-            raise
-
-    # ── Phase 2: Shared infrastructure (LLM / Embedding) ───────
-    llm_route_settings = load_llm_route_settings()
-    declared_llm_settings = {
-        "simple": llm_route_settings.simple,
-        "standard": llm_route_settings.standard,
-        "complex": llm_route_settings.complex,
-    }
-    if llm_route_settings.fallback is not None:
-        declared_llm_settings["fallback"] = llm_route_settings.fallback
-    providers = {
-        key: OpenAICompatibleLLMProvider(settings)
-        for key, settings in declared_llm_settings.items()
-    }
-    model_routing = build_configured_model_routing_runtime(
-        settings=llm_route_settings,
-        providers=providers,
-    )
-    embedding_provider = OpenAICompatibleEmbeddingProvider(
-        load_embedding_settings()
-    )
-
-    # ── Phase 3: Build contexts for all datasources ────────────
-    for ds_id, connector, allowed_schemas, allowed_tables, sem_ver in pending:
-        try:
-            contexts[ds_id] = WorkflowContext(
-                connector=connector,
-                model_routing=model_routing,
-                datasource_id=ds_id,
-                allowed_schemas=allowed_schemas,
-                allowed_tables=allowed_tables,
-                retrieval_runtime=RetrievalRuntime(
-                    provider=embedding_provider,
-                    registry=EmbeddingIndexRegistry(),
-                    semantic_version=sem_ver,
-                ),
+                for (
+                    datasource_id,
+                    connector,
+                    allowed_schemas,
+                    allowed_tables,
+                    semantic_version,
+                ) in pending
+            }
+            stage = "runner"
+            runner = default_traced_runner()
+            stage = "services"
+            services = ApplicationServices(
+                contexts=contexts,
+                runner=runner,
+                close=registry.close_all,
+                llm_route_settings=llm_route_settings,
             )
-        except Exception:
-            registry.close_all()
+        except DatabaseConnectorError:
+            _close_connectors(owned_connectors)
             raise
+        except Exception:
+            _close_connectors(owned_connectors)
+            raise ApplicationBootstrapError(stage) from None
+        except BaseException:
+            _close_connectors(owned_connectors)
+            raise
+        return services
 
-    return ApplicationServices(
-        contexts=contexts,
-        runner=default_traced_runner(),
-        close=registry.close_all,
-        llm_route_settings=llm_route_settings,
-    )
+
+def _close_connectors(
+    connectors: list[tuple[str, DatabaseConnector]],
+) -> None:
+    """Best-effort cleanup that never replaces the startup failure."""
+    for datasource_id, connector in reversed(connectors):
+        try:
+            connector.close()
+        except Exception:
+            logger.warning(
+                "bootstrap_connector_close_failed",
+                extra={"datasource_id": datasource_id},
+            )
+
+
+def build_production_services() -> ApplicationServices:
+    """Build configured production services with explicit ownership."""
+    return ApplicationBootstrap().build()

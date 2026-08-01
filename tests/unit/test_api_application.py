@@ -322,22 +322,25 @@ def test_production_services_reject_non_pagila_datasource_before_open(
         datasource_id="other",
         dsn="postgresql://reader:secret@127.0.0.1:55432/pagila",
     )
-    connector_class = Mock()
     monkeypatch.setattr(
         api_bootstrap,
         "load_database_settings",
         lambda: settings,
     )
+    connector_factory = Mock()
     monkeypatch.setattr(
         api_bootstrap,
-        "PostgreSQLConnector",
-        connector_class,
+        "ConnectorFactory",
+        lambda: connector_factory,
     )
 
-    with pytest.raises(ValueError, match="no configured allowlist"):
+    from app.api.bootstrap import ApplicationBootstrapError
+
+    with pytest.raises(ApplicationBootstrapError) as captured:
         api_bootstrap.build_production_services()
 
-    connector_class.assert_not_called()
+    connector_factory.create.assert_not_called()
+    assert captured.value.stage == "configuration"
 
 
 def test_production_manifest_drift_fails_before_llm_credentials(
@@ -365,8 +368,8 @@ def test_production_manifest_drift_fails_before_llm_credentials(
     )
     monkeypatch.setattr(
         api_bootstrap,
-        "PostgreSQLConnector",
-        Mock(return_value=connector),
+        "ConnectorFactory",
+        lambda: Mock(create=Mock(return_value=connector)),
     )
     monkeypatch.setattr(
         api_bootstrap,
@@ -382,12 +385,15 @@ def test_production_manifest_drift_fails_before_llm_credentials(
         raising=False,
     )
 
-    with pytest.raises(ValueError, match="manifest"):
+    from app.api.bootstrap import ApplicationBootstrapError
+
+    with pytest.raises(ApplicationBootstrapError) as captured:
         api_bootstrap.build_production_services()
 
     assert llm_loads == 0
     connector.open.assert_called_once_with()
     connector.close.assert_called_once_with()
+    assert captured.value.stage == "connector"
 
 
 def test_production_services_inject_versioned_embedding_runtime(
@@ -442,8 +448,8 @@ def test_production_services_inject_versioned_embedding_runtime(
     )
     monkeypatch.setattr(
         api_bootstrap,
-        "PostgreSQLConnector",
-        Mock(return_value=connector),
+        "ConnectorFactory",
+        lambda: Mock(create=Mock(return_value=connector)),
     )
     monkeypatch.setattr(
         api_bootstrap,
@@ -460,10 +466,14 @@ def test_production_services_inject_versioned_embedding_runtime(
         "load_llm_route_settings",
         Mock(return_value=llm_route_settings),
     )
+    from app.generation.factory import ModelProviderFactory
+
     monkeypatch.setattr(
         api_bootstrap,
-        "OpenAICompatibleLLMProvider",
-        llm_provider_factory,
+        "ModelProviderFactory",
+        lambda: ModelProviderFactory(
+            provider_builder=llm_provider_factory,
+        ),
     )
     monkeypatch.setattr(
         api_bootstrap,
@@ -531,9 +541,13 @@ def test_production_lifespan_fails_closed_without_credentials(
         else __import__("pathlib").Path(".env.missing"),
     )
 
-    with pytest.raises(ValidationError):
+    from app.api.bootstrap import ApplicationBootstrapError
+
+    with pytest.raises(ApplicationBootstrapError) as captured:
         with TestClient(create_app()):
             pass
+
+    assert captured.value.stage == "configuration"
 
 
 def test_importing_asgi_app_does_not_load_credentials() -> None:

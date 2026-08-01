@@ -42,6 +42,7 @@ from app.connectors.postgresql import PostgreSQLConnector
 from app.connectors.mysql import MySQLConnector
 from app.connectors.starrocks import StarRocksConnector
 from app.connectors.registry import ConnectorRegistry
+from app.connectors.factory import ConnectorFactory
 from app.connectors.types import (
     DialectName,
     normalize_value,
@@ -62,6 +63,7 @@ __all__ = [
     "starrocks_dialect",
     # Connectors
     "ConnectorRegistry",
+    "ConnectorFactory",
     "PostgreSQLConnector",
     "MySQLConnector",
     "StarRocksConnector",

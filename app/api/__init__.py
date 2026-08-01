@@ -4,6 +4,8 @@ from app.api.application import API_PATH, create_app
 from app.api.bootstrap import (
     PAGILA_MVP_ALLOWED_SCHEMAS,
     PAGILA_MVP_ALLOWED_TABLES,
+    ApplicationBootstrap,
+    ApplicationBootstrapError,
     ApplicationServices,
     RequestIdentity,
     build_production_services,
@@ -23,6 +25,8 @@ __all__ = [
     "API_PATH",
     "PAGILA_MVP_ALLOWED_SCHEMAS",
     "PAGILA_MVP_ALLOWED_TABLES",
+    "ApplicationBootstrap",
+    "ApplicationBootstrapError",
     "ApplicationServices",
     "QUESTION_MAX_CHARS",
     "PublicError",

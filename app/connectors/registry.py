@@ -35,10 +35,13 @@ class ConnectorRegistry:
     ) -> None:
         """Register *connector* under *datasource_id*.
 
-        Overwrites any existing connector with the same id.
+        Duplicate datasource ids are rejected so the existing connector
+        remains the sole lifecycle owner for that id.
         """
         if not datasource_id.strip():
             raise ValueError("datasource_id must be non-empty")
+        if datasource_id in self._connectors:
+            raise ValueError("datasource_id is already registered")
         # Duck-type check (not isinstance, to allow Mock objects in tests)
         if not callable(getattr(connector, "execute", None)):
             raise TypeError(
@@ -72,15 +75,17 @@ class ConnectorRegistry:
     def close_all(self) -> None:
         """Close every registered connector."""
         errors: list[tuple[str, Exception]] = []
-        for datasource_id, connector in self._connectors.items():
+        for datasource_id, connector in reversed(
+            tuple(self._connectors.items())
+        ):
             try:
                 connector.close()
             except Exception as exc:
                 errors.append((datasource_id, exc))
         self._connectors.clear()
         if errors:
-            joined = "; ".join(
-                f"{ds}: {err}" for ds, err in errors
+            datasource_ids = ", ".join(
+                datasource_id for datasource_id, _ in errors
             )
             raise DatabaseConnectorError(
                 DatabaseError(
@@ -88,6 +93,9 @@ class ConnectorRegistry:
                     error_type=ErrorType.CONNECTION_ERROR,
                     code="DB_CLOSE_ERROR",
                     retryable=False,
-                    public_message=f"Errors closing connectors: {joined}",
+                    public_message=(
+                        "Failed to close connectors: "
+                        f"{datasource_ids}"
+                    ),
                 )
             )

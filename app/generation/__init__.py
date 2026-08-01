@@ -37,6 +37,7 @@ from app.generation.routing import (
     model_config_sha256,
 )
 from app.generation.service import generate_sql
+from app.generation.factory import ModelProviderFactory
 
 __all__ = [
     "CONTEXT_ESTIMATOR_VERSION",
@@ -56,6 +57,7 @@ __all__ = [
     "ModelRoute",
     "ModelRouteTable",
     "ModelRoutingRuntime",
+    "ModelProviderFactory",
     "ModelTarget",
     "OpenAICompatibleLLMProvider",
     "ProviderRegistry",
