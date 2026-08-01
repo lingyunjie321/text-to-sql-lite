@@ -7,7 +7,7 @@ from app.connectors.postgresql import PostgreSQLConnector
 from app.schema_linking import link_schema
 
 
-CASE_PATH = Path("evaluation/cases/pagila_mvp.jsonl")
+CASE_PATH = Path("evaluation/cases/pagila_mvp_all_draft.jsonl")
 LINKING_CASE_IDS = {
     *(f"PG-MVP-{index:03d}" for index in range(1, 15)),
     "PG-MVP-018",

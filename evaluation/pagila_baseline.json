@@ -36,7 +36,7 @@
     "review_file_sha256": "7378023921e8f78c152e41b6bb4eb047d6f9d2da0ae13009fa145ad4b2a3b1b6"
   },
   "software": {
-    "controlled_code_sha256": "1f9e93e6749c2c8e081e54ab5c16679c4c7c3860fbea063159c9257c52b3a921",
+    "controlled_code_sha256": "f6bc0c0f827790f8de99f01cce95c410ed90e9e90499040c2ffd096f49c1aab4",
     "python_implementation": "CPython",
     "python_version": "3.12.7",
     "installed_distributions": [
@@ -64,7 +64,7 @@
     ],
     "prompt_version": "stage1-retrieval-routing-v1",
     "provider_contract_version": "openai-compatible-json-v1",
-    "comparator_version": "stage1-comparator-v1",
+    "comparator_version": "stage1-comparator-v2",
     "evidence_version": "stage1-evidence-v1",
     "report_version": "stage1-report-v1"
   },
@@ -82,7 +82,7 @@
     "connection_retry_count": 1
   },
   "model_configuration": {
-    "config_sha256": "bd66c666151db8c3236b2454696d23b20cd60fbff8ecf37c46d45c54abb422db"
+    "config_sha256": "a1b38442cb37785a8b2366f87cbda0d3379411ab3125ed3cf77055a1e2b534ac"
   },
-  "evaluation_baseline_id": "a7b3bd95e68810874b4f7ebcbc54bd1dcec41d35a6a5489c9090fbefafa29628"
+  "evaluation_baseline_id": "67deb833144f7811d1351943f9531a06f29d33ce40290c69c5a5b1f1e313b62f"
 }

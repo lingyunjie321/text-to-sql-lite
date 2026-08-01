@@ -103,6 +103,93 @@ def test_nested_json_compares_structurally() -> None:
     assert result.passed is True
 
 
+def test_trailing_whitespace_in_string_values_is_ignored() -> None:
+    columns = [("name", 25)]
+
+    result = compare_results(
+        _result(columns, [["English   "]]),
+        _result(columns, [["English"]]),
+        mode=ComparisonMode.MULTISET,
+        order_sensitive=False,
+        numeric_tolerances={},
+    )
+
+    assert result.passed is True
+    assert result.code == "COMPARATOR_MATCH"
+
+
+def test_trailing_whitespace_normalization_applies_in_exact_mode() -> None:
+    columns = [("name", 25)]
+
+    result = compare_results(
+        _result(columns, [["English "], ["Deutsch  "]]),
+        _result(columns, [["English"], ["Deutsch"]]),
+        mode=ComparisonMode.EXACT,
+        order_sensitive=False,
+        numeric_tolerances={},
+    )
+
+    assert result.passed is True
+
+
+def test_leading_and_internal_whitespace_are_still_significant() -> None:
+    columns = [("name", 25)]
+
+    leading = compare_results(
+        _result(columns, [[" English"]]),
+        _result(columns, [["English"]]),
+        mode=ComparisonMode.MULTISET,
+        order_sensitive=False,
+        numeric_tolerances={},
+    )
+    internal = compare_results(
+        _result(columns, [["A  B"]]),
+        _result(columns, [["A B"]]),
+        mode=ComparisonMode.MULTISET,
+        order_sensitive=False,
+        numeric_tolerances={},
+    )
+
+    assert leading.passed is False
+    assert leading.code == "COMPARATOR_ROW_MISMATCH"
+    assert internal.passed is False
+
+
+def test_case_is_still_significant() -> None:
+    columns = [("name", 25)]
+
+    result = compare_results(
+        _result(columns, [["English"]]),
+        _result(columns, [["english"]]),
+        mode=ComparisonMode.MULTISET,
+        order_sensitive=False,
+        numeric_tolerances={},
+    )
+
+    assert result.passed is False
+
+
+def test_nested_json_strings_normalize_only_trailing_whitespace() -> None:
+    columns = [("payload", 3802)]
+
+    result = compare_results(
+        _result(columns, [[{"name": "English   ", "code": "A B"}]]),
+        _result(columns, [[{"name": "English", "code": "A  B"}]]),
+        mode=ComparisonMode.MULTISET,
+        order_sensitive=False,
+        numeric_tolerances={},
+    )
+
+    assert result.passed is False
+    assert compare_results(
+        _result(columns, [[{"name": "English   "}]]),
+        _result(columns, [[{"name": "English"}]]),
+        mode=ComparisonMode.MULTISET,
+        order_sensitive=False,
+        numeric_tolerances={},
+    ).passed is True
+
+
 def test_column_names_are_normalized_but_types_are_exact() -> None:
     normalized = compare_results(
         _result([(" Film_ID ", 23)], [[1]]),

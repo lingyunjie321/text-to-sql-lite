@@ -20,7 +20,7 @@ from app.validation import validate_sql
 
 
 CASE_PATH = (
-    Path(__file__).parents[2] / "evaluation/cases/pagila_mvp.jsonl"
+    Path(__file__).parents[2] / "evaluation/cases/pagila_mvp_all_draft.jsonl"
 )
 
 

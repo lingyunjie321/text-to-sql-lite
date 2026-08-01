@@ -122,7 +122,7 @@ def test_evaluate_refuses_baseline_drift_before_credentials(
 
     with pytest.raises(ValueError, match="baseline"):
         run_pagila_evaluation.evaluate_to_report(
-            cases_path=Path("evaluation/cases/pagila_mvp.jsonl"),
+            cases_path=Path("evaluation/cases/pagila_mvp_all_draft.jsonl"),
             baseline_path=Path("evaluation/pagila_baseline.json"),
             report_path=Path("unused.json"),
             env_file=Path(".env"),
@@ -179,7 +179,7 @@ def test_evaluate_runs_static_freeze_before_runtime_or_credentials(
 
     with pytest.raises(ValueError, match="code freeze"):
         run_pagila_evaluation.evaluate_to_report(
-            cases_path=Path("evaluation/cases/pagila_mvp.jsonl"),
+            cases_path=Path("evaluation/cases/pagila_mvp_all_draft.jsonl"),
             baseline_path=Path("evaluation/pagila_baseline.json"),
             report_path=Path("unused.json"),
             env_file=Path(".env"),
@@ -192,7 +192,7 @@ def test_evaluate_requires_exact_all_draft_gold_before_probes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    source = Path("evaluation/cases/pagila_mvp.jsonl").read_bytes()
+    source = Path("evaluation/cases/pagila_mvp_all_draft.jsonl").read_bytes()
     changed = source.replace(
         b'"status":"draft"',
         b'"status":"verified"',
@@ -207,7 +207,7 @@ def test_evaluate_requires_exact_all_draft_gold_before_probes(
     cases_path = tmp_path / "cases.jsonl"
     cases_path.write_bytes(changed)
     original_suite = load_case_suite(
-        Path("evaluation/cases/pagila_mvp.jsonl")
+        Path("evaluation/cases/pagila_mvp_all_draft.jsonl")
     )
     probes = 0
 
@@ -300,7 +300,7 @@ def test_evaluate_refuses_unbound_database_before_llm_credentials(
 
     with pytest.raises(ValueError, match="database target"):
         run_pagila_evaluation.evaluate_to_report(
-            cases_path=Path("evaluation/cases/pagila_mvp.jsonl"),
+            cases_path=Path("evaluation/cases/pagila_mvp_all_draft.jsonl"),
             baseline_path=Path("evaluation/pagila_baseline.json"),
             report_path=Path("unused.json"),
             env_file=Path(".env"),
@@ -440,7 +440,7 @@ def test_database_execution_drift_fails_before_connector_or_provider(
 
     with pytest.raises(ValueError, match="freeze"):
         run_pagila_evaluation.evaluate_to_report(
-            cases_path=Path("evaluation/cases/pagila_mvp.jsonl"),
+            cases_path=Path("evaluation/cases/pagila_mvp_all_draft.jsonl"),
             baseline_path=Path("evaluation/pagila_baseline.json"),
             report_path=Path("unused.json"),
             env_file=Path(".env"),

@@ -988,6 +988,16 @@ Record exact versions, hashes, counts, failures, and whether
 重跑；18 条 Case 独立逐条审核与 `verify-case` 待执行，
 `real_environment_validated` 保持 `false`。
 
+第二次正式候选记录（2026-08-01）：候选 1 失败被确认为 standard 档模型名
+`deepseek-chat-v4` 不被端点支持（HTTP 400，非 Gold 可证明的配置缺陷），
+比较器升级 `stage1-comparator-v2`（字符串仅尾部空格归一化）。用户确认后
+重建配置/校准冻结与 Pagila baseline（ID
+`67deb833144f7811d1351943f9531a06f29d33ce40290c69c5a5b1f1e313b62f`），
+使用与初始 Gold 逐字节一致的全 draft 副本
+`evaluation/cases/pagila_mvp_all_draft.jsonl` 重跑第二次正式候选：自动证据
+`13/18`。修复 003/010/011；剩余失败 002/005/008/009/012（模型输出波动、
+列类型检查、`||` 白名单），独立逐条审核待执行；历史 11 条 verified 未改动。
+
 - [ ] **Step 3: Independent review**
 
 Provide the complete focused diff and this plan to an independent reviewer.

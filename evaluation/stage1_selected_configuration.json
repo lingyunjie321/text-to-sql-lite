@@ -56,7 +56,7 @@
         {
           "route_id": "standard_route",
           "primary": {
-            "model_config_sha256": "a1b7fe8fcc7a6a4b3de674532a725110baa4c4af0f968b54bc816dca0cd3befa",
+            "model_config_sha256": "80c4874ed952aea9d9df51b6d71d4bce201fc3b2afd01c876df7be33a359666e",
             "max_input_tokens": 32768,
             "max_output_tokens": 2048,
             "timeout_seconds": 30.0,
@@ -68,7 +68,7 @@
         {
           "route_id": "complex_route",
           "primary": {
-            "model_config_sha256": "90df2a564ec5092de31f00027851f8bea2db0a9609679692496a5d19a32a8a56",
+            "model_config_sha256": "67134208f06643160f12ec57f03fad826d978b243360424eaa7412343908960e",
             "max_input_tokens": 32768,
             "max_output_tokens": 2048,
             "timeout_seconds": 120.0,
@@ -80,5 +80,5 @@
       ]
     }
   },
-  "stage1_config_sha256": "bd66c666151db8c3236b2454696d23b20cd60fbff8ecf37c46d45c54abb422db"
+  "stage1_config_sha256": "a1b38442cb37785a8b2366f87cbda0d3379411ab3125ed3cf77055a1e2b534ac"
 }

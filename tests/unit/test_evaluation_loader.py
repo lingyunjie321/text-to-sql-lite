@@ -9,7 +9,7 @@ from evaluation import (
     status_neutral_sha256,
 )
 
-CASES_PATH = Path("evaluation/cases/pagila_mvp.jsonl")
+CASES_PATH = Path("evaluation/cases/pagila_mvp_all_draft.jsonl")
 
 
 def _lines() -> list[dict[str, object]]:

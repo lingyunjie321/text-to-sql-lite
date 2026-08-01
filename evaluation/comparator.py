@@ -11,7 +11,7 @@ from evaluation.models import (
     NumericTolerance,
 )
 
-COMPARATOR_VERSION = "stage1-comparator-v1"
+COMPARATOR_VERSION = "stage1-comparator-v2"
 
 _FLOAT_OIDS = frozenset({700, 701})
 _NUMERIC_OIDS = frozenset({20, 21, 23, 700, 701, 1700})
@@ -68,7 +68,15 @@ def _parse_timestamptz(value: JsonValue) -> datetime | None:
     return parsed.astimezone(timezone.utc)
 
 
+def _normalize_string(value: JsonValue) -> JsonValue:
+    if isinstance(value, str):
+        return value.rstrip()
+    return value
+
+
 def _strict_equal(left: JsonValue, right: JsonValue) -> bool:
+    left = _normalize_string(left)
+    right = _normalize_string(right)
     if type(left) is not type(right):
         return False
     if isinstance(left, list) and isinstance(right, list):
@@ -121,6 +129,8 @@ def _value_equal(
     type_oid: int,
     tolerance: NumericTolerance | None,
 ) -> bool:
+    predicted = _normalize_string(predicted)
+    gold = _normalize_string(gold)
     if predicted is None or gold is None:
         return predicted is None and gold is None
     if tolerance is not None:

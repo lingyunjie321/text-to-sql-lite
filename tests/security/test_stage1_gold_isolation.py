@@ -26,10 +26,10 @@ from tests.routing_support import single_provider_test_routing
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 _GOLD_CASES_PATH = (
-    _REPOSITORY_ROOT / "evaluation/cases/pagila_mvp.jsonl"
+    _REPOSITORY_ROOT / "evaluation/cases/pagila_mvp_all_draft.jsonl"
 )
 _PROTECTED_DATASET_PATHS = (
-    "evaluation/cases/pagila_mvp.jsonl",
+    "evaluation/cases/pagila_mvp_all_draft.jsonl",
     "evaluation/cases/retrieval_routing_development.jsonl",
     "evaluation/cases/retrieval_routing_calibration.jsonl",
 )

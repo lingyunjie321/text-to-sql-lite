@@ -31,7 +31,7 @@ from evaluation.runner import evaluate_case
 from tests.routing_support import single_provider_test_routing
 
 CASES = load_case_suite(
-    Path("evaluation/cases/pagila_mvp.jsonl")
+    Path("evaluation/cases/pagila_mvp_all_draft.jsonl")
 ).cases
 
 

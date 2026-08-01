@@ -8,7 +8,7 @@ from app.connectors.postgresql import PostgreSQLConnector
 from app.validation import validate_sql
 
 
-CASE_PATH = Path("evaluation/cases/pagila_mvp.jsonl")
+CASE_PATH = Path("evaluation/cases/pagila_mvp_all_draft.jsonl")
 
 
 def _load_cases() -> list[dict[str, object]]:
