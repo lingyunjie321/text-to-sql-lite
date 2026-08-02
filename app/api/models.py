@@ -13,6 +13,7 @@ from pydantic import (
 )
 
 from app.connectors.errors import ErrorType
+from app.local.profile_models import validate_profile_id
 from app.workflow import FinalStatus
 
 QUESTION_MAX_CHARS = 2000
@@ -66,12 +67,19 @@ class QueryRequest(BaseModel):
 
     question: StrictStr
     datasource_id: StrictStr = "pagila"
+    model_profile_id: StrictStr | None = None
     schemas: tuple[StrictStr, ...] = ()
     debug: StrictBool = False
 
-    # Phase 2: 请求级覆写
-    model_overrides: dict[str, ModelOverride] | None = None
-    datasource_override: DatasourceOverride | None = None
+    # deprecated 过渡兼容；新查询应使用 Profile ID。
+    model_overrides: dict[str, ModelOverride] | None = Field(
+        default=None,
+        json_schema_extra={"deprecated": True},
+    )
+    datasource_override: DatasourceOverride | None = Field(
+        default=None,
+        json_schema_extra={"deprecated": True},
+    )
 
     @field_validator("question")
     @classmethod
@@ -88,6 +96,13 @@ class QueryRequest(BaseModel):
             raise ValueError("datasource_id is invalid")
         return stripped
 
+    @field_validator("model_profile_id")
+    @classmethod
+    def validate_model_profile_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return validate_profile_id(value)
+
     @field_validator("schemas")
     @classmethod
     def validate_schemas(
@@ -102,6 +117,15 @@ class QueryRequest(BaseModel):
     @model_validator(mode="after")
     def validate_override_tier_keys(self) -> Self:
         """拒绝 model_overrides 中的未知 tier 键。"""
+        if self.model_profile_id is not None:
+            validate_profile_id(self.datasource_id)
+        if self.model_profile_id is not None and (
+            self.model_overrides is not None
+            or self.datasource_override is not None
+        ):
+            raise ValueError(
+                "Profile mode cannot be combined with request overrides"
+            )
         if self.model_overrides is not None:
             allowed = {"simple", "standard", "complex"}
             unknown = set(self.model_overrides) - allowed

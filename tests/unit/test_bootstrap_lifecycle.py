@@ -159,6 +159,11 @@ def _configure(
         "WorkflowContextFactory",
         lambda: context_factory or _ContextFactory(),
     )
+    monkeypatch.setattr(
+        bootstrap,
+        "LocalProfileStore",
+        lambda: object(),
+    )
     return bootstrap.ApplicationBootstrap()
 
 

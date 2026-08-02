@@ -6,6 +6,7 @@ from pydantic import ValidationError
 
 from app.config import (
     DatabaseSettings,
+    default_profile_database_path,
     load_database_settings,
     load_datasources_from_file,
 )
@@ -121,3 +122,15 @@ def test_datasource_file_uses_explicit_allowlist_fields_and_config_package(
     assert settings.allowed_schemas == ("analytics",)
     assert settings.allowed_tables == ("analytics.orders",)
     assert not hasattr(settings, "_extra")
+
+
+def test_default_profile_database_path_has_no_import_or_lookup_side_effect(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+    database_path = default_profile_database_path()
+
+    assert database_path == tmp_path / ".text-to-sql-lite" / "config.db"
+    assert not database_path.parent.exists()

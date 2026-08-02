@@ -10,6 +10,7 @@ from app.config.embedding import EmbeddingSettings, load_embedding_settings
 from app.config.local_app import (
     AuthSettings,
     _resolved_env_file,
+    default_profile_database_path,
     load_auth_settings,
 )
 from app.config.model import (
@@ -30,6 +31,7 @@ __all__ = (
     "SUPPORTED_DATABASE_TYPES",
     "_LLMRouteOverrideSettings",
     "_resolved_env_file",
+    "default_profile_database_path",
     "load_auth_settings",
     "load_database_settings",
     "load_datasource_allowlist",

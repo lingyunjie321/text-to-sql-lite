@@ -13,7 +13,13 @@ from fastapi.responses import JSONResponse
 from app.api.bootstrap import ApplicationServices, build_production_services
 from app.api.dependencies import authenticate as _authenticate
 from app.api.dependencies import services_from_request as _services_from_request
-from app.api.routes import API_PATH, create_query_router, system_router
+from app.api.routes import (
+    API_PATH,
+    create_query_router,
+    datasource_profiles_router,
+    model_profiles_router,
+    system_router,
+)
 
 IdFactory = Callable[[], str]
 
@@ -45,6 +51,8 @@ def create_app(
         lifespan=lifespan,
     )
     app.include_router(system_router)
+    app.include_router(model_profiles_router)
+    app.include_router(datasource_profiles_router)
     app.include_router(create_query_router(selected_id_factory))
 
     @app.exception_handler(RequestValidationError)

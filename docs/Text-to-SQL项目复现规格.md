@@ -5,6 +5,25 @@
 > “补充实现”中的增强版与生产版能力同样属于最终交付必做范围，但必须按
 > 阶段 0～5 形成可独立验收的纵向闭环。
 
+> 本文同时记录两条不同的交付路线：原有的“增强能力
+> Stage 0～5”和当前的“本地工具交付阶段 0～6”。本轮“本地工具
+> 阶段 2”专指 Local Profile，不是下文原有的业务知识/Few-shot
+> Stage 2。
+
+## 当前编码任务：本地工具阶段 2
+
+- 新增不含凭据的 `ModelProfile` 和 `DatasourceProfile`。
+- 使用 Python 标准库 `sqlite3` 保存非敏感 Profile 配置。
+- API Key 和数据库密码只保存在当前单进程内存，重启后缺失。
+- 新的标准查询路径使用 `datasource_id` 和 `model_profile_id`。
+- `model_overrides` 和 `datasource_override` 仅作 deprecated 过渡兼容，
+  不持久化，且不得与 Profile 模式混用。
+- 本阶段可增加“只保存配置”的 Profile CRUD，但不建立动态
+  Connector 或 Provider。查询只能使用显式绑定的现有静态 runtime；
+  未绑定时必须脱敏拒绝，不得回退到默认资源。
+- 不修改 Workflow、Schema Linking、Prompt、模型路由、Embedding 必需行为、
+  SQLGlot 安全策略、PostgreSQL 执行边界或 Gold。
+
 ## 必须实现
 
 - PostgreSQL 单数据源和 Pagila 固定快照。
@@ -26,7 +45,8 @@
 - MySQL、StarRocks、多方言和跨数据源查询。
 - 缓存、导出、完整生产监控和容量治理。
 
-阶段顺序固定为：
+以下是原有的“增强能力 Stage”顺序，与当前本地工具交付
+阶段分开计数：
 
 0. 规格和验收基线；
 1. 检索与路由增强；
@@ -167,12 +187,28 @@ SQL attempt、校验/执行结果、错误、修复计数和观测数据。完�
 每阶段只有同时满足明确契约、真实实现、单元和必要集成/E2E、超时取消降级、
 配置和观测、权限隔离、迁移说明、实际测试通过及文档一致，才可标记完成。
 
+### 2.2 本地工具交付阶段
+
+| 阶段 | 目标 | 当前边界 |
+|---|---|---|
+| 0 现状基线 | 架构、测试、风险与重构范围 | 不改业务行为 |
+| 1 可读性整理 | 配置、工厂、Bootstrap 和 API 职责分离 | 保持对外行为 |
+| 2 本地 Profile | Profile、SQLite 非敏感配置、内存凭据和 ID 查询 | 只绑定现有静态 runtime |
+| 3 动态数据库 | 连接测试、metadata、RuntimeRegistry、PostgreSQL/MySQL | MySQL 安全修复需真实环境 |
+| 4 模型与离线 | 动态 Provider、单模型默认路由、可选 Embedding | 本地 HTTP 仅允许 loopback |
+| 5 前端闭环 | 设置页、Schema 选择和 Profile-ID Workbench | localStorage 不再保存凭据 |
+| 6 本地交付 | 统一启动、安装、真实数据库验证和交接 | 不引入 SaaS/多租户 |
+
 ## 3. 系统架构与请求链路
 
 ### 分层
 
 ```text
 FastAPI / Bootstrap
+        ↓
+Local Profile Service
+        ↓
+Factory / 现有静态 Runtime 绑定
         ↓
 LangGraph Workflow
         ↓
@@ -563,6 +599,7 @@ SQLGlot(postgres)
 class QueryRequest(BaseModel):
     question: str
     datasource_id: str = "pagila"
+    model_profile_id: str | None = None
     schemas: list[str] = Field(default_factory=list)
     debug: bool = False
 ```
@@ -571,6 +608,25 @@ class QueryRequest(BaseModel):
 - `question` 去除空白后长度为 1～2000。
 - 用户身份由可信认证依赖注入，不能由正文声明。
 - 普通客户端的 `debug=true` 不能绕过服务端调试权限。
+- 提供 `model_profile_id` 时进入 Profile 模式；`datasource_id` 同时解释为
+  `DatasourceProfile.id`。
+- Profile 模式只接受 Profile ID，不携带模型 Base URL、API Key、
+  数据库 Host、密码或 allowlist。
+- 未提供 `model_profile_id` 时保留现有请求行为。旧 Override 字段继续
+  可用但标记 deprecated；与 Profile 模式混用返回 422。
+
+### 本地 Profile API（阶段 2）
+
+- `POST/GET /api/v1/local/models`
+- `GET/PUT/DELETE /api/v1/local/models/{id}`
+- `POST/GET /api/v1/local/datasources`
+- `GET/PUT/DELETE /api/v1/local/datasources/{id}`
+
+上述端点只负责 Profile 和当前进程内凭据；不连接模型或数据库。
+凭据字段只允许出现在写入请求，响应只返回 `configured/missing`
+等状态。CRUD 对象不存在返回 404；Profile 查询时静态 runtime
+不可用返回 409；Store 不可用返回脱敏 503。阶段 2 的查询绑定已经持有自身
+凭据的静态 runtime，因此内存凭据状态不是重复的执行前置条件。
 
 ### 响应
 
@@ -659,10 +715,16 @@ time:
   default_timezone: Asia/Shanghai
 ```
 
+本地 Profile Store 默认使用 `~/.text-to-sql-lite/config.db`。目录和文件
+只在应用启动或显式初始化 Store 时创建，不得在 import 时产生文件。
+SQLite 只保存 Profile 公开字段；API Key、密码和完整 DSN 不得进入
+表结构、journal/WAL/SHM、日志、Trace 或异常。
+
 基础 LLM 配置为三条主路由的默认值；每个非空的路由前缀覆盖项必须形成完整、
 合法的路由配置。Fallback 只有在配置了独立 Provider 且显式为至少一条路由开启
 时才生效，并且必须满足同一数据边界及 Token 上限约束。凭据只通过
-Secret/环境变量注入。启动时校验配置；缺少数据库、声明的生成模型路由或
+Secret/环境变量注入；本地 Profile 写入端点接收的凭据是另一个受控来源，
+只在当前单进程内存中存活。启动时校验配置；缺少数据库、声明的生成模型路由或
 Embedding 必要配置时不得以宽松模式运行。
 
 ## 14. 日志与 Trace
@@ -677,7 +739,8 @@ Embedding 必要配置时不得以宽松模式运行。
 - BM25/Embedding 版本与候选数、RRF 配置摘要、Rerank 理由码、
   上下文裁剪前后计数、模型路由和降级状态。
 
-不得记录问题原文、SQL 原文、表/字段原名、数据库凭据、完整 Prompt、未脱敏
+不得记录问题原文、SQL 原文、表/字段原名、数据库凭据、模型 API Key、
+完整 DSN、带 userinfo/query/fragment 的 endpoint、完整 Prompt、未脱敏
 样例值和完整敏感结果。Trace sink 失败只记录降级事件，不改变已完成的业务结果。
 
 ## 15. 项目目录
@@ -685,6 +748,12 @@ Embedding 必要配置时不得以宽松模式运行。
 ```text
 app/
 ├── api/
+├── local/
+│   ├── profile_models.py
+│   ├── profile_store.py
+│   ├── credential_store.py
+│   ├── model_service.py
+│   └── datasource_service.py
 ├── workflow/
 │   ├── models.py
 │   ├── complexity.py
@@ -705,7 +774,7 @@ app/
 ├── validation/
 ├── connectors/
 ├── observability/
-└── config.py
+└── config/
 evaluation/
 ├── cases/
 │   ├── pagila_mvp.jsonl
@@ -736,6 +805,17 @@ docs/
 `docs/Text-to-SQL原项目参考信息.md` 不是编码需求，也不得纳入后续推送。
 
 ## 16. MVP 编码任务清单
+
+### 本地工具阶段 2
+
+- [x] 实现不含 Secret 的 ModelProfile 和 DatasourceProfile。
+- [x] 实现 sqlite3 Profile Store 与进程内 Credential Store。
+- [x] 实现只保存配置的模型/数据源 CRUD API。
+- [x] 实现 Profile-ID 查询与现有静态 runtime 显式绑定。
+- [x] 保留并标记 deprecated Override，不将其持久化。
+- [x] 验证 SQLite、响应、日志、Trace 和异常不含凭据。
+
+### 原 MVP/增强能力清单
 
 - [ ] 锁定 Pagila 和 PostgreSQL 测试环境。
 - [ ] 实现配置加载和启动校验。

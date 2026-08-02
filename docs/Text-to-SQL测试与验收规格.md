@@ -4,6 +4,10 @@
 > Gold SQL 不要求字符串相同；优先比较执行结果、列、重复行、聚合粒度和数值
 > 容差。权限和危险 SQL Case 单独统计，安全门禁在所有阶段保持 100%。
 
+> 本文中原有的阶段 0～5 统一称为“增强能力 Stage”。当前
+> “本地工具阶段 2”是 Local Profile 交付，其独立门禁见第 13 节；
+> 原业务知识/Few-shot 门禁顺延为第 15 节且含义不变。
+
 ## 1. 测试分层
 
 | 层次 | 目标 | 外部依赖 | P0 |
@@ -15,6 +19,7 @@
 | Workflow 集成 | 当前十种节点、计数、终止和恶意修复 | LLM/Connector Stub | 是 |
 | Pagila E2E | 问题到真实执行结果 | 固定 Pagila + 模型 | 是 |
 | API | 请求、联合响应、错误和 Trace | 启动服务 | 是 |
+| 本地 Profile | Profile 校验、SQLite、内存凭据、CRUD 和 ID 查询 | 临时目录/静态 runtime | 本地工具阶段 2 |
 | 增强检索 | 复杂度、动态 K、双路召回、RRF、Rerank、裁剪 | 固定语料/Embedding Stub | 阶段 1 |
 | 业务知识 | 术语、指标、Few-shot、RAG、审批与撤销 | 固定知识库 | 阶段 2 |
 | 会话恢复 | Session、Checkpoint、Compaction、Memory 隔离 | 持久化测试存储 | 阶段 3 |
@@ -266,6 +271,12 @@ Endpoint：`POST /api/v1/text-to-sql`。
 - 未知 datasource 和客户端扩大 Schema 范围。
 - 非可信客户端请求 debug。
 - 总请求 timeout 120 秒。
+- 本地 Profile 模式接受 `datasource_id + model_profile_id`，不携带
+  API Key、数据库密码、Host、Base URL 或 allowlist。
+- Profile 模式与 `model_overrides`/`datasource_override` 混用返回
+  422，且 Workflow、Connector 和 Provider 调用均为 0。
+- 未提供 `model_profile_id` 的旧请求、Override 成功和拒绝 Case 保持
+  原有行为。
 
 响应测试：
 
@@ -277,6 +288,11 @@ Endpoint：`POST /api/v1/text-to-sql`。
 - 失败无原始驱动堆栈。
 - OpenAPI 与 Pydantic Schema 一致。
 - Trace sink 失败不改写已完成业务结果。
+- Profile 不存在使用固定 404 错误；runtime 未绑定使用固定 409 错误；
+  Store 不可用使用脱敏 503 错误。阶段 2 的静态 runtime 已持有自身凭据，
+  Profile 内存凭据缺失只显示状态，不重复阻断查询。
+- 上述错误响应、日志和异常不回显 Profile 输入中的 Host、URL、
+  用户名、密码、API Key 或完整 DSN。
 
 ## 10. Pagila MVP Case
 
@@ -356,7 +372,53 @@ Schema 字段依据已锁定的 Pagila 3.1.0、commit
   都重新经过当前身份下的权限、AST、函数和执行边界；
 - 版本证据不完整的运行不进入任何质量或发布分母。
 
-## 13. 阶段 1：检索与路由增强门禁
+## 13. 本地工具阶段 2：Local Profile 门禁
+
+### Profile 模型与存储
+
+- `ModelProfile` 和 `DatasourceProfile` 严格禁止额外字段，自身
+  `repr`/JSON/OpenAPI 不包含 API Key、密码或 DSN。
+- ID 拒绝空白、控制字符、换行、路径式输入和日志注入；端口、
+  endpoint、host 和 allowlist 边界有独立反例。
+- SQLite 使用 `user_version=1`、参数化 SQL 和显式事务；未知版本、
+  损坏行、坏 JSON、锁超时和 I/O 失败均 fail closed。
+- 创建、读取、替换、删除和确定性列表通过；重复 ID 和不存在对象
+  返回稳定服务错误。
+
+### 凭据安全与生命周期
+
+- API Key 和数据库密码只保存在当前单进程的 Credential Store。
+- 重新打开 SQLite 后非敏感 Profile 保留，新 Credential Store 全部为
+  `missing`或 `not_applicable`。
+- 更新时“未提供 Secret”表示保留，“显式 `null`”表示清除；
+  endpoint/主机/用户等身份字段变化且未提供新 Secret 时自动清除。
+- 删除 Profile 和应用正常退出会清除相应内存引用。Python 字符串
+  不宣称可物理零化。
+- 使用哨兵 Secret 扫描 `config.db`、journal/WAL/SHM、API 响应、
+  OpenAPI、异常、`caplog` 和 Trace，任一位置都不得命中。
+
+### API 与运行时边界
+
+- 模型和数据源 CRUD 的 Create/List/Get/Replace/Delete 全部可达，写入
+  可接收 Secret，响应只返回凭据状态。
+- CRUD 不调用 ConnectorFactory、ModelProviderFactory 或 Workflow runner。
+- Profile-ID 查询只使用 Bootstrap 显式绑定的现有静态 Context/模型
+  路由；未绑定的 Profile 返回 409，不得暗中使用默认资源。
+- Profile 模式下进入 Workflow 的 datasource ID 必须与解析后 Context 一致。
+- Override 字段在 OpenAPI 中标记 deprecated，旧请求、成功、拒绝和
+  脱敏行为通过原有回归。
+- 本阶段不建立动态 Connector/Provider，不修改 Embedding 必需行为，
+  不修改 Workflow、Gold 或 Comparator。
+
+### 阶段通过线
+
+- 新增 Profile 测试全部通过，不新增无理由 skip。
+- unit/security 总体分支覆盖率不低于 83%，原有 unit、security、
+  Pagila integration、Python 全量和前端基线不回归。
+- Gold 内容和 `16 verified / 2 draft` 保持不变；Profile ID 不写入
+  Pagila Gold Case。
+
+## 14. 增强能力 Stage 1：检索与路由增强门禁
 
 ### 功能完成
 
@@ -390,7 +452,7 @@ Schema 字段依据已锁定的 Pagila 3.1.0、commit
 - 18 条 Pagila Gold 仅在配置和代码冻结后运行；不得按失败 Case 修改策略或
   重复抽样择优。
 
-## 14. 阶段 2：业务知识与 Few-shot 门禁
+## 15. 增强能力 Stage 2：业务知识与 Few-shot 门禁
 
 - 术语和指标记录名称、定义、公式、粒度、过滤条件、时间口径、适用数据源、
   所有者、审核状态和版本。
@@ -403,7 +465,7 @@ Schema 字段依据已锁定的 Pagila 3.1.0、commit
 - 功能完成可使用确定性知识库；集成完成必须贯通审核—检索—生成—重新校验；
   真实环境验证必须使用真实批准样本完成对账和撤销演练。
 
-## 15. 阶段 3：Session、Checkpoint 与 Memory 门禁
+## 16. 增强能力 Stage 3：Session、Checkpoint 与 Memory 门禁
 
 - API 使用服务端或可信认证绑定的 `session_id`，请求正文不能冒充其他身份、
   租户或项目。
@@ -417,7 +479,7 @@ Schema 字段依据已锁定的 Pagila 3.1.0、commit
 - 真实环境验证要求在持久化存储上完成进程重启、并发 Session、权限撤销和
   Schema/知识升级演练。
 
-## 16. 阶段 4：多数据库和跨数据源门禁
+## 17. 增强能力 Stage 4：多数据库和跨数据源门禁
 
 - Connector Contract 明确元数据、只读执行、超时、取消、分页能力、错误、
   方言和 capability；Dialect Profile 明确引用、函数、类型、日期/时区、
@@ -430,7 +492,7 @@ Schema 字段依据已锁定的 Pagila 3.1.0、commit
 - 真实环境验证要求固定 MySQL/StarRocks 版本、字符集、时区和数据摘要，并
   运行跨源 E2E。
 
-## 17. 阶段 5：缓存、导出和生产治理门禁
+## 18. 增强能力 Stage 5：缓存、导出和生产治理门禁
 
 - Schema、Few-shot 和结果缓存键绑定身份/租户、数据源、权限摘要、Schema、
   知识、模型/策略和结果版本；跨范围命中必须为 0。
@@ -444,7 +506,7 @@ Schema 字段依据已锁定的 Pagila 3.1.0、commit
 - Secret 轮换、部署、升级、回滚、备份恢复和数据保留/删除都有生产等价演练；
   缺少演练不得标记 `real_environment_validated`。
 
-## 18. Gold、非 Gold 与正式发布边界
+## 19. Gold、非 Gold 与正式发布边界
 
 | 数据集合 | 允许用途 | 禁止用途 |
 |---|---|---|

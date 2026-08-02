@@ -1,5 +1,6 @@
 import logging
 from collections.abc import Sequence
+from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
@@ -24,6 +25,7 @@ from app.connectors.metadata import empty_schema_snapshot
 from app.connectors.models import ExecutionResult, ResultColumn
 from app.execution import success_outcome
 from app.generation import build_configured_model_routing_runtime
+from app.local.profile_store import LocalProfileStore
 from app.reflection import (
     record_execution,
     record_validation,
@@ -38,6 +40,18 @@ from app.workflow import (
     WorkflowPublicError,
 )
 from tests.routing_support import single_provider_test_routing
+
+
+@pytest.fixture(autouse=True)
+def _isolate_production_profile_store(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        api_bootstrap,
+        "LocalProfileStore",
+        lambda: LocalProfileStore(tmp_path / "config.db"),
+    )
 
 
 def _success_state(state: SQLTaskState) -> SQLTaskState:
@@ -257,10 +271,14 @@ def test_openapi_exposes_only_the_specified_post_endpoint() -> None:
     schema = app.openapi()
 
     # POST /api/v1/text-to-sql 是核心契约；GET /health 与 GET /api/v1/config
-    # 是有意的只读辅助端点（健康检查与配置查询），不含写操作或敏感数据。
+    # 是只读辅助端点；/local 路由只保存阶段 2 Profile 配置。
     assert set(schema["paths"]) == {
         "/api/v1/text-to-sql",
         "/api/v1/config",
+        "/api/v1/local/models",
+        "/api/v1/local/models/{profile_id}",
+        "/api/v1/local/datasources",
+        "/api/v1/local/datasources/{profile_id}",
         "/health",
     }
     assert set(schema["paths"]["/health"]) == {"get"}
@@ -283,7 +301,16 @@ def test_openapi_exposes_only_the_specified_post_endpoint() -> None:
         "query_text_to_sql_api_v1_text_to_sql_post"
     )
     assert operation["security"] == [{"HTTPBearer": []}]
-    assert set(operation["responses"]) == {"200", "400", "403", "422", "500"}
+    assert set(operation["responses"]) == {
+        "200",
+        "400",
+        "403",
+        "404",
+        "409",
+        "422",
+        "500",
+        "503",
+    }
     assert operation["requestBody"]["required"] is True
     assert operation["responses"]["200"]["content"][
         "application/json"

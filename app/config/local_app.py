@@ -4,10 +4,17 @@ from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _DEFAULT_ENV_FILE = Path(".env")
+_LOCAL_APP_DIRECTORY = ".text-to-sql-lite"
 
 
 def _resolved_env_file(env_file: Path | None) -> Path:
     return _DEFAULT_ENV_FILE if env_file is None else env_file
+
+
+def default_profile_database_path() -> Path:
+    """Return the local Profile database path without creating it."""
+
+    return Path.home() / _LOCAL_APP_DIRECTORY / "config.db"
 
 
 class AuthSettings(BaseSettings):

@@ -28,6 +28,16 @@ from app.connectors.view_semantics_lock import (
     VIEW_SEMANTIC_MANIFEST_SHA256,
 )
 from app.generation.factory import ModelProviderFactory
+from app.local.credential_store import InMemoryCredentialStore
+from app.local.datasource_service import DatasourceProfileService
+from app.local.model_service import ModelProfileService
+from app.local.profile_models import DatasourceProfile
+from app.local.profile_resolver import (
+    StaticProfileResolver,
+    build_static_datasource_profile,
+    build_static_model_profile,
+)
+from app.local.profile_store import LocalProfileStore
 from app.observability import default_traced_runner
 from app.schema_linking import OpenAICompatibleEmbeddingProvider
 from app.workflow import (
@@ -58,6 +68,7 @@ _DEFAULT_DATASOURCES_JSON = Path("datasources.json")
 logger = logging.getLogger(__name__)
 
 BootstrapStage = Literal[
+    "profiles",
     "configuration",
     "connector",
     "model",
@@ -109,6 +120,10 @@ class ApplicationServices:
         "runner",
         "close",
         "llm_route_settings",
+        "model_profiles",
+        "datasource_profiles",
+        "credential_store",
+        "profile_resolver",
     )
 
     def __init__(
@@ -119,6 +134,10 @@ class ApplicationServices:
         runner: WorkflowRunner = run_workflow,
         close: Callable[[], None] | None = None,
         llm_route_settings: object | None = None,
+        model_profiles: ModelProfileService | None = None,
+        datasource_profiles: DatasourceProfileService | None = None,
+        credential_store: InMemoryCredentialStore | None = None,
+        profile_resolver: StaticProfileResolver | None = None,
     ) -> None:
         if context is None and contexts is None:
             raise ValueError("either 'context' or 'contexts' is required")
@@ -143,6 +162,10 @@ class ApplicationServices:
         object.__setattr__(self, "runner", runner)
         object.__setattr__(self, "close", close)
         object.__setattr__(self, "llm_route_settings", llm_route_settings)
+        object.__setattr__(self, "model_profiles", model_profiles)
+        object.__setattr__(self, "datasource_profiles", datasource_profiles)
+        object.__setattr__(self, "credential_store", credential_store)
+        object.__setattr__(self, "profile_resolver", profile_resolver)
 
     @property
     def context(self) -> WorkflowContext:
@@ -290,6 +313,7 @@ class ApplicationBootstrap:
 
     def build(self) -> ApplicationServices:
         registry = ConnectorRegistry()
+        credential_store = InMemoryCredentialStore()
         owned_connectors: list[tuple[str, DatabaseConnector]] = []
         pending: list[
             tuple[
@@ -300,8 +324,20 @@ class ApplicationBootstrap:
                 str,
             ]
         ] = []
+        active_datasource_profiles: dict[str, DatasourceProfile] = {}
         stage: BootstrapStage = "configuration"
         try:
+            stage = "profiles"
+            profile_store = LocalProfileStore()
+            model_profiles = ModelProfileService(
+                profile_store,
+                credential_store,
+            )
+            datasource_profiles = DatasourceProfileService(
+                profile_store,
+                credential_store,
+            )
+            stage = "configuration"
             primary_settings = load_database_settings()
             extra_configs = load_datasources_from_file(
                 _DEFAULT_DATASOURCES_JSON
@@ -323,6 +359,13 @@ class ApplicationBootstrap:
                         extra_configs=extra_configs,
                     )
                 )
+                static_profile = build_static_datasource_profile(
+                    settings,
+                    allowed_schemas=allowed_schemas,
+                    allowed_tables=allowed_tables,
+                )
+                if static_profile is not None:
+                    active_datasource_profiles[datasource_id] = static_profile
                 stage = "connector"
                 raw_connector = self._connector_factory.create(settings)
                 owned_connectors.append((datasource_id, raw_connector))
@@ -350,6 +393,9 @@ class ApplicationBootstrap:
 
             stage = "model"
             llm_route_settings = load_llm_route_settings()
+            active_model_profile = build_static_model_profile(
+                llm_route_settings
+            )
             model_routing = self._model_factory.create(llm_route_settings)
             stage = "embedding"
             embedding_provider = OpenAICompatibleEmbeddingProvider(
@@ -377,20 +423,37 @@ class ApplicationBootstrap:
             stage = "runner"
             runner = default_traced_runner()
             stage = "services"
+            profile_resolver = StaticProfileResolver(
+                model_profiles=model_profiles,
+                datasource_profiles=datasource_profiles,
+                contexts=contexts,
+                active_model=active_model_profile,
+                active_datasources=active_datasource_profiles,
+            )
             services = ApplicationServices(
                 contexts=contexts,
                 runner=runner,
-                close=registry.close_all,
+                close=lambda: _close_application_resources(
+                    registry,
+                    credential_store,
+                ),
                 llm_route_settings=llm_route_settings,
+                model_profiles=model_profiles,
+                datasource_profiles=datasource_profiles,
+                credential_store=credential_store,
+                profile_resolver=profile_resolver,
             )
         except DatabaseConnectorError:
             _close_connectors(owned_connectors)
+            credential_store.clear_all()
             raise
         except Exception:
             _close_connectors(owned_connectors)
+            credential_store.clear_all()
             raise ApplicationBootstrapError(stage) from None
         except BaseException:
             _close_connectors(owned_connectors)
+            credential_store.clear_all()
             raise
         return services
 
@@ -407,6 +470,16 @@ def _close_connectors(
                 "bootstrap_connector_close_failed",
                 extra={"datasource_id": datasource_id},
             )
+
+
+def _close_application_resources(
+    registry: ConnectorRegistry,
+    credential_store: InMemoryCredentialStore,
+) -> None:
+    try:
+        registry.close_all()
+    finally:
+        credential_store.clear_all()
 
 
 def build_production_services() -> ApplicationServices:

@@ -9,8 +9,10 @@ PostgreSQL 16.14、Pagila 3.1.0、`public` Schema 和 13 张授权表；它尚�
 任意数据库即插即用的生产服务。当前成熟度、验证证据和后续路线图见
 [RELEASE.md](RELEASE.md)。
 
-Next.js 前端已存在，但本地模型/数据源配置与查询的 Profile 闭环尚未完成；当前
-不能把设置页视为可持久化配置任意本地数据库并立即查询的产品能力。
+后端已经完成本地 ModelProfile / DatasourceProfile、SQLite 非敏感配置持久化、
+进程内凭据和 Profile-ID 查询入口。阶段 2 只允许 Profile 绑定启动时已经创建的
+静态 runtime；动态连接、模型切换和前端 Profile 闭环仍未实现，因此当前设置页
+不能被视为可配置任意本地数据库并立即查询的产品能力。
 
 PostgreSQL/Pagila 是当前正式基线。MySQL 仅部分接入，尚未完成真实验证，且只读
 事务设置失败后继续执行是 P0 风险；StarRocks 保持实验状态。两者均不能据此宣称
@@ -24,9 +26,12 @@ PostgreSQL/Pagila 是当前正式基线。MySQL 仅部分接入，尚未完成�
   可解释 Rerank，以及显式 `ComplexityRouteNode` 驱动的动态 Top-K
   （5/10/20）。
 - **服务端模型路由**：按 `simple`、`standard`、`complex` 路由选择模型和
-  上下文预算，可为批准的数据边界配置受限 fallback；阶段 1 仍允许客户端通过
-  受限的 `model_overrides` 过渡字段覆盖三个 tier 的模型配置，但不能指定复杂度
-  或 Top-K。该字段不是最终 Profile 接口。
+  上下文预算，可为批准的数据边界配置受限 fallback；旧客户端仍可通过受限的
+  `model_overrides` 过渡字段覆盖三个 tier 的模型配置，但该字段已经标记为
+  deprecated，不能指定复杂度或 Top-K。
+- **本地 Profile 基础**：ModelProfile 与 DatasourceProfile 的非敏感字段保存到
+  本地 SQLite；API Key 和数据库密码只保存在当前进程内存；新查询可以只提交
+  `datasource_id` 与 `model_profile_id`。本阶段不会据此动态创建连接或 Provider。
 - **SQL 安全门**：只接受单条只读 `SELECT` 或受控 CTE；校验授权对象、字段、
   函数、通配符和危险 AST；模型输出、修复 SQL 都必须重新校验。
 - **数据库执行边界**：PostgreSQL 只读账号和只读事务、最长 30 秒、最多
@@ -167,7 +172,9 @@ Uvicorn 只是启动示例，未写入 `pyproject.toml`，也不属于当前资�
 [部署与回滚](docs/部署与回滚.md)。
 
 启动时会加载 `.env`、连接数据库、读取授权元数据、校验锁定语义 manifest，
-并创建 LLM/Embedding runtime。缺少必需配置时进程会 fail closed。
+创建 LLM/Embedding runtime，并初始化默认位于
+`~/.text-to-sql-lite/config.db` 的本地 Profile Store。Profile 模块导入本身不会
+创建目录或文件；缺少必需启动配置时进程会 fail closed。
 
 ### 6. 发起查询
 
@@ -196,6 +203,23 @@ curl --fail-with-body \
 失败时只返回脱敏 `error`，不会返回当前或历史 SQL。交互式 OpenAPI 文档默认
 位于 `http://127.0.0.1:8000/docs`。
 
+阶段 2 推荐的新查询形式只提交 Profile ID：
+
+```json
+{
+  "question": "列出前 10 部影片的编号和标题",
+  "datasource_id": "pagila",
+  "model_profile_id": "local-model",
+  "schemas": ["public"],
+  "debug": false
+}
+```
+
+该请求只有在两个 Profile 已经保存，且它们的公开连接/模型身份与启动时静态
+runtime 完全匹配时才会进入 Workflow。未匹配时返回明确的 404、409 或 503，
+不会回退到默认数据源或默认模型。动态创建 Connector、Provider 与运行时属于
+后续阶段。
+
 ## 配置说明
 
 | 配置组 | 用途 | 关键约束 |
@@ -212,27 +236,49 @@ curl --fail-with-body \
 
 ## API 约束
 
-当前后端公开三个端点：`GET /health`、`GET /api/v1/config` 与
-`POST /api/v1/text-to-sql`。查询端点接受六个字段：
+当前后端公开 13 个业务操作：health、config、query，以及模型/数据源 Profile
+各 5 个 CRUD 操作。查询端点接受七个字段：
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
 | `question` | string | 必填，去除首尾空白后 1～2000 字符 |
-| `datasource_id` | string | 默认 `pagila`；生产 Bootstrap 只接受 `pagila` |
+| `datasource_id` | string | 默认 `pagila`；Profile 模式下同时作为 DatasourceProfile ID |
+| `model_profile_id` | string \| null | 新标准查询的 ModelProfile ID；未提供时保持旧查询路径 |
 | `schemas` | string[] | 可缩小服务端授权 Schema，不能扩大权限 |
 | `debug` | boolean | 默认 `false`；当前固定身份没有 debug 权限 |
-| `model_overrides` | object \| null | 阶段 1 的请求级过渡兼容字段；仅允许 `simple`、`standard`、`complex` tier，后续 Profile 路线会替代它 |
-| `datasource_override` | object \| null | 阶段 1 的请求级过渡兼容字段；内联数据源默认仍拒绝，不能作为本地配置闭环 |
+| `model_overrides` | object \| null | deprecated 过渡字段；仅允许 `simple`、`standard`、`complex` tier |
+| `datasource_override` | object \| null | deprecated 过渡字段；内联数据源默认仍拒绝 |
 
-除上述兼容字段外，API 不接受 SQL、复杂度、Top-K、Prompt 或超时参数。允许
-范围与实际运行资源仍由服务端可信上下文决定；override 不表示后续 Profile API
-已经实现。
+Profile 模式不能与任一 override 混用。除上述兼容字段外，API 不接受 SQL、
+复杂度、Top-K、Prompt 或超时参数。允许范围与实际运行资源仍由服务端可信上下文
+决定。
+
+本地 Profile CRUD：
+
+| 方法与路径 | 用途 |
+|---|---|
+| `POST /api/v1/local/models` | 创建模型 Profile，可同时提交 write-only API Key |
+| `GET /api/v1/local/models` | 列出模型 Profile 与凭据状态 |
+| `GET /api/v1/local/models/{id}` | 读取一个模型 Profile |
+| `PUT /api/v1/local/models/{id}` | 完整替换模型 Profile；省略凭据表示按安全规则保留或清除 |
+| `DELETE /api/v1/local/models/{id}` | 删除 Profile 并清除对应内存凭据 |
+| `POST /api/v1/local/datasources` | 创建数据源 Profile，可同时提交 write-only 密码 |
+| `GET /api/v1/local/datasources` | 列出数据源 Profile 与凭据状态 |
+| `GET /api/v1/local/datasources/{id}` | 读取一个数据源 Profile |
+| `PUT /api/v1/local/datasources/{id}` | 完整替换数据源 Profile；省略凭据表示按安全规则保留或清除 |
+| `DELETE /api/v1/local/datasources/{id}` | 删除 Profile 并清除对应内存凭据 |
+
+SQLite 只保存响应可见的非敏感字段；API Key、密码和完整 DSN 不写入数据库。
+进程重启后 Profile 仍保留，但凭据状态恢复为 `missing`，需要重新输入。第一版不
+引入通用迁移框架或自制加密；数据库 `user_version` 非 0/1 时会 fail closed。
+详细契约见 [本地 Profile 阶段 2 设计](docs/local-profile-phase2.md)。
 
 业务成功、澄清和业务失败通常都以 HTTP 200 返回，并由响应内的 `status`
 区分；未授权 `debug=true` 返回 403，请求体校验失败返回 422，未处理的服务
-边界异常返回 500。`/health` 与 `/api/v1/config` 是只读端点；当前没有 Session
-或 Profile CRUD 端点。未设置 API Key 时使用固定身份，设置 API Key 后查询端点
-要求 Bearer token。
+边界异常返回 500。Profile 不存在返回 404，未绑定静态 runtime 返回 409，
+Profile Store 不可用返回 503。`/health` 与 `/api/v1/config` 是只读端点；当前
+仍没有 Session。未设置服务端 API Key 时使用固定身份，设置 API Key 后查询和
+Profile CRUD 都要求 Bearer token。
 
 ## 安全边界
 
@@ -310,6 +356,7 @@ docker compose -f infrastructure/pagila/compose.yaml down
 ```text
 app/
   api/              FastAPI 契约、Bootstrap 和响应映射
+  local/            Profile 模型、SQLite Store、进程内凭据、服务与静态解析
   connectors/       PostgreSQL、元数据、只读执行和锁定语义
   schema_linking/   BM25、Embedding、RRF、Rerank 和版本化索引
   generation/       Prompt、OpenAI-compatible Provider、模型路由与上下文裁剪
@@ -323,14 +370,16 @@ infrastructure/     锁定 Pagila Compose、初始化和语义 manifest
 tests/              unit、security 和 integration 测试
 tools/              Pagila fixture 与正式评测命令
 docs/               主规格、验收规格、ADR、设计和实施记录
+frontend/           Next.js 本地界面；当前尚未切换到后端 Profile
 ```
 
 ## 项目状态与路线图
 
-核心 PostgreSQL/Pagila MVP 闭环已实现，增强阶段 1 的确定性实现和本地集成已
-建立，但完整真实环境资格仍为 `not_passed`。业务知识与 Few-shot、Session /
-Checkpoint / Memory、多数据库与跨源查询、缓存与生产治理属于后续必做阶段，
-当前版本均不能宣称已支持。
+核心 PostgreSQL/Pagila MVP 闭环与本地工具阶段 2 的后端 Profile 基础已经实现，
+但完整真实环境资格仍为 `not_passed`。动态数据库连接、动态模型 Provider、
+Embedding 可选化和前端配置闭环属于本地工具阶段 3～5；业务知识与 Few-shot、
+Session / Checkpoint / Memory 等增强路线是另一套历史阶段编号，当前版本均不能
+宣称已支持。
 
 详细完成项、验证结果、已知限制和推荐推进顺序见 [RELEASE.md](RELEASE.md)；
 实现契约以 [项目复现规格](docs/Text-to-SQL项目复现规格.md) 和

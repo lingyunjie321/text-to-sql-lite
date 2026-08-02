@@ -452,3 +452,42 @@ Bootstrap 解析了方言但在两个调用点把返回值丢给 `_`；`new_task
 - 现有多模型路由底层能力，普通用户简化留到后续阶段。
 
 阶段 1 的文件级计划、兼容方案、风险和验收标准见 `docs/refactor-scope.md`。
+
+## 11. 阶段 2 实施后状态附录（2026-08-02）
+
+以上第 1～10 节保留为阶段 0 的历史架构快照，其中关于配置单文件、API 未拆分、
+Profile 不存在等表述不再代表当前实现。阶段 1 的结构整理状态见
+`docs/refactor-scope.md` 末尾附录；本附录只记录本地工具阶段 2 带来的增量。
+
+当前后端调用关系为：
+
+```text
+API
+→ ModelProfileService / DatasourceProfileService
+→ LocalProfileStore + InMemoryCredentialStore
+→ StaticProfileResolver
+→ 现有静态 WorkflowContext
+→ Text-to-SQL Workflow
+```
+
+新增的 `app/local/` 明确承担五类职责：严格 Profile 模型、SQLite 非敏感持久化、
+进程内凭据、模型/数据源 CRUD 服务，以及静态 runtime 解析。API 新增模型和
+数据源各 5 个 CRUD 操作；查询请求新增 `model_profile_id`，Profile 模式只提交
+两个 Profile ID，且不能与旧 override 混用。
+
+阶段 2 没有新增动态资源所有权。`StaticProfileResolver` 只会返回 Bootstrap
+已经创建、且公开身份与 Profile 完全匹配的 Context；不匹配就在进入 Workflow
+前失败，不回退到默认 Context。旧 `model_overrides` / `datasource_override` 保留
+兼容并标记 deprecated。
+
+仍未完成且保持后续阶段边界的能力：
+
+- 根据 DatasourceProfile 动态创建、替换和关闭 Connector；
+- RuntimeRegistry、数据库测试连接和 metadata API；
+- 根据 ModelProfile 动态创建 Provider、单模型默认路由和模型测试接口；
+- Embedding 可选化与 BM25-only 启动；
+- 前端 Profile 设置、工作台选择和 localStorage 凭据清理；
+- MySQL 只读失败 fail closed 与真实 Sakila 验证。
+
+阶段 2 的精确契约见 `docs/local-profile-phase2.md`。核心 Workflow、Schema
+Linking、Prompt、Comparator、Gold 与前端业务代码均未修改。

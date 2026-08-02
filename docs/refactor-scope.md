@@ -411,3 +411,22 @@ MySQL 无法建立数据库级只读保障时 fail closed 是正确的安全方�
 - 一键启动和本地交付文档。
 
 阶段 1 完成后必须停下，报告结果并等待下一阶段确认，不自动进入阶段 2。
+
+## 12. 文档状态与阶段 2 后续结果（2026-08-02）
+
+本文件第 1～11 节是阶段 1 的实施范围和裁决记录，继续作为历史依据保留。阶段 1
+完成并经用户确认后，本地工具阶段 2 已单独实施，因此第 11 节中以下四项已不再
+属于“未完成”：
+
+- Profile ID 查询路径；
+- ModelProfile 与 DatasourceProfile；
+- SQLite 非敏感 Profile Store；
+- 进程内凭据 Store 与模型/数据源 CRUD。
+
+阶段 2 使用 `app/local/` 承载 Profile 职责，并在已有最小路由结构上新增有真实
+行为的 `app/api/routes/models.py` 与 `datasources.py`。它没有反向扩大阶段 1
+范围，也没有修改核心 Workflow 或阶段 1 已裁决的兼容行为。
+
+第 11 节其余事项继续未完成，尤其是动态 Connector/Provider、RuntimeRegistry、
+Embedding 可选化、前端迁移和 MySQL 安全修复。阶段 2 的设计、兼容策略与风险
+以 `docs/local-profile-phase2.md` 为准。

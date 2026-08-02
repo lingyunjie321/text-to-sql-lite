@@ -2,14 +2,16 @@
 
 ## 当前快照
 
-- 记录日期：2026-08-01
+- 记录日期：2026-08-02
 - 包版本：`0.1.0`
 - 当前分支：`main`
 - 定位：工程预览，不是生产发布
 - MVP 工程实现：已形成 PostgreSQL + Pagila 的端到端闭环
 - MVP Stage 10 发布资格：`not_passed`
 - 增强 Stage 1 总体资格：`not_passed`
-- Stage 2～5：尚未开始实现
+- 增强 Stage 2～5：尚未开始实现
+- 本地工具阶段 2：后端 Profile 模型、SQLite 非敏感持久化、进程内凭据、CRUD
+  和 Profile-ID 静态 runtime 查询路径已完成；动态 runtime 与前端闭环未完成
 - 阶段 1 结构整理：已完成配置、工厂/Bootstrap、API 路由、依赖与公开模型摘要的
   模块化；资格仍为 `not_passed`
 - 当前 Gold：`16 verified / 2 draft`；旧正式冻结不能作为当前代码的资格证据
@@ -54,25 +56,48 @@
 这些能力已经进入真实可达代码和确定性测试，但“代码存在”不等于 Stage 1
 总体发布资格通过。
 
+### 本地工具阶段 2 已落地的工程能力
+
+- 严格、不可变的 `ModelProfile` 与 `DatasourceProfile`；模型只接受
+  OpenAI-compatible，数据源只接受 PostgreSQL/MySQL，StarRocks 不进入正式
+  Profile 契约。
+- Python `sqlite3` 非敏感持久化，默认路径
+  `~/.text-to-sql-lite/config.db`，`user_version=1`，未知版本 fail closed。
+- API Key 与数据库密码仅保存在应用 lifespan 持有的进程内存 Store；删除
+  Profile 和应用退出都会清理引用，重启后凭据状态恢复为 `missing`。
+- 模型/数据源各 5 个 CRUD 操作；Secret 只允许写入，响应只暴露凭据状态。
+- 查询请求新增 `model_profile_id`。Profile 模式只提交 Profile ID，与旧 override
+  互斥；旧 override 保留兼容并在 OpenAPI 标记 deprecated。
+- Profile Resolver 只绑定 Bootstrap 已创建且公开身份完全匹配的静态 runtime；
+  不匹配时在 Workflow 前返回明确错误，绝不回退到默认资源。
+- 未修改核心 Workflow、Schema Linking、Prompt、SQLGlot 策略、Embedding 必需
+  行为、Comparator 或 Pagila Gold。
+
+该阶段建立的是本地配置与选择契约，不是动态连接闭环。Connector/Provider 的
+按 Profile 创建、替换和释放分别留在本地工具阶段 3/4，前端迁移留在阶段 5。
+
 ## 当前验证证据
 
-### 当前结构整理回归
+### 当前本地工具阶段 2 回归
 
-- 实际执行的单元回归：`1053 passed`。
-- 实际执行的安全回归：`162 passed`。
+- 实际执行的单元回归：`1127 passed`。
+- 实际执行的安全回归：`171 passed`。
 - unit+security 分支覆盖：**83%**。
 - 锁定 Pagila 集成：`91 passed, 9 skipped`；9 项仍是未配置真实 MySQL/
   StarRocks DSN 的既有条件跳过。
-- Python 全量：`1306 passed, 9 skipped`。
+- Python 全量：`1389 passed, 9 skipped`。
 - 前端 Vitest：`49 passed`；typecheck 与 production build 通过；lint 保持阶段 0
   的 `15 errors / 5 warnings`，未新增问题。
 - `compileall`、`pip check`、Compose config、`git diff --check` 与临时干净 venv
-  安装/导入/unit+security 均通过。
+  安装/导入/unit+security `1298 passed` 均通过。
+- integration 目录与 `-m integration` 均收集 `100` 项；Profile 测试注入临时
+  SQLite 路径，没有在真实用户目录生成测试配置。
 - PyMySQL 已作为直接依赖固定为 `1.2.0`；integration marker 只表示跨组件测试，
   不等同于真实数据库验证。
 
-这些是阶段 1 结构整理的当前回归记录，不是新的正式候选或发布资格。Pagila 回归
-不等于重建正式 baseline；真实 MySQL/StarRocks 与完整前端端到端验证仍未完成。
+这些是本地工具阶段 2 的当前回归记录，不是新的正式候选或发布资格。Pagila 回归
+不等于重建正式 baseline；正式 Gold 与 Pagila baseline 均未修改。真实 MySQL/
+StarRocks 与完整前端 Profile 端到端验证仍未完成。
 
 ### 历史确定性与本地集成
 
@@ -98,8 +123,8 @@
 | development 规范化 | `c1746bea22d588578929b25afb1a3a29d13c7e978f5687e2b6352b7029668dd7` |
 | calibration 原始文件 | `07070687fb39592e26b02fb21891b5108b38bc0f5337240de25a4df3ac638845` |
 | calibration 规范化 | `d7e7d7d60a157ec78e00ba16fbf722dddd5552eb833863310a8d9ed95797b8bd` |
-| 当前受控代码 | `7cfebcd348be0b1511795e83fed6aa61c9dad992bc83c3b6885006e11423b1b4` |
-| 当前非 Gold calibration baseline | `32bab041292abd226e410ecf8e85c1c618055062f849679d95dc67d71ec841e6` |
+| 当前受控代码 | `624d4ba9baf01f3060cc29c1a8519f2c2a4d46fab1cb4cf69871e1248f0b4d76` |
+| 当前非 Gold calibration baseline | `008e40d4f0ae5513dc9c5f5fd3a70fb502ddd4730d8f49fa75668dfa3db47988` |
 | 历史 Pagila baseline（候选 3） | `0b658f083b685cf93938689d109007a9916550e4c78d7a93aa12b17aaa5d1df4` |
 
 表中选定配置、development、calibration、当前受控代码与 calibration baseline
@@ -112,9 +137,10 @@ report 契约 `stage1-report-v1`）。`evaluation/pagila_baseline.json` 仍绑�
 任何受控代码、配置、依赖、数据或语义 manifest 变化后，都必须重新建立相应
 冻结，不能跨版本复用。
 
-阶段 1 的结构整理已改变受控代码与依赖元数据。上述候选、baseline 和其通过数量
-均是历史候选事实，不能作为当前代码的新资格证据；当前版本如需资格结论，必须按
-完整门禁重新冻结并在真实环境运行。
+本地工具阶段 2 再次改变受控代码，因此只重绑了非 Gold 合成校准冻结；选定配置、
+development/calibration 数据摘要均保持不变。上述正式候选、Pagila baseline 和
+其通过数量仍是历史候选事实，不能作为当前代码的新资格证据；当前版本如需资格
+结论，必须按完整门禁重新冻结并在真实环境运行。
 
 ### 真实 Embedding
 
@@ -261,6 +287,8 @@ stage1.real_environment_validated=false
 
 - 生产 Bootstrap 只支持 `pagila` 数据源、PostgreSQL 方言、`public` Schema
   和固定 13 张表。
+- 后端已有本地 Profile CRUD 和 Profile-ID 查询入口，但只能绑定启动时已有的
+  静态 runtime；尚不能根据保存的 Profile 动态创建 Connector 或 Provider。
 - API 是同步单轮接口；没有 `session_id`、Checkpoint 或长期 Memory。
 - 固定请求身份只适合本地演示；尚无完整认证、用户级隔离或多租户数据模型。
 - MySQL Connector 仅部分接入：方言链路和真实 E2E 尚未完成，且只读事务设置失败
@@ -274,9 +302,10 @@ stage1.real_environment_validated=false
   Bootstrap 依赖完整仓库检出。
 - 仓库包含 [MIT License](LICENSE)；仍应遵循其中的使用与免责条款。
 
-## 后续建设顺序
+## 增强路线的后续建设顺序
 
-后续能力仍属于最终交付范围，不因本次暂停而取消。恢复开发时按依赖顺序推进：
+以下 Stage 2～5 是历史增强路线，不是已经完成的“本地工具阶段 2”。后续能力仍
+属于最终交付范围，不因本次暂停而取消；恢复开发时按依赖顺序推进：
 
 ### 1. 收口增强 Stage 1
 

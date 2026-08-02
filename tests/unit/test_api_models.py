@@ -17,6 +17,7 @@ def test_query_request_has_strict_safe_defaults() -> None:
 
     assert request.question == "  List films  "
     assert request.datasource_id == "pagila"
+    assert request.model_profile_id is None
     assert request.schemas == ()
     assert request.debug is False
 
@@ -28,6 +29,7 @@ def test_query_request_has_strict_safe_defaults() -> None:
         {"question": "   "},
         {"question": "x" * 2001},
         {"question": "q", "datasource_id": ""},
+        {"question": "q", "model_profile_id": "BAD ID"},
         {"question": "q", "schemas": [""]},
         {"question": "q", "debug": 1},
         {"question": "q", "unexpected": True},
@@ -38,6 +40,47 @@ def test_query_request_rejects_invalid_or_extra_input(
 ) -> None:
     with pytest.raises(ValidationError):
         QueryRequest.model_validate(payload)
+
+
+def test_query_request_accepts_profile_ids_as_the_standard_mode() -> None:
+    request = QueryRequest(
+        question="List films",
+        datasource_id="pagila",
+        model_profile_id="local-model",
+    )
+
+    assert request.datasource_id == "pagila"
+    assert request.model_profile_id == "local-model"
+
+
+def test_query_request_rejects_unsafe_datasource_id_in_profile_mode() -> None:
+    with pytest.raises(ValidationError, match="profile id is invalid"):
+        QueryRequest(
+            question="List films",
+            datasource_id="../pagila\nlog",
+            model_profile_id="local-model",
+        )
+
+
+@pytest.mark.parametrize(
+    "override_field",
+    [
+        {"model_overrides": {"simple": {"model_name": "legacy"}}},
+        {"datasource_override": {"datasource_id": "pagila"}},
+    ],
+)
+def test_query_request_rejects_mixed_profile_and_override_modes(
+    override_field: dict[str, object],
+) -> None:
+    with pytest.raises(ValidationError, match="Profile mode cannot be combined"):
+        QueryRequest.model_validate(
+            {
+                "question": "List films",
+                "datasource_id": "pagila",
+                "model_profile_id": "local-model",
+                **override_field,
+            }
+        )
 
 
 def test_success_response_allows_a_legal_empty_result() -> None:
