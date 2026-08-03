@@ -83,6 +83,11 @@ class ModelProfile(BaseModel):
     model_name: StrictStr
     embedding_base_url: HttpUrl | None = None
     embedding_model: StrictStr | None = None
+    embedding_dimension: StrictInt | None = Field(
+        default=None,
+        ge=1,
+        le=1_000_000,
+    )
 
     @field_validator("id")
     @classmethod
@@ -127,7 +132,12 @@ class ModelProfile(BaseModel):
 
     @model_validator(mode="after")
     def validate_embedding_pair(self) -> Self:
-        if (self.embedding_base_url is None) != (self.embedding_model is None):
+        configured = (
+            self.embedding_base_url is not None,
+            self.embedding_model is not None,
+            self.embedding_dimension is not None,
+        )
+        if len(set(configured)) != 1:
             raise ValueError("embedding configuration is incomplete")
         return self
 

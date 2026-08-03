@@ -194,6 +194,7 @@ def test_model_profile_crud_never_returns_api_key(tmp_path: Path) -> None:
         "model_name": "qwen2.5-coder",
         "embedding_base_url": None,
         "embedding_model": None,
+        "embedding_dimension": None,
         "generation_credential_status": "configured",
         "embedding_credential_status": "not_applicable",
     }

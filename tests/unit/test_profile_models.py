@@ -59,15 +59,66 @@ def test_model_profile_rejects_unsafe_remote_endpoint(base_url: str) -> None:
         )
 
 
-def test_model_profile_requires_complete_embedding_pair() -> None:
-    with pytest.raises(ValidationError, match="embedding configuration is incomplete"):
+@pytest.mark.parametrize(
+    "embedding_fields",
+    [
+        {"embedding_model": "embedding-model"},
+        {
+            "embedding_base_url": "http://localhost:11434/v1",
+            "embedding_model": "embedding-model",
+        },
+        {
+            "embedding_base_url": "http://localhost:11434/v1",
+            "embedding_dimension": 768,
+        },
+    ],
+)
+def test_model_profile_requires_complete_embedding_group(
+    embedding_fields: dict[str, object],
+) -> None:
+    with pytest.raises(
+        ValidationError,
+        match="embedding configuration is incomplete",
+    ):
         ModelProfile(
             id="local-model",
             name="Local",
             provider_type="openai_compatible",
             base_url="http://localhost:11434/v1",
             model_name="model",
+            **embedding_fields,
+        )
+
+
+def test_model_profile_accepts_complete_embedding_group() -> None:
+    profile = ModelProfile(
+        id="local-model",
+        name="Local",
+        provider_type="openai_compatible",
+        base_url="http://localhost:11434/v1",
+        model_name="model",
+        embedding_base_url="http://localhost:11434/v1",
+        embedding_model="embedding-model",
+        embedding_dimension=768,
+    )
+
+    assert profile.embedding_dimension == 768
+
+
+@pytest.mark.parametrize("dimension", [True, 0, -1, 1_000_001])
+def test_model_profile_rejects_invalid_embedding_dimension(
+    dimension: object,
+) -> None:
+    with pytest.raises(ValidationError):
+        ModelProfile(
+            id="local-model",
+            name="Local",
+            provider_type="openai_compatible",
+            base_url="http://localhost:11434/v1",
+            model_name="model",
+            embedding_base_url="http://localhost:11434/v1",
             embedding_model="embedding-model",
+            embedding_dimension=dimension,
         )
 
 

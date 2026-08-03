@@ -25,6 +25,19 @@ def _model(profile_id: str = "local-model", name: str = "Local Model") -> ModelP
     )
 
 
+def _embedding_model() -> ModelProfile:
+    return ModelProfile(
+        id="embedding-model",
+        name="Embedding Model",
+        provider_type="openai_compatible",
+        base_url="http://localhost:11434/v1",
+        model_name="qwen2.5-coder",
+        embedding_base_url="http://localhost:11434/v1",
+        embedding_model="nomic-embed-text",
+        embedding_dimension=768,
+    )
+
+
 def _datasource(
     profile_id: str = "local-postgres",
     name: str = "Local PostgreSQL",
@@ -57,7 +70,8 @@ def test_store_initializes_versioned_database_only_when_constructed(
             row[1]
             for row in connection.execute("PRAGMA table_info(model_profiles)")
         }
-    assert version == 1
+    assert version == 2
+    assert "embedding_dimension" in columns
     assert "api_key" not in columns
     assert "password" not in columns
 
@@ -88,6 +102,118 @@ def test_store_round_trips_model_profile(tmp_path: Path) -> None:
     assert store.delete_model("local-model") is True
     assert store.get_model("local-model") is None
     assert store.delete_model("local-model") is False
+
+
+def test_store_round_trips_embedding_dimension(tmp_path: Path) -> None:
+    store = LocalProfileStore(tmp_path / "config.db")
+
+    store.create_model(_embedding_model())
+
+    assert store.get_model("embedding-model") == _embedding_model()
+
+
+def test_store_migrates_version_one_model_profiles(tmp_path: Path) -> None:
+    database_path = tmp_path / "config.db"
+    with sqlite3.connect(database_path) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE model_profiles (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                provider_type TEXT NOT NULL,
+                base_url TEXT NOT NULL,
+                model_name TEXT NOT NULL,
+                embedding_base_url TEXT,
+                embedding_model TEXT,
+                CHECK (provider_type = 'openai_compatible'),
+                CHECK (
+                    (embedding_base_url IS NULL AND embedding_model IS NULL)
+                    OR
+                    (embedding_base_url IS NOT NULL AND embedding_model IS NOT NULL)
+                )
+            );
+            CREATE TABLE datasource_profiles (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                database_type TEXT NOT NULL,
+                host TEXT NOT NULL,
+                port INTEGER NOT NULL CHECK (port BETWEEN 1 AND 65535),
+                database_name TEXT NOT NULL,
+                username TEXT NOT NULL,
+                allowed_schemas_json TEXT NOT NULL,
+                allowed_tables_json TEXT NOT NULL,
+                CHECK (database_type IN ('postgresql', 'mysql'))
+            );
+            INSERT INTO model_profiles (
+                id, name, provider_type, base_url, model_name,
+                embedding_base_url, embedding_model
+            ) VALUES (
+                'local-model', 'Local Model', 'openai_compatible',
+                'http://localhost:11434/v1', 'qwen2.5-coder', NULL, NULL
+            );
+            PRAGMA user_version=1;
+            """
+        )
+
+    store = LocalProfileStore(database_path)
+
+    with sqlite3.connect(database_path) as connection:
+        version = connection.execute("PRAGMA user_version").fetchone()[0]
+        columns = {
+            row[1]
+            for row in connection.execute("PRAGMA table_info(model_profiles)")
+        }
+    assert version == 2
+    assert "embedding_dimension" in columns
+    assert store.get_model("local-model") == _model()
+
+
+def test_store_does_not_guess_dimension_for_version_one_embedding(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "config.db"
+    with sqlite3.connect(database_path) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE model_profiles (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                provider_type TEXT NOT NULL,
+                base_url TEXT NOT NULL,
+                model_name TEXT NOT NULL,
+                embedding_base_url TEXT,
+                embedding_model TEXT
+            );
+            CREATE TABLE datasource_profiles (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                database_type TEXT NOT NULL,
+                host TEXT NOT NULL,
+                port INTEGER NOT NULL,
+                database_name TEXT NOT NULL,
+                username TEXT NOT NULL,
+                allowed_schemas_json TEXT NOT NULL,
+                allowed_tables_json TEXT NOT NULL
+            );
+            INSERT INTO model_profiles VALUES (
+                'local-model', 'Local Model', 'openai_compatible',
+                'http://localhost:11434/v1', 'qwen2.5-coder',
+                'http://localhost:11434/v1', 'nomic-embed-text'
+            );
+            PRAGMA user_version=1;
+            """
+        )
+
+    with pytest.raises(ProfileStoreCorruptError):
+        LocalProfileStore(database_path)
+
+    with sqlite3.connect(database_path) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 1
+        columns = {
+            row[1]
+            for row in connection.execute("PRAGMA table_info(model_profiles)")
+        }
+    assert "embedding_dimension" not in columns
 
 
 def test_store_round_trips_datasource_profile(tmp_path: Path) -> None:

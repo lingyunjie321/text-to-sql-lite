@@ -15,7 +15,33 @@ from pydantic import ValidationError
 from app.config.local_app import default_profile_database_path
 from app.local.profile_models import DatasourceProfile, ModelProfile
 
-_SCHEMA_VERSION = 1
+_SCHEMA_VERSION = 2
+_V1_EXPECTED_SCHEMA = {
+    "model_profiles": frozenset(
+        {
+            "id",
+            "name",
+            "provider_type",
+            "base_url",
+            "model_name",
+            "embedding_base_url",
+            "embedding_model",
+        }
+    ),
+    "datasource_profiles": frozenset(
+        {
+            "id",
+            "name",
+            "database_type",
+            "host",
+            "port",
+            "database_name",
+            "username",
+            "allowed_schemas_json",
+            "allowed_tables_json",
+        }
+    ),
+}
 _EXPECTED_SCHEMA = {
     "model_profiles": frozenset(
         {
@@ -26,6 +52,7 @@ _EXPECTED_SCHEMA = {
             "model_name",
             "embedding_base_url",
             "embedding_model",
+            "embedding_dimension",
         }
     ),
     "datasource_profiles": frozenset(
@@ -107,8 +134,9 @@ class LocalProfileStore:
                     """
                     INSERT INTO model_profiles (
                         id, name, provider_type, base_url, model_name,
-                        embedding_base_url, embedding_model
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                        embedding_base_url, embedding_model,
+                        embedding_dimension
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         profile.id,
@@ -122,6 +150,7 @@ class LocalProfileStore:
                             else None
                         ),
                         profile.embedding_model,
+                        profile.embedding_dimension,
                     ),
                 )
         except sqlite3.IntegrityError:
@@ -160,7 +189,8 @@ class LocalProfileStore:
                     """
                     UPDATE model_profiles
                     SET name = ?, provider_type = ?, base_url = ?, model_name = ?,
-                        embedding_base_url = ?, embedding_model = ?
+                        embedding_base_url = ?, embedding_model = ?,
+                        embedding_dimension = ?
                     WHERE id = ?
                     """,
                     (
@@ -174,6 +204,7 @@ class LocalProfileStore:
                             else None
                         ),
                         profile.embedding_model,
+                        profile.embedding_dimension,
                         profile.id,
                     ),
                 )
@@ -323,7 +354,7 @@ class LocalProfileStore:
                 os.chmod(self._database_path.parent, 0o700)
             with self._connection() as connection:
                 version = connection.execute("PRAGMA user_version").fetchone()[0]
-                if version not in (0, _SCHEMA_VERSION):
+                if version not in (0, 1, _SCHEMA_VERSION):
                     raise ProfileStoreCorruptError()
                 if version == 0:
                     existing_object = connection.execute(
@@ -348,11 +379,20 @@ class LocalProfileStore:
                                 model_name TEXT NOT NULL,
                                 embedding_base_url TEXT,
                                 embedding_model TEXT,
+                                embedding_dimension INTEGER,
                                 CHECK (provider_type = 'openai_compatible'),
                                 CHECK (
-                                    (embedding_base_url IS NULL AND embedding_model IS NULL)
+                                    (
+                                        embedding_base_url IS NULL
+                                        AND embedding_model IS NULL
+                                        AND embedding_dimension IS NULL
+                                    )
                                     OR
-                                    (embedding_base_url IS NOT NULL AND embedding_model IS NOT NULL)
+                                    (
+                                        embedding_base_url IS NOT NULL
+                                        AND embedding_model IS NOT NULL
+                                        AND embedding_dimension BETWEEN 1 AND 1000000
+                                    )
                                 )
                             )
                             """
@@ -378,6 +418,8 @@ class LocalProfileStore:
                     except BaseException:
                         connection.rollback()
                         raise
+                elif version == 1:
+                    self._migrate_v1_to_v2(connection)
                 self._validate_schema(connection)
                 connection.execute("PRAGMA journal_mode=WAL")
             os.chmod(self._database_path, 0o600)
@@ -411,7 +453,10 @@ class LocalProfileStore:
                     raise
 
     @staticmethod
-    def _validate_schema(connection: sqlite3.Connection) -> None:
+    def _validate_schema(
+        connection: sqlite3.Connection,
+        expected_schema: dict[str, frozenset[str]] = _EXPECTED_SCHEMA,
+    ) -> None:
         objects = {
             (row["type"], row["name"])
             for row in connection.execute(
@@ -423,11 +468,11 @@ class LocalProfileStore:
             )
         }
         expected_objects = {
-            ("table", table_name) for table_name in _EXPECTED_SCHEMA
+            ("table", table_name) for table_name in expected_schema
         }
         if objects != expected_objects:
             raise ProfileStoreCorruptError()
-        for table_name, expected_columns in _EXPECTED_SCHEMA.items():
+        for table_name, expected_columns in expected_schema.items():
             columns = {
                 row["name"]
                 for row in connection.execute(
@@ -436,6 +481,38 @@ class LocalProfileStore:
             }
             if columns != expected_columns:
                 raise ProfileStoreCorruptError()
+
+    @classmethod
+    def _migrate_v1_to_v2(cls, connection: sqlite3.Connection) -> None:
+        cls._validate_schema(connection, _V1_EXPECTED_SCHEMA)
+        configured_embedding = connection.execute(
+            """
+            SELECT 1
+            FROM model_profiles
+            WHERE embedding_base_url IS NOT NULL
+               OR embedding_model IS NOT NULL
+            LIMIT 1
+            """
+        ).fetchone()
+        if configured_embedding is not None:
+            raise ProfileStoreCorruptError()
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            connection.execute(
+                """
+                ALTER TABLE model_profiles
+                ADD COLUMN embedding_dimension INTEGER
+                CHECK (
+                    embedding_dimension IS NULL
+                    OR embedding_dimension BETWEEN 1 AND 1000000
+                )
+                """
+            )
+            connection.execute("PRAGMA user_version=2")
+            connection.commit()
+        except BaseException:
+            connection.rollback()
+            raise
 
     @staticmethod
     def _model_from_row(row: sqlite3.Row) -> ModelProfile:
@@ -448,6 +525,7 @@ class LocalProfileStore:
                 model_name=row["model_name"],
                 embedding_base_url=row["embedding_base_url"],
                 embedding_model=row["embedding_model"],
+                embedding_dimension=row["embedding_dimension"],
             )
         except (IndexError, KeyError, TypeError, ValidationError):
             raise ProfileStoreCorruptError() from None
