@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import time
 from typing import Literal
 
 from app.connectors.base import DatabaseConnector
@@ -75,6 +76,7 @@ def discover_metadata(
 ) -> DiscoveredMetadata:
     """发现账号可见的非系统关系，并按固定对象边界裁剪结构。"""
     _validate_limits(limits)
+    deadline = time.monotonic() + limits.timeout_seconds
     catalog_sql = _catalog_sql(dialect, limits.max_relations + 1)
     result = connector.execute(
         catalog_sql,
@@ -108,14 +110,17 @@ def discover_metadata(
     snapshot = connector.read_metadata(
         schemas,
         tables,
-        timeout_seconds=limits.timeout_seconds,
+        timeout_seconds=_remaining_timeout(deadline),
     )
+    _remaining_timeout(deadline)
     _ensure_catalog_matches_snapshot(selected_relations, snapshot)
-    return _truncate_snapshot(
+    discovered = _truncate_snapshot(
         snapshot,
         limits=limits,
         already_truncated=relation_truncated,
     )
+    _remaining_timeout(deadline)
+    return discovered
 
 
 def validate_allowlist(
@@ -224,6 +229,21 @@ def _validate_limits(limits: MetadataLimits) -> None:
         raise ValueError("metadata limits are invalid")
 
 
+def _remaining_timeout(deadline: float) -> float:
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise DatabaseConnectorError(
+            DatabaseError(
+                sqlstate=None,
+                error_type=ErrorType.TIMEOUT,
+                code="DB_METADATA_TIMEOUT",
+                retryable=False,
+                public_message="Database metadata discovery timed out.",
+            )
+        )
+    return remaining
+
+
 def _catalog_sql(dialect: str, limit: int) -> str:
     if dialect == "postgres":
         return POSTGRESQL_CATALOG_SQL.format(limit=limit)
@@ -327,6 +347,11 @@ def _truncate_snapshot(
         if (
             foreign_key.source_schema,
             foreign_key.source_table,
+        )
+        in selected_table_ids
+        and (
+            foreign_key.target_schema,
+            foreign_key.target_table,
         )
         in selected_table_ids
     )

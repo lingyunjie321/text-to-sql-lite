@@ -16,6 +16,7 @@ from app.connectors.catalog import (
     RelationIdentity,
     discover_metadata,
 )
+from app.connectors.errors import DatabaseConnectorError, ErrorType
 
 
 def _column(
@@ -157,13 +158,71 @@ def test_postgresql_discovery_excludes_system_schemas_and_sorts_relations():
     )
     assert result.truncated is False
     assert connector.execute_timeouts == [30.0]
-    assert connector.metadata_calls == [
-        (
-            ("public",),
-            ("public.actor", "public.z_view"),
-            30.0,
-        )
-    ]
+    assert connector.metadata_calls[0][:2] == (
+        ("public",),
+        ("public.actor", "public.z_view"),
+    )
+    metadata_timeout = connector.metadata_calls[0][2]
+    assert metadata_timeout is not None
+    assert 0 < metadata_timeout <= 30.0
+
+
+def test_discovery_shares_one_timeout_budget_across_catalog_and_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    clock = iter((100.0, 105.0, 110.0, 115.0))
+    monkeypatch.setattr(
+        "app.connectors.catalog.time.monotonic",
+        lambda: next(clock),
+    )
+    connector = CatalogConnectorFake(
+        rows=(("public", "actor", "BASE TABLE"),),
+        tables=(_table("actor"),),
+    )
+
+    discover_metadata(connector, dialect="postgres")
+
+    assert connector.execute_timeouts == [30.0]
+    assert connector.metadata_calls[0][2] == 25.0
+
+
+def test_discovery_fails_when_catalog_exhausts_metadata_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    clock = iter((100.0, 130.0))
+    monkeypatch.setattr(
+        "app.connectors.catalog.time.monotonic",
+        lambda: next(clock),
+    )
+    connector = CatalogConnectorFake(
+        rows=(("public", "actor", "BASE TABLE"),),
+        tables=(_table("actor"),),
+    )
+
+    with pytest.raises(DatabaseConnectorError) as captured:
+        discover_metadata(connector, dialect="postgres")
+
+    assert captured.value.details.error_type is ErrorType.TIMEOUT
+    assert connector.metadata_calls == []
+
+
+def test_discovery_fails_when_local_metadata_processing_exhausts_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    clock = iter((100.0, 105.0, 125.0, 130.0))
+    monkeypatch.setattr(
+        "app.connectors.catalog.time.monotonic",
+        lambda: next(clock),
+    )
+    connector = CatalogConnectorFake(
+        rows=(("public", "actor", "BASE TABLE"),),
+        tables=(_table("actor"),),
+    )
+
+    with pytest.raises(DatabaseConnectorError) as captured:
+        discover_metadata(connector, dialect="postgres")
+
+    assert captured.value.details.error_type is ErrorType.TIMEOUT
 
 
 def test_mysql_discovery_excludes_system_schemas():
@@ -232,6 +291,7 @@ def test_column_limit_stops_before_relation_that_would_split():
             _table("actor", column_count=2),
             _table("staff", column_count=1),
         ),
+        foreign_keys=(_foreign_key(1),),
     )
 
     result = discover_metadata(
@@ -249,13 +309,17 @@ def test_column_limit_stops_before_relation_that_would_split():
     assert result.relations == (
         RelationIdentity("public", "actor", "table"),
     )
+    assert result.snapshot.foreign_keys == ()
     assert result.truncated is True
 
 
 def test_foreign_key_limit_keeps_complete_objects_in_canonical_order():
     connector = CatalogConnectorFake(
-        rows=(("public", "actor", "BASE TABLE"),),
-        tables=(_table("actor"),),
+        rows=(
+            ("public", "actor", "BASE TABLE"),
+            ("public", "staff", "BASE TABLE"),
+        ),
+        tables=(_table("actor"), _table("staff")),
         foreign_keys=(_foreign_key(2), _foreign_key(1)),
     )
 

@@ -7,22 +7,28 @@
 
 > 本文同时记录两条不同的交付路线：原有的“增强能力
 > Stage 0～5”和当前的“本地工具交付阶段 0～6”。本轮“本地工具
-> 阶段 2”专指 Local Profile，不是下文原有的业务知识/Few-shot
-> Stage 2。
+> 阶段 3”专指动态数据库连接，不是下文原有的 Session/Checkpoint/Memory
+> Stage 3。
 
-## 当前编码任务：本地工具阶段 2
+## 当前编码任务：本地工具阶段 3
 
-- 新增不含凭据的 `ModelProfile` 和 `DatasourceProfile`。
-- 使用 Python 标准库 `sqlite3` 保存非敏感 Profile 配置。
-- API Key 和数据库密码只保存在当前单进程内存，重启后缺失。
-- 新的标准查询路径使用 `datasource_id` 和 `model_profile_id`。
-- `model_overrides` 和 `datasource_override` 仅作 deprecated 过渡兼容，
-  不持久化，且不得与 Profile 模式混用。
-- 本阶段可增加“只保存配置”的 Profile CRUD，但不建立动态
-  Connector 或 Provider。查询只能使用显式绑定的现有静态 runtime；
-  未绑定时必须脱敏拒绝，不得回退到默认资源。
-- 不修改 Workflow、Schema Linking、Prompt、模型路由、Embedding 必需行为、
-  SQLGlot 安全策略、PostgreSQL 执行边界或 Gold。
+- `DatasourceProfile` 可按 ID 动态创建、复用、失效和关闭 PostgreSQL/MySQL
+  Connector；不依赖默认 `.env` 数据源。
+- 数据源接口补齐连接测试与完整非系统 metadata 发现。metadata 只用于展示，
+  绝不自动扩大 `allowed_schemas` / `allowed_tables`。
+- 创建或更新 allowlist 时必须在线验证为当前账号可发现对象的子集；查询只使用
+  Profile allowlist，并在空、失效或不匹配时 fail closed。
+- Metadata 的 catalog 与详细结构读取共享固定 30 秒端到端预算；500 个关系、
+  10,000 个字段和 5,000 个外键上限按完整对象边界截断并返回 `truncated`。
+- MySQL 使用原子只读事务和数据库只读账号双重边界；MySQL 生成、SQLGlot 校验
+  与真实执行使用独立方言和 Prompt 版本；合法 MySQL SQL 的指纹按 MySQL 语法
+  归一，纯格式变化不能绕过循环检测。
+- 标准查询仍只提交 `datasource_id` 与 `model_profile_id`。模型 Provider 和
+  Embedding 仍由现有静态配置提供，动态模型与 BM25-only 留到阶段 4。
+- `model_overrides` 和 `datasource_override` 继续作为 deprecated 兼容路径；
+  StarRocks 继续标记实验，不进入动态 Profile。
+- 不修改 Workflow 图、节点、State、三次修复、32 步限制、Schema Linking、
+  Comparator 或 Gold。
 
 ## 必须实现
 

@@ -9,6 +9,8 @@ __pycache__/
 .coverage
 htmlcov/
 tests/fixtures/pagila/upstream/
+tests/fixtures/mysql/sakila/upstream/
+.env.mysql.local
 
 # Local-only historical reference; never publish it to GitHub.
 docs/Text-to-SQL原项目参考信息.md

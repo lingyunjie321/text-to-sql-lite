@@ -430,3 +430,29 @@ MySQL 无法建立数据库级只读保障时 fail closed 是正确的安全方�
 第 11 节其余事项继续未完成，尤其是动态 Connector/Provider、RuntimeRegistry、
 Embedding 可选化、前端迁移和 MySQL 安全修复。阶段 2 的设计、兼容策略与风险
 以 `docs/local-profile-phase2.md` 为准。
+
+## 13. 文档状态与阶段 3 后续结果（2026-08-03）
+
+阶段 3 已单独完成第 11 节中的动态 Connector、RuntimeRegistry、MySQL 方言贯穿
+和真实只读 E2E，因此这些内容继续作为阶段 1 的历史“当时未完成”记录，不再代表
+当前实现。
+
+阶段 3 采用最小职责拆分：Connector Factory 继续只负责按配置构造；
+`DatasourceRuntimeService` 负责临时连接、metadata/allowlist 校验与 Context
+组装；`RuntimeRegistry` 负责按 Profile ID 缓存和释放；
+`ProfileScopedConnector` 在 Workflow 边界锁定授权。没有引入 DI 容器、插件系统
+或修改 Workflow 图。
+
+阶段 3 关闭了原 P0 MySQL 只读风险：只读事务必须原子建立，失败时不执行用户
+SQL；真实 MySQL 8.4/Sakila 环境同时使用只读账号验证写拒绝。MySQL 由“部分接入”
+提升为动态数据源后端闭环已验证；StarRocks 仍是实验能力，且不进入动态 Profile。
+
+仍保留在后续阶段的事项：
+
+- 动态 Model Provider、模型连接测试和默认单模型映射；
+- Embedding 可选化、失败降级到 BM25 和完全离线启动；
+- 前端 Profile CRUD、Schema 树、工作台选择与 localStorage 凭据清理；
+- 一键启动、安装交付和更完整的本地用户文档。
+
+阶段 3 的范围、错误码、兼容策略与风险以
+`docs/local-datasource-phase3.md` 为准。

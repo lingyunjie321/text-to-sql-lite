@@ -18,6 +18,16 @@ def test_parseable_formatting_has_one_stable_fingerprint() -> None:
     assert len({sql_fingerprint(sql) for sql in variants}) == 1
 
 
+def test_mysql_quoted_identifier_formatting_has_one_stable_fingerprint():
+    variants = (
+        "select `film_id` from `film`",
+        "SELECT `film_id` FROM `film`;",
+        "  SELECT  `film_id`\nFROM `film`  ",
+    )
+
+    assert len({sql_fingerprint(sql) for sql in variants}) == 1
+
+
 def test_quoted_identifier_case_remains_distinct() -> None:
     assert (
         sql_fingerprint('SELECT "FILM_ID" FROM "FILM"')

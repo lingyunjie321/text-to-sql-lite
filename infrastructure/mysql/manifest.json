@@ -1,0 +1,18 @@
+{
+  "source": "https://dev.mysql.com/doc/index-other.html",
+  "sakila_version": "1.5",
+  "archive_url": "https://downloads.mysql.com/docs/sakila-db.tar.gz",
+  "archive_sha256": "5e43def18e194ae131525fead94e8bcfe1476b90ef4909f69183ddfb00000fe1",
+  "retrieved_at": "2026-08-03",
+  "last_modified": "Fri, 31 Jul 2026 22:05:36 GMT",
+  "files": {
+    "sakila-schema.sql": {
+      "member": "sakila-db/sakila-schema.sql",
+      "sha256": "b32170e1e2ad5828749b61a5ec896155bcd143104b076e5ee8a3a3b013f44915"
+    },
+    "sakila-data.sql": {
+      "member": "sakila-db/sakila-data.sql",
+      "sha256": "8c228c678cec6ea9e5145ea868f48be87982252e806a547dcddb67758cadf174"
+    }
+  }
+}

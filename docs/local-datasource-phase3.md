@@ -85,15 +85,16 @@ DSN、连接身份或原始驱动错误。
 
 | 项目 | 上限 |
 |---|---:|
-| metadata 超时 | 30 秒 |
+| metadata 端到端预算 | 30 秒 |
 | 表/视图 | 500 |
 | 字段 | 10,000 |
 | 外键 | 5,000 |
 
 关系按 Schema、名称和类型排序；字段按 ordinal position 和名称排序；主键、外键按
 Schema、表和约束名排序。字段达到上限时在完整表/视图边界停止，外键在完整外键
-对象边界停止。任一上限命中即返回 `truncated=true`。allowlist 精确校验直接查询
-目标对象，不受展示上限影响。
+对象边界停止。Catalog 查询和详细结构读取共享同一个 30 秒 deadline，不会各自
+重新获得 30 秒。任一上限命中即返回 `truncated=true`。allowlist 精确校验直接
+查询目标对象，不受展示上限影响。
 
 PostgreSQL 排除 `pg_catalog`、`information_schema`、`pg_toast*`、
 `pg_temp_*` 和 `pg_toast_temp_*`。MySQL 排除 `information_schema`、
@@ -111,7 +112,10 @@ PUT 规则：
 - 修改 Host、端口、数据库、用户名、密码或 allowlist 时，先用候选配置和有效
   密码执行临时验证。
 - 验证失败时保留原 Profile、凭据和运行时。
-- 验证成功后先使旧运行时失效，再保存新 Profile 和凭据。
+- 验证成功后先写入新 Profile 与进程内凭据，再使旧运行时失效；Registry 同时
+  记录新运行时身份，拒绝并发请求在失效后用先前读取的旧 Profile 重建。
+- create、PUT 和 DELETE 写操作在服务内串行执行，两个并发 PUT 不能让 Registry
+  的期望身份回退到较旧版本。
 - 显式 `password: null` 可以清除密码并关闭旧运行时；Profile 保留，但后续动态
   查询和 metadata 返回凭据缺失。
 - 应用重启后 Profile 保留、密码缺失，需要通过 PUT 重新输入。
@@ -128,6 +132,8 @@ WorkflowContext：
 - 后续请求复用已建立的连接池。
 - Profile 公开连接身份或 allowlist 与缓存项不一致时拒绝复用并重建。
 - Profile 更新、密码变化或删除时关闭并移除对应运行时。
+- 配置更新后，先前已读取旧 Profile 但尚未进入 Registry 的请求会被身份检查
+  拒绝，不能重新缓存旧运行时；删除完成后先清除密码再做最终失效。
 - 创建失败后下次请求可以重试。
 - 应用退出时逆序关闭全部动态运行时；一个 close 失败不阻止其他资源关闭。
 - 关闭错误只记录固定事件和安全 Profile ID，不记录异常文本或连接信息。
@@ -162,6 +168,8 @@ MySQL 事务使用 `START TRANSACTION READ ONLY` 原子启动只读事务，不�
 `dialect_name` 注入 `postgres` 或 `mysql`。PostgreSQL Prompt 和版本保持不变；
 新增独立 MySQL Prompt/版本，只描述 MySQL 和两种方言共同支持的安全函数。
 SQLGlot 继续使用现有方言入口和安全策略。不修改 Workflow 节点或 State 定义。
+SQL 指纹先保持 PostgreSQL 的既有归一化，再对 PostgreSQL 无法解析的合法 MySQL
+语法使用 MySQL 归一化，确保反引号 SQL 的纯格式变化不会绕过循环检测。
 
 MySQL metadata 查询分别渲染 Schema 和 Table 的占位符数量，支持一个 Schema 下
 多张表，并区分表与视图。
@@ -184,8 +192,8 @@ MySQL metadata 查询分别渲染 Schema 和 Table 的占位符数量，支持�
 
 ## 9. MySQL/Sakila 真实环境
 
-使用锁定的 MySQL 8.4 镜像和 MySQL 官方 Sakila 归档。manifest 固定归档 URL、
-版本说明、归档 SHA-256 以及 `sakila-schema.sql`、`sakila-data.sql` 的
+使用锁定的 MySQL 8.4 镜像和 MySQL 官方 Sakila 1.5 归档。manifest 固定归档 URL、
+明确版本、归档 SHA-256 以及 `sakila-schema.sql`、`sakila-data.sql` 的
 SHA-256。首次使用前由工具下载和校验到被 Git 忽略的 fixture 目录。
 
 Compose 初始化 Sakila 后撤销应用用户写权限并只授予需要的读取权限。真实测试至少

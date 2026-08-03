@@ -585,7 +585,7 @@ git commit -m "阶段三：修复 MySQL 只读与方言支持"
 - Consumes: MySQL 官方 `sakila-db.tar.gz`、锁定 MySQL 8.4 镜像、阶段三全部运行时接口。
 - Produces: 可复现 MySQL/Sakila 环境、真实 Connector/API 证据、同步文档。
 
-- [ ] **Step 1: 写 Sakila fixture RED 测试**
+- [x] **Step 1: 写 Sakila fixture RED 测试**
 
 ```python
 def test_sakila_archive_rejects_wrong_hash(tmp_path):
@@ -597,13 +597,13 @@ def test_sakila_archive_rejects_wrong_hash(tmp_path):
 
 覆盖 manifest 缺字段、路径穿越、成员 Hash、已有文件复用和临时文件清理。
 
-- [ ] **Step 2: 运行并确认 fixture RED**
+- [x] **Step 2: 运行并确认 fixture RED**
 
 Run: `.venv/bin/python -m pytest -q tests/unit/test_sakila_fixture.py`
 
 Expected: 缺少 `tools.fetch_sakila`。
 
-- [ ] **Step 3: 实现锁定下载与 Compose**
+- [x] **Step 3: 实现锁定下载与 Compose**
 
 下载工具只接受 manifest 中的固定 URL 和 Hash；fixture 写入
 `tests/fixtures/mysql/sakila/upstream/` 并被 Git 忽略。Compose 挂载
@@ -615,7 +615,7 @@ Run: `.venv/bin/python -m pytest -q tests/unit/test_sakila_fixture.py`
 
 Expected: PASS。
 
-- [ ] **Step 4: 启动真实 MySQL/Sakila 并先跑 Connector contract**
+- [x] **Step 4: 启动真实 MySQL/Sakila 并先跑 Connector contract**
 
 Run:
 
@@ -627,7 +627,7 @@ docker compose --env-file .env.mysql.local -f infrastructure/mysql/compose.yaml 
 
 Expected: 连接、23 个表/视图发现、字段、主键、外键、多表 metadata、NULL/Decimal、1000 行截断、timeout 和写拒绝全部 PASS。
 
-- [ ] **Step 5: 写并运行 MySQL API E2E**
+- [x] **Step 5: 写并运行 MySQL API E2E**
 
 测试使用真实 MySQL/Sakila、临时 Profile Store、进程内密码和固定 LLM/Embedding 替身；请求只提交 Profile ID，最终 SQL 经 MySQL SQLGlot 校验并真实执行。
 
@@ -635,11 +635,11 @@ Run: `.venv/bin/python -m pytest -q tests/integration/test_api_mysql_sakila.py`
 
 Expected: PASS，且请求/响应、日志和 Trace 不含密码或 DSN。
 
-- [ ] **Step 6: 更新规格和文档**
+- [x] **Step 6: 更新规格和文档**
 
 主规格当前编码任务改为本地工具阶段 3；测试规格增加独立阶段 3 门禁；README 记录动态 API、Sakila 启动和当前静态模型限制；RELEASE 只记录实际完成和实际测试数字。保留历史正文并追加阶段 3 状态，不改原项目参考文档。
 
-- [ ] **Step 7: 运行阶段三重点回归**
+- [x] **Step 7: 运行阶段三重点回归**
 
 Run:
 
@@ -649,13 +649,13 @@ Run:
 
 Expected: 全部 PASS。
 
-- [ ] **Step 8: 运行完整验收并重绑非 Gold freeze**
+- [x] **Step 8: 运行完整验收并重绑非 Gold freeze**
 
 依次运行 unit、security、branch coverage、Pagila 91 项、MySQL/Sakila、Python 全量、前端 Vitest 49 项、typecheck、build、lint、compileall、pip check、三套 Compose config、干净 Python 3.12 安装/import、Gold diff 和 `git diff --check`。
 
 使用 `evaluation.code_freeze.controlled_code_sha256()` 重新生成仅包含非 Gold 校准冻结的受控代码 Hash；不得修改 `evaluation/cases/pagila_mvp.jsonl` 或 `evaluation/pagila_baseline.json`。
 
-- [ ] **Step 9: 最终审查与提交**
+- [x] **Step 9: 最终审查与提交**
 
 确认 staged 文件不包含 `AGENTS.md`、前端业务文件、任何 Gold、正式 baseline 或
 `docs/Text-to-SQL原项目参考信息.md`。

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+import threading
 
 import pytest
 from pydantic import SecretStr
@@ -84,7 +86,13 @@ class _RuntimeRegistry:
     def __init__(self) -> None:
         self.invalidated: list[str] = []
 
-    def invalidate(self, profile_id: str) -> None:
+    def invalidate(
+        self,
+        profile_id: str,
+        *,
+        expected_profile: DatasourceProfile | None = None,
+    ) -> None:
+        del expected_profile
         self.invalidated.append(profile_id)
 
 
@@ -350,6 +358,129 @@ def test_allowlist_update_uses_existing_password_before_invalidation(
     assert view.profile == changed
     assert runtime_service.validations == [(changed, "secret")]
     assert registry.invalidated == ["local-postgres"]
+
+
+def test_update_invalidates_after_profile_and_password_are_replaced(
+    tmp_path: Path,
+) -> None:
+    store = LocalProfileStore(tmp_path / "config.db")
+    credentials = InMemoryCredentialStore()
+    runtime_service = _DatasourceRuntimeService()
+    changed = _datasource(host="localhost")
+
+    class _OrderingRegistry:
+        def invalidate(
+            self,
+            profile_id: str,
+            *,
+            expected_profile: DatasourceProfile | None = None,
+        ) -> None:
+            assert profile_id == "local-postgres"
+            assert expected_profile == changed
+            assert store.get_datasource(profile_id) == changed
+            stored = credentials.get_datasource(profile_id)
+            assert stored is not None and stored.password is not None
+            assert stored.password.get_secret_value() == "new-secret"
+
+    service = DatasourceProfileService(
+        store,
+        credentials,
+        runtime_service=runtime_service,
+        runtime_registry=_OrderingRegistry(),  # type: ignore[arg-type]
+    )
+    service.create(_datasource(), password=SecretStr("old-secret"))
+
+    service.replace(changed, password=SecretStr("new-secret"))
+
+
+def test_concurrent_updates_publish_the_latest_persisted_profile(
+    tmp_path: Path,
+) -> None:
+    store = LocalProfileStore(tmp_path / "config.db")
+    credentials = InMemoryCredentialStore()
+    runtime_service = _DatasourceRuntimeService()
+    first_at_invalidation = threading.Event()
+    second_invalidated = threading.Event()
+
+    class _InterleavingRegistry:
+        def __init__(self) -> None:
+            self.expected_profile: DatasourceProfile | None = None
+
+        def invalidate(
+            self,
+            profile_id: str,
+            *,
+            expected_profile: DatasourceProfile | None = None,
+        ) -> None:
+            assert profile_id == "local-postgres"
+            assert expected_profile is not None
+            if expected_profile.host == "db-a.local":
+                first_at_invalidation.set()
+                second_invalidated.wait(timeout=0.25)
+            else:
+                second_invalidated.set()
+            self.expected_profile = expected_profile
+
+    registry = _InterleavingRegistry()
+    service = DatasourceProfileService(
+        store,
+        credentials,
+        runtime_service=runtime_service,
+        runtime_registry=registry,  # type: ignore[arg-type]
+    )
+    service.create(_datasource(), password=SecretStr("initial-secret"))
+    first = _datasource(host="db-a.local")
+    second = _datasource(host="db-b.local")
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first_future = executor.submit(
+            service.replace,
+            first,
+            password=SecretStr("first-secret"),
+        )
+        assert first_at_invalidation.wait(timeout=2)
+        second_future = executor.submit(
+            service.replace,
+            second,
+            password=SecretStr("second-secret"),
+        )
+        second_future.result(timeout=2)
+        first_future.result(timeout=2)
+
+    assert store.get_datasource("local-postgres") == second
+    stored = credentials.get_datasource("local-postgres")
+    assert stored is not None and stored.password is not None
+    assert stored.password.get_secret_value() == "second-secret"
+    assert registry.expected_profile == second
+
+
+def test_delete_invalidates_after_profile_and_password_are_removed(
+    tmp_path: Path,
+) -> None:
+    store = LocalProfileStore(tmp_path / "config.db")
+    credentials = InMemoryCredentialStore()
+    runtime_service = _DatasourceRuntimeService()
+
+    class _OrderingRegistry:
+        def invalidate(
+            self,
+            profile_id: str,
+            *,
+            expected_profile: DatasourceProfile | None = None,
+        ) -> None:
+            assert expected_profile is None
+            assert store.get_datasource(profile_id) is None
+            assert credentials.get_datasource(profile_id) is None
+
+    service = DatasourceProfileService(
+        store,
+        credentials,
+        runtime_service=runtime_service,
+        runtime_registry=_OrderingRegistry(),  # type: ignore[arg-type]
+    )
+    service.create(_datasource(), password=SecretStr("secret"))
+
+    service.delete("local-postgres")
 
 
 def test_explicit_null_password_clears_credential_and_runtime_without_connecting(

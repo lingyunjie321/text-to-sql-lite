@@ -28,6 +28,7 @@ class RuntimeRegistry:
         self._runtime_service = runtime_service
         self._credential_store = credential_store
         self._runtimes: dict[str, DatasourceRuntime] = {}
+        self._expected_identities: dict[str, tuple[object, ...]] = {}
         self._lock = threading.RLock()
 
     def get_or_create(
@@ -35,6 +36,12 @@ class RuntimeRegistry:
         profile: DatasourceProfile,
     ) -> DatasourceRuntime:
         with self._lock:
+            expected_identity = self._expected_identities.get(profile.id)
+            if (
+                expected_identity is not None
+                and _runtime_identity(profile) != expected_identity
+            ):
+                raise _runtime_unavailable_error()
             credentials = self._credential_store.get_datasource(profile.id)
             if credentials is None or credentials.password is None:
                 cached = self._runtimes.pop(profile.id, None)
@@ -75,8 +82,19 @@ class RuntimeRegistry:
             self._runtimes[profile.id] = runtime
             return runtime
 
-    def invalidate(self, profile_id: str) -> None:
+    def invalidate(
+        self,
+        profile_id: str,
+        *,
+        expected_profile: DatasourceProfile | None = None,
+    ) -> None:
         with self._lock:
+            if expected_profile is None:
+                self._expected_identities.pop(profile_id, None)
+            else:
+                self._expected_identities[profile_id] = _runtime_identity(
+                    expected_profile
+                )
             runtime = self._runtimes.pop(profile_id, None)
             if runtime is not None:
                 self._close_runtime(profile_id, runtime)
@@ -85,6 +103,7 @@ class RuntimeRegistry:
         with self._lock:
             runtimes = tuple(self._runtimes.items())
             self._runtimes.clear()
+            self._expected_identities.clear()
             for profile_id, runtime in reversed(runtimes):
                 self._close_runtime(profile_id, runtime)
 
@@ -111,4 +130,12 @@ def _runtime_identity(profile: DatasourceProfile) -> tuple[object, ...]:
         profile.username,
         tuple(sorted(profile.allowed_schemas)),
         tuple(sorted(profile.allowed_tables)),
+    )
+
+
+def _runtime_unavailable_error() -> DatasourceRuntimeError:
+    return DatasourceRuntimeError(
+        code="DATASOURCE_RUNTIME_UNAVAILABLE",
+        public_message="The datasource runtime is unavailable.",
+        status_code=503,
     )

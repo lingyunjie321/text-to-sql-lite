@@ -5,8 +5,8 @@
 > 容差。权限和危险 SQL Case 单独统计，安全门禁在所有阶段保持 100%。
 
 > 本文中原有的阶段 0～5 统一称为“增强能力 Stage”。当前
-> “本地工具阶段 2”是 Local Profile 交付，其独立门禁见第 13 节；
-> 原业务知识/Few-shot 门禁顺延为第 15 节且含义不变。
+> “本地工具阶段 3”是动态数据库连接交付，其独立门禁见第 14 节；
+> 原业务知识/Few-shot 门禁顺延为第 16 节且含义不变。
 
 ## 1. 测试分层
 
@@ -20,6 +20,7 @@
 | Pagila E2E | 问题到真实执行结果 | 固定 Pagila + 模型 | 是 |
 | API | 请求、联合响应、错误和 Trace | 启动服务 | 是 |
 | 本地 Profile | Profile 校验、SQLite、内存凭据、CRUD 和 ID 查询 | 临时目录/静态 runtime | 本地工具阶段 2 |
+| 动态数据源 | 连接测试、metadata、allowlist、RuntimeRegistry 和 ID 查询 | PostgreSQL/MySQL | 本地工具阶段 3 |
 | 增强检索 | 复杂度、动态 K、双路召回、RRF、Rerank、裁剪 | 固定语料/Embedding Stub | 阶段 1 |
 | 业务知识 | 术语、指标、Few-shot、RAG、审批与撤销 | 固定知识库 | 阶段 2 |
 | 会话恢复 | Session、Checkpoint、Compaction、Memory 隔离 | 持久化测试存储 | 阶段 3 |
@@ -418,7 +419,56 @@ Schema 字段依据已锁定的 Pagila 3.1.0、commit
 - Gold 内容和 `16 verified / 2 draft` 保持不变；Profile ID 不写入
   Pagila Gold Case。
 
-## 14. 增强能力 Stage 1：检索与路由增强门禁
+## 14. 本地工具阶段 3：动态数据库连接门禁
+
+### Metadata 与授权隔离
+
+- `POST /api/v1/local/datasources/test` 使用临时 Connector，完成连接检查与结构
+  发现后必定关闭，不保存 Profile、密码或运行时。
+- `GET /api/v1/local/datasources/{id}/metadata` 返回当前账号可发现的全部非系统
+  Schema、表/视图、字段、类型、nullable、主键和外键，不返回样例值、视图定义、
+  存储过程、Trigger、凭据或驱动错误。
+- metadata 发现范围不等于 AI 授权范围；接口不得修改 allowlist。只有显式 PUT
+  且在线验证成功的新对象才进入授权。
+- Workflow、Schema Linking、Prompt、Validator 和 execute 只接收 Profile 的
+  非空 allowlist。空、失效、不匹配或请求扩大范围全部 fail closed，不回退到
+  metadata 全量或默认 `.env` 数据源。
+- PostgreSQL/MySQL 系统 Schema 排除正确，结果确定性排序；catalog 与详细结构
+  读取共享 30 秒端到端预算；500 个关系、10,000 个字段、5,000 个外键上限和
+  对象边界截断均有测试。
+
+### 动态运行时与错误边界
+
+- `RuntimeRegistry` 按 datasource ID 懒创建和复用 runtime；首次并发只创建一次，
+  失败不缓存且允许重试。
+- 更新完成后 Registry 拒绝先前读取的旧 Profile 重建运行时；删除完成后密码已
+  清除且旧运行时已移除，配置变化不存在可长期复用的旧缓存。
+- 数据源 create、PUT 和 DELETE 写操作串行化；并发 PUT 后 Store、凭据和 Registry
+  身份必须一致指向最后完成的更新。
+- Connector 构造后、`open()` 前即进入资源管理；创建失败、Profile 更新/删除和
+  应用退出均关闭旧资源，单个 close 失败不阻止其他资源关闭。
+- Profile 不存在、内存密码缺失、连接失败、allowlist 无效、metadata 超时和
+  metadata 不可用使用不同稳定错误码，且绝不回退到默认 Context。
+- 公开响应、OpenAPI、日志、Trace 和异常不包含密码、API Key、完整 DSN、Host、
+  用户名、驱动错误、原始 SQL 或数据库文件路径。
+
+### PostgreSQL/MySQL 真实门禁
+
+- 原有 PostgreSQL/Pagila 91 项保持通过，事务只读、超时、1000 行上限和行为不变。
+- MySQL 固定为官方 8.4 镜像与官方 Sakila 1.5 归档；镜像 digest、归档 SHA-256、
+  显式 Sakila 版本和两份 SQL 文件 SHA-256 可重复校验。
+- MySQL Connector 真实验证连接、23 个非系统表/视图、字段、主键、外键、多表
+  metadata、NULL/Decimal、超时、1000 行截断和写拒绝。
+- MySQL API E2E 使用临时 Profile Store、进程内密码和固定模型/Embedding 替身；
+  请求只含两个 Profile ID，最终 SQL 经 MySQL SQLGlot 校验并在 Sakila 真实执行。
+- MySQL 使用 `START TRANSACTION READ ONLY`，启动不确定或回滚失败时废弃连接；
+  Docker 应用账号仅有 Sakila `SELECT` / `SHOW VIEW` 权限。
+- MySQL 反引号 SQL 的纯格式变化产生相同指纹，继续受既有修复次数和循环上限
+  约束。
+- 不新增无理由 skip；unit+security 分支覆盖率不低于 83%；Gold 内容和
+  `16 verified / 2 draft` 状态不变。
+
+## 15. 增强能力 Stage 1：检索与路由增强门禁
 
 ### 功能完成
 
@@ -452,7 +502,7 @@ Schema 字段依据已锁定的 Pagila 3.1.0、commit
 - 18 条 Pagila Gold 仅在配置和代码冻结后运行；不得按失败 Case 修改策略或
   重复抽样择优。
 
-## 15. 增强能力 Stage 2：业务知识与 Few-shot 门禁
+## 16. 增强能力 Stage 2：业务知识与 Few-shot 门禁
 
 - 术语和指标记录名称、定义、公式、粒度、过滤条件、时间口径、适用数据源、
   所有者、审核状态和版本。
@@ -465,7 +515,7 @@ Schema 字段依据已锁定的 Pagila 3.1.0、commit
 - 功能完成可使用确定性知识库；集成完成必须贯通审核—检索—生成—重新校验；
   真实环境验证必须使用真实批准样本完成对账和撤销演练。
 
-## 16. 增强能力 Stage 3：Session、Checkpoint 与 Memory 门禁
+## 17. 增强能力 Stage 3：Session、Checkpoint 与 Memory 门禁
 
 - API 使用服务端或可信认证绑定的 `session_id`，请求正文不能冒充其他身份、
   租户或项目。
@@ -479,7 +529,7 @@ Schema 字段依据已锁定的 Pagila 3.1.0、commit
 - 真实环境验证要求在持久化存储上完成进程重启、并发 Session、权限撤销和
   Schema/知识升级演练。
 
-## 17. 增强能力 Stage 4：多数据库和跨数据源门禁
+## 18. 增强能力 Stage 4：多数据库和跨数据源门禁
 
 - Connector Contract 明确元数据、只读执行、超时、取消、分页能力、错误、
   方言和 capability；Dialect Profile 明确引用、函数、类型、日期/时区、
@@ -492,7 +542,7 @@ Schema 字段依据已锁定的 Pagila 3.1.0、commit
 - 真实环境验证要求固定 MySQL/StarRocks 版本、字符集、时区和数据摘要，并
   运行跨源 E2E。
 
-## 18. 增强能力 Stage 5：缓存、导出和生产治理门禁
+## 19. 增强能力 Stage 5：缓存、导出和生产治理门禁
 
 - Schema、Few-shot 和结果缓存键绑定身份/租户、数据源、权限摘要、Schema、
   知识、模型/策略和结果版本；跨范围命中必须为 0。
@@ -506,7 +556,7 @@ Schema 字段依据已锁定的 Pagila 3.1.0、commit
 - Secret 轮换、部署、升级、回滚、备份恢复和数据保留/删除都有生产等价演练；
   缺少演练不得标记 `real_environment_validated`。
 
-## 19. Gold、非 Gold 与正式发布边界
+## 20. Gold、非 Gold 与正式发布边界
 
 | 数据集合 | 允许用途 | 禁止用途 |
 |---|---|---|

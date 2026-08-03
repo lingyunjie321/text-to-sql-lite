@@ -2,22 +2,26 @@ name: text-to-sql-mysql
 
 services:
   mysql:
-    image: mysql:8.4
+    image: mysql:8.4.10@sha256:8dbcf531a03aade657e181b9cf2f1d1803ce621a1d55610cb44cb531ab7d7db6
     container_name: text-to-sql-mysql
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?required}
-      MYSQL_DATABASE: test
-      MYSQL_USER: ${MYSQL_APP_USER:-reader}
+      MYSQL_DATABASE: sakila
+      MYSQL_USER: text_to_sql_reader
       MYSQL_PASSWORD: ${MYSQL_APP_PASSWORD:?required}
     ports:
-      - "${MYSQL_HOST_PORT:-3306}:3306"
+      - "127.0.0.1:${MYSQL_HOST_PORT:-53306}:3306"
     volumes:
       - mysql-data:/var/lib/mysql
+      - ../../tests/fixtures/mysql/sakila/upstream/sakila-schema.sql:/docker-entrypoint-initdb.d/01-sakila-schema.sql:ro
+      - ../../tests/fixtures/mysql/sakila/upstream/sakila-data.sql:/docker-entrypoint-initdb.d/02-sakila-data.sql:ro
+      - ./init/03-create-readonly-user.sh:/docker-entrypoint-initdb.d/03-create-readonly-user.sh:ro
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
-      interval: 5s
+      test: ["CMD-SHELL", "MYSQL_PWD=$$MYSQL_ROOT_PASSWORD mysqladmin ping --silent -h localhost -u root"]
+      interval: 2s
       timeout: 5s
-      retries: 10
+      retries: 30
+      start_period: 20s
 
 volumes:
   mysql-data:

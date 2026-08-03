@@ -2,7 +2,7 @@
 
 ## 当前快照
 
-- 记录日期：2026-08-02
+- 记录日期：2026-08-03
 - 包版本：`0.1.0`
 - 当前分支：`main`
 - 定位：工程预览，不是生产发布
@@ -11,7 +11,10 @@
 - 增强 Stage 1 总体资格：`not_passed`
 - 增强 Stage 2～5：尚未开始实现
 - 本地工具阶段 2：后端 Profile 模型、SQLite 非敏感持久化、进程内凭据、CRUD
-  和 Profile-ID 静态 runtime 查询路径已完成；动态 runtime 与前端闭环未完成
+  和 Profile-ID 查询契约已完成
+- 本地工具阶段 3：PostgreSQL/MySQL 动态数据源、连接测试、metadata、allowlist
+  在线验证、RuntimeRegistry 与 MySQL/Sakila 真实闭环已完成；动态模型与前端闭环
+  未完成
 - 阶段 1 结构整理：已完成配置、工厂/Bootstrap、API 路由、依赖与公开模型摘要的
   模块化；资格仍为 `not_passed`
 - 当前 Gold：`16 verified / 2 draft`；旧正式冻结不能作为当前代码的资格证据
@@ -73,12 +76,36 @@
 - 未修改核心 Workflow、Schema Linking、Prompt、SQLGlot 策略、Embedding 必需
   行为、Comparator 或 Pagila Gold。
 
-该阶段建立的是本地配置与选择契约，不是动态连接闭环。Connector/Provider 的
-按 Profile 创建、替换和释放分别留在本地工具阶段 3/4，前端迁移留在阶段 5。
+该阶段建立的是本地配置与选择契约；动态数据库连接由阶段 3 完成，动态 Provider
+留在阶段 4，前端迁移留在阶段 5。
+
+### 本地工具阶段 3 已落地的工程能力
+
+- `POST /api/v1/local/datasources/test` 使用临时 Connector 测试连接并发现非系统
+  metadata，结束后必定关闭，不保存 Profile 或密码。
+- `GET /api/v1/local/datasources/{id}/metadata` 返回确定性排序的 Schema、表/视图、
+  字段、类型、nullable、主键和外键；不返回样例值、视图定义或驱动错误。
+- Metadata 发现与 AI 授权严格隔离。创建或 PUT Profile 会在线验证 allowlist；
+  Workflow 只获得 Profile allowlist，空、失效、扩大或不匹配全部 fail closed。
+- `RuntimeRegistry` 按数据源 ID 懒创建和复用 PostgreSQL/MySQL runtime；配置更新、
+  删除、启动失败和应用退出都有明确、可测试的资源关闭边界；更新后的身份检查
+  阻止并发请求重新缓存旧 Profile runtime，数据源写操作串行化避免并发 PUT
+  让期望身份回退。
+- 无静态数据库配置时后端仍可启动并提供 Profile API；动态查询失败绝不回退到
+  默认 `.env` 数据源。
+- MySQL 使用独立方言与 Prompt 版本、SQLGlot MySQL 校验和原子
+  `START TRANSACTION READ ONLY`；事务建立不确定或回滚失败时废弃连接；反引号
+  SQL 的纯格式变化使用稳定指纹。
+- 固定 MySQL 8.4.10 镜像 digest 与 MySQL 官方 Sakila 1.5 归档/SQL Hash；真实测试
+  账号只保留 Sakila `SELECT` / `SHOW VIEW` 权限。
+- Profile-ID MySQL API E2E 使用临时 SQLite、进程内密码及确定性模型/Embedding，
+  最终 SQL 在真实 Sakila 执行；请求、响应、日志和 Trace 不含密码、API Key 或 DSN。
+- 未修改 Workflow 图、节点、State、三次修复、32 步限制、Schema Linking、
+  Comparator、Gold 或前端业务代码。
 
 ## 当前验证证据
 
-### 当前本地工具阶段 2 回归
+### 本地工具阶段 2 历史回归
 
 - 实际执行的单元回归：`1127 passed`。
 - 实际执行的安全回归：`171 passed`。
@@ -95,9 +122,37 @@
 - PyMySQL 已作为直接依赖固定为 `1.2.0`；integration marker 只表示跨组件测试，
   不等同于真实数据库验证。
 
-这些是本地工具阶段 2 的当前回归记录，不是新的正式候选或发布资格。Pagila 回归
-不等于重建正式 baseline；正式 Gold 与 Pagila baseline 均未修改。真实 MySQL/
-StarRocks 与完整前端 Profile 端到端验证仍未完成。
+这些是本地工具阶段 2 的历史回归记录，不是新的正式候选或发布资格。Pagila 回归
+不等于重建正式 baseline；正式 Gold 与 Pagila baseline 均未修改。真实 StarRocks
+与完整前端 Profile 端到端验证仍未完成；阶段 2 的数字保留为历史证据，阶段 3 的
+当前回归数字见下方独立记录。
+
+### 当前本地工具阶段 3 回归
+
+- 单元测试：`1218 passed`；安全测试：`173 passed`。
+- unit+security：`1391 passed`，分支覆盖率 **86%**。
+- 阶段 3 扩展重点回归：`186 passed`。
+- 原有 PostgreSQL/Pagila integration：`91 passed`。
+- MySQL 8.4.10/Sakila 真实 Connector + Profile-ID API：`7 passed`。
+- 完整 integration：`98 passed, 4 skipped`；4 项仅为既有 StarRocks 外部实例
+  条件跳过，MySQL 没有跳过。
+- Python 全测试并集：`1489 passed, 4 skipped`。unit/security 与 integration
+  分进程运行，避免真实 Pagila DSN 覆盖配置优先级单测的显式临时 env 文件。
+- 前端 Vitest：`49 passed`；TypeScript typecheck 与 production build 通过；
+  lint 保持既有 `15 errors / 5 warnings`，没有新增问题。
+- Vitest 首轮曾命中既有 `updatedAt` 相差 1ms 的非确定性断言，立即复跑为
+  `49 passed`；本阶段未修改前端文件。受控代码修复后、重绑 freeze 前，完整
+  integration 的两项合成校准测试按预期拒绝旧摘要；重绑后为上述最终结果。
+- `compileall`、`pip check`、Pagila/MySQL/StarRocks 三套 Compose config、
+  `git diff --check` 均通过。
+- 临时干净 Python 3.12 环境成功构建并安装 wheel，`import app.main`、
+  `import app.connectors` 和环境内 `pip check` 通过。
+- Gold 与正式 Pagila baseline 零修改，主 Gold 保持
+  `16 verified / 2 draft`。
+
+这些数字证明本地工具阶段 3 的工程与真实数据库门禁通过，不等于重建正式 Pagila
+模型质量 baseline，也不把尚未完成的动态模型、Embedding 可选化或前端闭环标记为
+完成。
 
 ### 历史确定性与本地集成
 
@@ -123,8 +178,8 @@ StarRocks 与完整前端 Profile 端到端验证仍未完成。
 | development 规范化 | `c1746bea22d588578929b25afb1a3a29d13c7e978f5687e2b6352b7029668dd7` |
 | calibration 原始文件 | `07070687fb39592e26b02fb21891b5108b38bc0f5337240de25a4df3ac638845` |
 | calibration 规范化 | `d7e7d7d60a157ec78e00ba16fbf722dddd5552eb833863310a8d9ed95797b8bd` |
-| 当前受控代码 | `624d4ba9baf01f3060cc29c1a8519f2c2a4d46fab1cb4cf69871e1248f0b4d76` |
-| 当前非 Gold calibration baseline | `008e40d4f0ae5513dc9c5f5fd3a70fb502ddd4730d8f49fa75668dfa3db47988` |
+| 当前受控代码 | `c721446e7689108ec854fe71ecb147c4c0dd584c47ff82e8e91eeeb14f06c669` |
+| 当前非 Gold calibration baseline | `624402f56460191d1cfa8bd4b98a8e21286e6868354f48d21b05be79266a7c23` |
 | 历史 Pagila baseline（候选 3） | `0b658f083b685cf93938689d109007a9916550e4c78d7a93aa12b17aaa5d1df4` |
 
 表中选定配置、development、calibration、当前受控代码与 calibration baseline
@@ -137,7 +192,7 @@ report 契约 `stage1-report-v1`）。`evaluation/pagila_baseline.json` 仍绑�
 任何受控代码、配置、依赖、数据或语义 manifest 变化后，都必须重新建立相应
 冻结，不能跨版本复用。
 
-本地工具阶段 2 再次改变受控代码，因此只重绑了非 Gold 合成校准冻结；选定配置、
+本地工具阶段 3 再次改变受控代码，因此只重绑了非 Gold 合成校准冻结；选定配置、
 development/calibration 数据摘要均保持不变。上述正式候选、Pagila baseline 和
 其通过数量仍是历史候选事实，不能作为当前代码的新资格证据；当前版本如需资格
 结论，必须按完整门禁重新冻结并在真实环境运行。
@@ -285,15 +340,14 @@ stage1.real_environment_validated=false
 
 ### 当前产品边界
 
-- 生产 Bootstrap 只支持 `pagila` 数据源、PostgreSQL 方言、`public` Schema
-  和固定 13 张表。
-- 后端已有本地 Profile CRUD 和 Profile-ID 查询入口，但只能绑定启动时已有的
-  静态 runtime；尚不能根据保存的 Profile 动态创建 Connector 或 Provider。
+- 静态 Pagila Bootstrap 仍固定 `public` Schema 和 13 张表；DatasourceProfile
+  可以动态创建 PostgreSQL/MySQL Connector，但 ModelProfile 仍只能匹配启动时
+  已有的静态 Provider 路由。
 - API 是同步单轮接口；没有 `session_id`、Checkpoint 或长期 Memory。
 - 固定请求身份只适合本地演示；尚无完整认证、用户级隔离或多租户数据模型。
-- MySQL Connector 仅部分接入：方言链路和真实 E2E 尚未完成，且只读事务设置失败
-  后仍继续执行是 P0 风险，不能标为正式支持。StarRocks 维持实验状态；二者均没有
-  跨数据源 QueryPlan 或受限结果合并。
+- MySQL 动态数据源后端已完成真实 Sakila 验证；前端配置闭环仍未完成。
+  StarRocks 维持实验状态，不进入动态 Profile；当前也没有跨数据源 QueryPlan 或
+  受限结果合并。
 - 没有动态 Few-shot、业务指标知识库、业务 RAG 或参考 SQL 审批生命周期。
 - 没有结果缓存、异步导出、Dashboard、告警、限流、熔断、资源组、Secret
   轮换、部署升级回滚和数据保留演练。

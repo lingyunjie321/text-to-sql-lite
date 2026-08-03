@@ -102,7 +102,13 @@ class _RuntimeRegistry:
         self.invalidated: list[str] = []
         self.error: Exception | None = None
 
-    def invalidate(self, profile_id: str) -> None:
+    def invalidate(
+        self,
+        profile_id: str,
+        *,
+        expected_profile=None,
+    ) -> None:
+        del expected_profile
         self.invalidated.append(profile_id)
 
     def get_or_create(self, profile):  # type: ignore[no-untyped-def]

@@ -10,7 +10,7 @@
 
 > **历史基线说明**：本文主体是阶段 0 快照，用于追溯当时的架构、测试和漂移，
 > 不应把其中的行号、未实施计划或 64/10 冲突当作当前状态。64/10 已裁决为 10；
-> 当前实施结论以下方“阶段 1 实施后记”为准。
+> 当前实施结论以“阶段 1 实施后记”及文末阶段 2、阶段 3 状态附录为准。
 
 ## 阶段 1 实施后记
 
@@ -491,3 +491,59 @@ API
 
 阶段 2 的精确契约见 `docs/local-profile-phase2.md`。核心 Workflow、Schema
 Linking、Prompt、Comparator、Gold 与前端业务代码均未修改。
+
+## 12. 阶段 3 实施后状态附录（2026-08-03）
+
+阶段 3 在阶段 2 的 Profile 契约上接通动态数据库，不改变核心 Workflow。当前
+Profile-ID 查询链路为：
+
+```text
+POST /api/v1/text-to-sql
+→ StaticProfileResolver（校验静态模型身份）
+→ RuntimeRegistry（按 datasource_id 懒创建/复用）
+→ DatasourceRuntimeService
+→ ConnectorFactory
+→ ProfileScopedConnector
+→ WorkflowContextFactory
+→ Text-to-SQL Workflow
+```
+
+数据源配置变化、删除和应用退出会使对应运行时失效并关闭 Connector；更新完成后
+Registry 还会拒绝用先前读取的旧 Profile 重新缓存运行时。动态运行时建立失败
+不会缓存；后续请求可以重试。应用没有默认数据库配置时仍可启动并提供
+Profile API，但旧普通查询安全拒绝，不会自动选用任意 Profile。
+
+结构发现与查询授权是两条独立路径：
+
+```text
+连接测试 / metadata API
+└── 临时 raw Connector → 全部可发现非系统结构 → 立即关闭
+
+查询
+└── RuntimeRegistry → ProfileScopedConnector → Profile allowlist
+```
+
+metadata 返回确定性排序的 Schema、表/视图、字段、类型、nullable、主键和外键，
+不返回样例数据或数据库实现细节；固定容量上限为 500 个关系、10,000 个字段、
+5,000 个外键和共享的 30 秒端到端预算。它不会修改 allowlist。创建或 PUT 数据源
+时，服务会用临时 Connector 在线确认 allowlist 是当前可发现对象的子集；查询仍会再次校验范围，
+任何空、失效或不匹配都 fail closed。
+
+MySQL 已贯通独立方言、Prompt 版本、SQLGlot 校验、只读事务和真实 Sakila 执行。
+测试环境固定 MySQL 8.4.10 镜像 digest 与 MySQL 官方 Sakila 1.5 归档 Hash；应用账号
+只授予 Sakila 的 `SELECT` / `SHOW VIEW`。StarRocks 继续实验且不进入动态 Profile。
+
+阶段 3 新增或明确的职责：
+
+| 模块 | 职责 |
+|---|---|
+| `app/connectors/catalog.py` | 全量非系统 metadata 发现、容量限制和 allowlist 在线校验 |
+| `app/connectors/scoped.py` | 在 Connector 边界固定 Profile 授权范围 |
+| `app/local/datasource_runtime.py` | 临时连接测试、发现、验证与动态 Context 组装 |
+| `app/local/runtime_registry.py` | 动态 runtime 的懒创建、复用、失效、重试和关闭 |
+| `app/api/routes/datasources.py` | 数据源测试、CRUD 与 metadata HTTP 契约 |
+| `app/local/profile_resolver.py` | 静态兼容 Context 或动态 runtime 的 fail-closed 选择 |
+
+仍未完成且不属于阶段 3：动态 Model Provider、模型测试接口、Embedding 可选化、
+BM25-only 启动、前端 Profile 闭环和凭据持久化。精确设计与错误码见
+`docs/local-datasource-phase3.md`。

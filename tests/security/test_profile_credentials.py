@@ -27,8 +27,13 @@ class _DatasourceRuntimeService:
 
 
 class _RuntimeRegistry:
-    def invalidate(self, profile_id: str) -> None:
-        del profile_id
+    def invalidate(
+        self,
+        profile_id: str,
+        *,
+        expected_profile=None,
+    ) -> None:
+        del profile_id, expected_profile
 
 
 def _services(tmp_path: Path) -> ApplicationServices:

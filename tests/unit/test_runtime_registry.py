@@ -223,6 +223,29 @@ def test_invalidate_removes_runtime_even_when_close_fails():
     assert runtime.connector is second
 
 
+def test_profile_update_rejects_stale_profile_captured_before_invalidation():
+    first = RuntimeConnectorFake("first")
+    second = RuntimeConnectorFake("second")
+    service = RuntimeServiceFake([first, second])
+    registry = RuntimeRegistry(
+        runtime_service=service,
+        credential_store=_credentials("orders"),
+    )
+    original = _profile()
+    changed = _profile(database="changed")
+    registry.get_or_create(original)
+
+    registry.invalidate("orders", expected_profile=changed)
+
+    with pytest.raises(DatasourceRuntimeError) as captured:
+        registry.get_or_create(original)
+    assert captured.value.code == "DATASOURCE_RUNTIME_UNAVAILABLE"
+    runtime = registry.get_or_create(changed)
+    assert runtime.connector is second
+    assert first.close_count == 1
+    assert len(service.calls) == 2
+
+
 def test_close_all_uses_reverse_order_and_continues_after_close_failure():
     close_order: list[str] = []
     first = RuntimeConnectorFake("first", close_order=close_order)

@@ -2,21 +2,22 @@
 
 一个以安全执行为核心的 Text-to-SQL 工程实现：接收自然语言问题，在服务端授权
 范围内检索 Schema，调用 OpenAI-compatible 模型生成 SQL，经 SQLGlot 校验后，
-只读执行 PostgreSQL 查询并返回结构化结果。
+只读执行 PostgreSQL 或 MySQL 查询并返回结构化结果。
 
-当前仓库面向本地开发、架构研究和评测复现。生产启动配置固定使用
-PostgreSQL 16.14、Pagila 3.1.0、`public` Schema 和 13 张授权表；它尚不是支持
-任意数据库即插即用的生产服务。当前成熟度、验证证据和后续路线图见
+当前仓库面向本地开发、架构研究和评测复现。静态评测基线固定使用
+PostgreSQL 16.14、Pagila 3.1.0、`public` Schema 和 13 张授权表；本地 Profile
+可以动态连接用户自己的 PostgreSQL 或 MySQL。当前成熟度、验证证据和后续路线图见
 [RELEASE.md](RELEASE.md)。
 
 后端已经完成本地 ModelProfile / DatasourceProfile、SQLite 非敏感配置持久化、
-进程内凭据和 Profile-ID 查询入口。阶段 2 只允许 Profile 绑定启动时已经创建的
-静态 runtime；动态连接、模型切换和前端 Profile 闭环仍未实现，因此当前设置页
-不能被视为可配置任意本地数据库并立即查询的产品能力。
+进程内凭据、动态数据库运行时和 Profile-ID 查询入口。数据源可以测试连接、发现
+metadata、保存 allowlist，并按 Profile ID 创建或复用 Connector。动态模型切换、
+Embedding 可选化和前端 Profile 闭环仍未实现，因此当前设置页还不能代表完整的
+本地工具体验。
 
-PostgreSQL/Pagila 是当前正式基线。MySQL 仅部分接入，尚未完成真实验证，且只读
-事务设置失败后继续执行是 P0 风险；StarRocks 保持实验状态。两者均不能据此宣称
-已正式支持。
+PostgreSQL/Pagila 是正式评测基线。MySQL 后端已在锁定的 MySQL 8.4.10 + 官方
+Sakila 环境完成 Connector 和 Profile-ID API 真实验证，并在账号权限和事务两层
+拒绝写入。StarRocks 保持实验状态，不进入动态 Profile。
 
 ## 主要能力
 
@@ -29,12 +30,16 @@ PostgreSQL/Pagila 是当前正式基线。MySQL 仅部分接入，尚未完成�
   上下文预算，可为批准的数据边界配置受限 fallback；旧客户端仍可通过受限的
   `model_overrides` 过渡字段覆盖三个 tier 的模型配置，但该字段已经标记为
   deprecated，不能指定复杂度或 Top-K。
-- **本地 Profile 基础**：ModelProfile 与 DatasourceProfile 的非敏感字段保存到
-  本地 SQLite；API Key 和数据库密码只保存在当前进程内存；新查询可以只提交
-  `datasource_id` 与 `model_profile_id`。本阶段不会据此动态创建连接或 Provider。
+- **本地 Profile 与动态数据源**：ModelProfile 与 DatasourceProfile 的非敏感
+  字段保存到本地 SQLite；API Key 和数据库密码只保存在当前进程内存；新查询只需
+  提交两个 Profile ID。DatasourceProfile 会按需创建/复用 Connector，模型
+  Provider 在阶段 4 前仍使用静态配置。
+- **结构发现与授权隔离**：metadata 返回账号可发现的非系统 Schema、表/视图、
+  字段、主键和外键，但不会扩大 allowlist；只有显式 PUT 并在线校验成功的对象才
+  能进入 AI 查询范围，空或失效范围一律 fail closed。
 - **SQL 安全门**：只接受单条只读 `SELECT` 或受控 CTE；校验授权对象、字段、
   函数、通配符和危险 AST；模型输出、修复 SQL 都必须重新校验。
-- **数据库执行边界**：PostgreSQL 只读账号和只读事务、最长 30 秒、最多
+- **数据库执行边界**：PostgreSQL/MySQL 只读账号和只读事务、最长 30 秒、最多
   1000 行、连接类有限重试、公开错误脱敏。
 - **有限反思修复**：初始 SQL 后最多三次不同修复，使用 SQL 指纹阻止重复和
   A→B→A 循环，权限和资源风险不会交给模型盲修。
@@ -71,7 +76,8 @@ Embedding 文档构建、融合、Rerank 和 Prompt 之前；Schema、语义、E
 
 - Python `>=3.12,<3.15`
 - Docker Desktop 或兼容的 Docker Engine + Compose
-- 首次获取 Pagila fixture 时能够访问 GitHub
+- 首次获取 Pagila fixture 时能够访问 GitHub；获取 Sakila fixture 时能够访问
+  MySQL 官方下载站
 - 一个 OpenAI-compatible Chat Completions 服务
 - 一个 OpenAI-compatible Embeddings 服务
 - 一个 ASGI server（例如 Uvicorn；本项目不把部署服务器固定为运行时依赖）
@@ -171,10 +177,11 @@ Uvicorn 只是启动示例，未写入 `pyproject.toml`，也不属于当前资�
 生产容器化部署（含 `Dockerfile` 构建、环境契约、升级与回滚预案）见
 [部署与回滚](docs/部署与回滚.md)。
 
-启动时会加载 `.env`、连接数据库、读取授权元数据、校验锁定语义 manifest，
-创建 LLM/Embedding runtime，并初始化默认位于
+启动时会加载 `.env`；如配置了静态数据库，则连接数据库、读取授权元数据并校验
+锁定语义 manifest。无静态数据库配置时应用仍可启动并提供 Profile API。应用还会
+创建当前静态 LLM/Embedding runtime，并初始化默认位于
 `~/.text-to-sql-lite/config.db` 的本地 Profile Store。Profile 模块导入本身不会
-创建目录或文件；缺少必需启动配置时进程会 fail closed。
+创建目录或文件；模型或 Embedding 的必需启动配置在阶段 4 前仍会 fail closed。
 
 ### 6. 发起查询
 
@@ -203,7 +210,7 @@ curl --fail-with-body \
 失败时只返回脱敏 `error`，不会返回当前或历史 SQL。交互式 OpenAPI 文档默认
 位于 `http://127.0.0.1:8000/docs`。
 
-阶段 2 推荐的新查询形式只提交 Profile ID：
+阶段 3 推荐的新查询形式只提交 Profile ID：
 
 ```json
 {
@@ -215,17 +222,19 @@ curl --fail-with-body \
 }
 ```
 
-该请求只有在两个 Profile 已经保存，且它们的公开连接/模型身份与启动时静态
-runtime 完全匹配时才会进入 Workflow。未匹配时返回明确的 404、409 或 503，
-不会回退到默认数据源或默认模型。动态创建 Connector、Provider 与运行时属于
-后续阶段。
+该请求只有在两个 Profile 已经保存，模型 Profile 与当前静态模型身份匹配，且
+DatasourceProfile 的密码仍在进程内存时才会进入 Workflow。数据源 runtime 按需
+动态创建和复用；Profile 更新或删除后旧连接会关闭，更新后读取到的旧 Profile
+也不能重新缓存运行时。任一解析或连接失败都返回
+明确的 404、409 或 503，不会回退到默认数据源或默认模型。动态 Model Provider
+属于阶段 4。
 
 ## 配置说明
 
 | 配置组 | 用途 | 关键约束 |
 |---|---|---|
 | `PAGILA_*` | Docker 初始化和端口 | 密码必须只保存在本地或 Secret 管理中 |
-| `TEXT_TO_SQL_DATABASE_*` | 数据源、连接池、超时和行数 | 当前数据库名必须为 `pagila`；超时 ≤ 30 秒；行数 ≤ 1000 |
+| `TEXT_TO_SQL_DATABASE_*` | 可选静态数据源、连接池、超时和行数 | Pagila 评测仍固定；动态 Profile 不写入 `.env` |
 | `LLM_*` | 基础 Chat Completions Provider | `temperature=0`；远程 URL 必须为 HTTPS |
 | `LLM_SIMPLE_*` / `STANDARD_*` / `COMPLEX_*` | 路由级模型覆盖 | 未设置的路由完整继承基础配置 |
 | `LLM_FALLBACK_*` | 可选备用模型 | 必须与启用开关、上下文预算和数据边界一致 |
@@ -236,8 +245,8 @@ runtime 完全匹配时才会进入 Workflow。未匹配时返回明确的 404�
 
 ## API 约束
 
-当前后端公开 13 个业务操作：health、config、query，以及模型/数据源 Profile
-各 5 个 CRUD 操作。查询端点接受七个字段：
+当前后端公开 15 个业务操作：health、config、query，模型 Profile 5 个 CRUD，
+以及数据源 Profile 5 个 CRUD、连接测试和 metadata。查询端点接受七个字段：
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
@@ -263,26 +272,34 @@ Profile 模式不能与任一 override 混用。除上述兼容字段外，API �
 | `PUT /api/v1/local/models/{id}` | 完整替换模型 Profile；省略凭据表示按安全规则保留或清除 |
 | `DELETE /api/v1/local/models/{id}` | 删除 Profile 并清除对应内存凭据 |
 | `POST /api/v1/local/datasources` | 创建数据源 Profile，可同时提交 write-only 密码 |
+| `POST /api/v1/local/datasources/test` | 使用临时 Connector 测试连接并返回 metadata 摘要，不保存配置 |
 | `GET /api/v1/local/datasources` | 列出数据源 Profile 与凭据状态 |
 | `GET /api/v1/local/datasources/{id}` | 读取一个数据源 Profile |
+| `GET /api/v1/local/datasources/{id}/metadata` | 读取账号可发现的全部非系统结构，不修改 allowlist |
 | `PUT /api/v1/local/datasources/{id}` | 完整替换数据源 Profile；省略凭据表示按安全规则保留或清除 |
 | `DELETE /api/v1/local/datasources/{id}` | 删除 Profile 并清除对应内存凭据 |
 
 SQLite 只保存响应可见的非敏感字段；API Key、密码和完整 DSN 不写入数据库。
 进程重启后 Profile 仍保留，但凭据状态恢复为 `missing`，需要重新输入。第一版不
 引入通用迁移框架或自制加密；数据库 `user_version` 非 0/1 时会 fail closed。
-详细契约见 [本地 Profile 阶段 2 设计](docs/local-profile-phase2.md)。
+创建和更新数据源时会在线验证 allowlist。metadata 的 catalog 与详细结构读取
+共享 30 秒预算。metadata 发现范围不等于查询授权范围；
+Workflow 只接收保存后的非空 allowlist，失效或不匹配时不会回退到完整 metadata。
+详细契约见 [本地 Profile 阶段 2 设计](docs/local-profile-phase2.md) 和
+[动态数据源阶段 3 设计](docs/local-datasource-phase3.md)。
 
 业务成功、澄清和业务失败通常都以 HTTP 200 返回，并由响应内的 `status`
 区分；未授权 `debug=true` 返回 403，请求体校验失败返回 422，未处理的服务
-边界异常返回 500。Profile 不存在返回 404，未绑定静态 runtime 返回 409，
-Profile Store 不可用返回 503。`/health` 与 `/api/v1/config` 是只读端点；当前
+边界异常返回 500。Profile 不存在返回 404，凭据缺失或 allowlist 无效返回 409，
+连接/runtime/metadata 不可用返回 503，metadata 超时返回 504。`/health` 与
+`/api/v1/config` 是只读端点；当前
 仍没有 Session。未设置服务端 API Key 时使用固定身份，设置 API Key 后查询和
 Profile CRUD 都要求 Bearer token。
 
 ## 安全边界
 
-- 生产 Bootstrap 当前只授权 Pagila 的 `public` Schema 和 13 张固定表。
+- 静态 Pagila Context 只授权 `public` Schema 和 13 张固定表；动态 Context 只
+  授权对应 DatasourceProfile 保存并在线验证的 allowlist。
 - 默认身份是代码内固定的 `mvp-fixed-user`，没有认证或多租户隔离；即使 API
   示例只绑定回环地址，也不要把服务直接暴露到不可信网络。
 - 所有模型生成、修复或其他来源的 SQL 都必须重新经过权限、SQLGlot AST、
@@ -302,6 +319,33 @@ Profile CRUD 都要求 Bearer token。
 PYTHONDONTWRITEBYTECODE=1 \
   .venv/bin/pytest -q -p no:cacheprovider tests/unit tests/security
 ```
+
+真实 MySQL 回归使用锁定的 MySQL 8.4.10 镜像和 MySQL 官方 Sakila 1.5。先在已被 Git
+忽略的 `.env.mysql.local` 中设置本机测试密码：
+
+```dotenv
+MYSQL_ROOT_PASSWORD=replace-with-local-admin-password
+MYSQL_APP_PASSWORD=replace-with-local-reader-password
+MYSQL_HOST_PORT=53306
+```
+
+然后下载并校验 fixture、启动数据库并运行 Connector/API 用例：
+
+```bash
+.venv/bin/python tools/fetch_sakila.py \
+  --manifest infrastructure/mysql/manifest.json \
+  --output tests/fixtures/mysql/sakila/upstream
+docker compose --env-file .env.mysql.local \
+  -f infrastructure/mysql/compose.yaml up -d --wait
+.venv/bin/python -m pytest -q \
+  tests/integration/test_mysql_contract.py \
+  tests/integration/test_api_mysql_sakila.py
+```
+
+下载工具校验显式版本、归档及 `sakila-schema.sql`、`sakila-data.sql` 的
+SHA-256。测试账号
+固定为 `text_to_sql_reader`，初始化后只保留 Sakila 的 `SELECT` 与 `SHOW VIEW`
+权限。密码文件、下载归档和解压后的 SQL 均不提交 Git。
 
 完整集成测试要求锁定的 Pagila 服务正在运行，并且当前进程能读取
 `TEXT_TO_SQL_DATABASE_DSN`。测试 fixture 不会自动加载 `.env`，必须把同一
@@ -356,8 +400,8 @@ docker compose -f infrastructure/pagila/compose.yaml down
 ```text
 app/
   api/              FastAPI 契约、Bootstrap 和响应映射
-  local/            Profile 模型、SQLite Store、进程内凭据、服务与静态解析
-  connectors/       PostgreSQL、元数据、只读执行和锁定语义
+  local/            Profile、SQLite、进程内凭据、动态数据源服务与运行时注册表
+  connectors/       PostgreSQL/MySQL、元数据、授权包装、只读执行和锁定语义
   schema_linking/   BM25、Embedding、RRF、Rerank 和版本化索引
   generation/       Prompt、OpenAI-compatible Provider、模型路由与上下文裁剪
   validation/       SQLGlot AST、对象和函数安全策略
@@ -366,18 +410,18 @@ app/
   workflow/         LangGraph State、十种节点和条件路由
   observability/    脱敏 Trace 模型与采集
 evaluation/         Case、Comparator、基线冻结、报告和审核工具
-infrastructure/     锁定 Pagila Compose、初始化和语义 manifest
+infrastructure/     锁定 Pagila/MySQL Compose、初始化和 fixture manifest
 tests/              unit、security 和 integration 测试
-tools/              Pagila fixture 与正式评测命令
+tools/              Pagila/Sakila fixture 与正式评测命令
 docs/               主规格、验收规格、ADR、设计和实施记录
 frontend/           Next.js 本地界面；当前尚未切换到后端 Profile
 ```
 
 ## 项目状态与路线图
 
-核心 PostgreSQL/Pagila MVP 闭环与本地工具阶段 2 的后端 Profile 基础已经实现，
-但完整真实环境资格仍为 `not_passed`。动态数据库连接、动态模型 Provider、
-Embedding 可选化和前端配置闭环属于本地工具阶段 3～5；业务知识与 Few-shot、
+核心 PostgreSQL/Pagila MVP 闭环与本地工具阶段 3 的动态数据库后端已经实现，
+但完整产品与正式评测资格仍为 `not_passed`。动态模型 Provider、Embedding 可选化
+和前端配置闭环属于本地工具阶段 4～5；业务知识与 Few-shot、
 Session / Checkpoint / Memory 等增强路线是另一套历史阶段编号，当前版本均不能
 宣称已支持。
 
