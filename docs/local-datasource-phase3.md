@@ -43,9 +43,10 @@ metadata 可发现范围不等于 AI 查询授权范围：
   `allowed_schemas`、`allowed_tables`。
 - metadata 结果不自动修改 Profile。
 - 新对象只有经用户显式 PUT 保存并通过在线校验后才进入查询授权。
-- Scoped Connector 要求 Workflow 请求范围与 Profile allowlist 完全一致，并
-  要求数据库实际返回的关系集合与 allowlist 完全一致；任何空范围、失效对象或
-  不匹配都 fail closed，不读取或回退到完整 metadata。
+- Scoped Connector 只接受 Profile allowlist 内由既有权限节点确定的非空 Schema
+  子集，并要求该子集包含的表与 Profile 精确对应；数据库实际返回的关系集合必须
+  与本次请求范围完全一致。任何扩大范围、空范围、失效对象或不匹配都 fail
+  closed，不读取或回退到完整 metadata。
 
 ## 3. Metadata 数据与容量契约
 

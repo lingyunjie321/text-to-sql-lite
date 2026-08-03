@@ -5,6 +5,13 @@ Supports PostgreSQL, MySQL, and StarRocks backends through a common
 """
 
 from app.connectors.base import DatabaseConnector
+from app.connectors.catalog import (
+    DiscoveredMetadata,
+    MetadataLimits,
+    RelationIdentity,
+    discover_metadata,
+    validate_allowlist,
+)
 from app.connectors.dialect import (
     DialectProfile,
     mysql_dialect,
@@ -41,6 +48,7 @@ from app.connectors.models import (
 from app.connectors.postgresql import PostgreSQLConnector
 from app.connectors.mysql import MySQLConnector
 from app.connectors.starrocks import StarRocksConnector
+from app.connectors.scoped import ProfileScopedConnector
 from app.connectors.registry import ConnectorRegistry
 from app.connectors.factory import ConnectorFactory
 from app.connectors.types import (
@@ -56,6 +64,7 @@ from app.connectors.view_semantics import (
 __all__ = [
     # Protocol & dialogs
     "DatabaseConnector",
+    "DiscoveredMetadata",
     "DialectProfile",
     "DialectName",
     "postgresql_dialect",
@@ -64,7 +73,10 @@ __all__ = [
     # Connectors
     "ConnectorRegistry",
     "ConnectorFactory",
+    "MetadataLimits",
     "PostgreSQLConnector",
+    "ProfileScopedConnector",
+    "RelationIdentity",
     "MySQLConnector",
     "StarRocksConnector",
     "FrozenSemanticConnector",
@@ -80,6 +92,7 @@ __all__ = [
     "normalize_database_error",
     # Metadata
     "build_schema_snapshot",
+    "discover_metadata",
     "ColumnMetadata",
     "empty_schema_snapshot",
     "ForeignKeyMetadata",
@@ -90,6 +103,7 @@ __all__ = [
     "TableMetadata",
     "UniqueConstraintMetadata",
     "UniqueIndexMetadata",
+    "validate_allowlist",
     # Models
     "ExecutionResult",
     "ResultColumn",
