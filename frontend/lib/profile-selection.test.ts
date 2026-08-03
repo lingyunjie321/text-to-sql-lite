@@ -42,6 +42,12 @@ describe("model profile selection", () => {
     expect(() => setSelectedModelProfileId("../secret")).toThrow();
   });
 
+  it("is a no-op for an invalid id during SSR", () => {
+    vi.unstubAllGlobals();
+
+    expect(() => setSelectedModelProfileId("../secret")).not.toThrow();
+  });
+
   it("clears a selection missing from the server list", () => {
     localStorageMock.setItem(SELECTED_MODEL_PROFILE_KEY, "gone");
 

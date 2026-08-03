@@ -24,11 +24,14 @@ export function getSelectedModelProfileId(): string | null {
 }
 
 export function setSelectedModelProfileId(profileId: string): void {
+  const storage = getBrowserStorage();
+  if (!storage) return;
+
   if (!isValidProfileId(profileId)) {
     throw new Error("Model profile ID is invalid.");
   }
 
-  getBrowserStorage()?.setItem(SELECTED_MODEL_PROFILE_KEY, profileId);
+  storage.setItem(SELECTED_MODEL_PROFILE_KEY, profileId);
 }
 
 export function clearSelectedModelProfileId(): void {
