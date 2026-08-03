@@ -75,6 +75,7 @@ class DatasourceRuntime:
     profile: DatasourceProfile
     connector: DatabaseConnector = field(repr=False)
     context: WorkflowContext = field(repr=False)
+    semantic_version: str = "0.0.0"
 
 
 class DatasourceRuntimeService:
@@ -191,6 +192,7 @@ class DatasourceRuntimeService:
                 profile=profile,
                 connector=connector,
                 context=context,
+                semantic_version="0.0.0",
             )
         except BaseException:
             _close_connector(connector)

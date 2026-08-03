@@ -11,6 +11,7 @@ from app.config import DatabaseSettings, LLMRouteSettings, LLMSettings
 from app.local.credential_store import InMemoryCredentialStore
 from app.local.datasource_service import DatasourceProfileService
 from app.local.model_service import ModelProfileService
+from app.local.model_runtime import ModelRuntimeError
 from app.local.profile_models import DatasourceProfile, ModelProfile
 from app.local.profile_resolver import (
     ProfileResolutionError,
@@ -21,6 +22,7 @@ from app.local.profile_resolver import (
 from app.local.profile_store import LocalProfileStore
 from app.local.datasource_runtime import DatasourceRuntimeError
 from app.workflow import WorkflowContext
+from app.schema_linking import EmbeddingIndexRegistry
 from tests.routing_support import single_provider_test_routing
 
 
@@ -74,7 +76,10 @@ class _RuntimeRegistry:
         self.get_calls.append(profile)
         if self.error is not None:
             raise self.error
-        return SimpleNamespace(context=self.context)
+        return SimpleNamespace(
+            context=self.context,
+            semantic_version="0.0.0",
+        )
 
     def invalidate(
         self,
@@ -84,6 +89,24 @@ class _RuntimeRegistry:
     ) -> None:
         del expected_profile
         self.invalidated.append(profile_id)
+
+
+class _ModelRuntimeRegistry:
+    def __init__(self) -> None:
+        self.get_calls: list[ModelProfile] = []
+        self.error: Exception | None = None
+        self.model_routing = single_provider_test_routing(Mock())
+        self.embedding_registry = EmbeddingIndexRegistry()
+
+    def get_or_create(self, profile):  # type: ignore[no-untyped-def]
+        self.get_calls.append(profile)
+        if self.error is not None:
+            raise self.error
+        return SimpleNamespace(
+            model_routing=self.model_routing,
+            embedding_provider=None,
+            embedding_registry=self.embedding_registry,
+        )
 
 
 def _resolver(
@@ -196,6 +219,72 @@ def test_resolver_rejects_model_that_does_not_match_static_runtime(
     assert exc_info.value.code == "PROFILE_RUNTIME_UNAVAILABLE"
     assert exc_info.value.status_code == 409
     assert runtime_registry.get_calls == []
+
+
+def test_resolver_composes_dynamic_model_with_static_datasource(
+    tmp_path: Path,
+) -> None:
+    from app.api.context_factory import WorkflowContextFactory
+
+    _, models, datasources, runtime_registry = _resolver(tmp_path)
+    models.replace(_stored_model(base_url="https://other.example.test/v1"))
+    model_registry = _ModelRuntimeRegistry()
+    static_context = _context()
+    resolver = StaticProfileResolver(
+        model_profiles=models,
+        datasource_profiles=datasources,
+        contexts={"pagila": static_context},
+        active_model=None,
+        active_datasources={"pagila": _stored_datasource()},
+        runtime_registry=runtime_registry,
+        model_runtime_registry=model_registry,  # type: ignore[arg-type]
+        context_factory=WorkflowContextFactory(),
+    )
+
+    context = resolver.resolve(
+        datasource_profile_id="pagila",
+        model_profile_id="local-model",
+    )
+
+    assert context.connector is static_context.connector
+    assert context.model_routing is model_registry.model_routing
+    assert context.retrieval_runtime is None
+    assert model_registry.get_calls == [
+        _stored_model(base_url="https://other.example.test/v1")
+    ]
+
+
+def test_resolver_maps_dynamic_model_runtime_failure_without_fallback(
+    tmp_path: Path,
+) -> None:
+    from app.api.context_factory import WorkflowContextFactory
+
+    _, models, datasources, runtime_registry = _resolver(tmp_path)
+    model_registry = _ModelRuntimeRegistry()
+    model_registry.error = ModelRuntimeError(
+        code="MODEL_RUNTIME_UNAVAILABLE",
+        public_message="The model runtime is unavailable.",
+        status_code=503,
+    )
+    resolver = StaticProfileResolver(
+        model_profiles=models,
+        datasource_profiles=datasources,
+        contexts={"pagila": _context()},
+        active_model=None,
+        active_datasources={"pagila": _stored_datasource()},
+        runtime_registry=runtime_registry,
+        model_runtime_registry=model_registry,  # type: ignore[arg-type]
+        context_factory=WorkflowContextFactory(),
+    )
+
+    with pytest.raises(ProfileResolutionError) as exc_info:
+        resolver.resolve(
+            datasource_profile_id="pagila",
+            model_profile_id="local-model",
+        )
+
+    assert exc_info.value.code == "MODEL_RUNTIME_UNAVAILABLE"
+    assert exc_info.value.status_code == 503
 
 
 def test_dynamic_runtime_error_is_preserved_without_static_fallback(

@@ -362,6 +362,7 @@ def test_runtime_build_returns_raw_connector_and_scoped_context():
     assert runtime.profile == _profile()
     assert runtime.connector is connector
     assert runtime.context is contexts.context
+    assert runtime.semantic_version == "0.0.0"
     assert isinstance(contexts.calls[0]["connector"], ProfileScopedConnector)
     assert contexts.calls[0]["datasource_id"] == "orders"
     assert contexts.calls[0]["semantic_version"] == "0.0.0"

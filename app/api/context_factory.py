@@ -23,15 +23,20 @@ class WorkflowContextFactory:
         datasource_id: str,
         allowed_schemas: tuple[str, ...],
         allowed_tables: tuple[str, ...],
-        embedding_provider: EmbeddingProvider,
+        embedding_provider: EmbeddingProvider | None,
+        embedding_registry: EmbeddingIndexRegistry | None = None,
         semantic_version: str,
     ) -> WorkflowContext:
-        if embedding_provider is None:
-            raise ValueError("embedding provider is invalid")
-        retrieval_runtime = RetrievalRuntime(
-            provider=embedding_provider,
-            registry=EmbeddingIndexRegistry(),
-            semantic_version=semantic_version,
+        if embedding_provider is None and embedding_registry is not None:
+            raise ValueError("embedding registry requires a provider")
+        retrieval_runtime = (
+            None
+            if embedding_provider is None
+            else RetrievalRuntime(
+                provider=embedding_provider,
+                registry=embedding_registry or EmbeddingIndexRegistry(),
+                semantic_version=semantic_version,
+            )
         )
         return WorkflowContext(
             connector=connector,

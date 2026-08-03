@@ -16,6 +16,7 @@ from app.local.profile_models import DatasourceProfile, ModelProfile
 from app.local.profile_resolver import StaticProfileResolver
 from app.local.profile_store import LocalProfileStore
 from app.local.datasource_runtime import DatasourceRuntimeError
+from app.schema_linking import EmbeddingIndexRegistry
 from app.workflow import (
     FinalStatus,
     SQLTaskState,
@@ -73,7 +74,10 @@ class _RuntimeRegistry:
         self.get_calls.append(profile)
         if self.error is not None:
             raise self.error
-        return SimpleNamespace(context=self.context)
+        return SimpleNamespace(
+            context=self.context,
+            semantic_version="0.0.0",
+        )
 
     def invalidate(
         self,
@@ -212,6 +216,50 @@ def test_profile_query_resolves_context_before_workflow(tmp_path: Path) -> None:
     assert state.datasource_id == "pagila"
     assert state.dialect == "postgres"
     assert context is services.contexts["pagila"]
+
+
+def test_profile_query_uses_dynamic_model_runtime(tmp_path: Path) -> None:
+    from app.api.context_factory import WorkflowContextFactory
+
+    runner = RecordingRunner()
+    services, models, datasources = _services(tmp_path, runner)
+    selected_routing = single_provider_test_routing(Mock())
+
+    class ModelRegistry:
+        def get_or_create(self, profile):  # type: ignore[no-untyped-def]
+            return SimpleNamespace(
+                profile=profile,
+                model_routing=selected_routing,
+                embedding_provider=None,
+                embedding_registry=EmbeddingIndexRegistry(),
+            )
+
+    models.replace(_model(base_url="https://other.example.test/v1"))
+    services.profile_resolver = StaticProfileResolver(
+        model_profiles=models,
+        datasource_profiles=datasources,
+        contexts=services.contexts,
+        active_model=None,
+        active_datasources={"pagila": _datasource()},
+        runtime_registry=services.runtime_registry,
+        model_runtime_registry=ModelRegistry(),  # type: ignore[arg-type]
+        context_factory=WorkflowContextFactory(),
+    )
+
+    with TestClient(create_app(services=services)) as client:
+        response = client.post(
+            "/api/v1/text-to-sql",
+            json={
+                "question": "List films",
+                "datasource_id": "pagila",
+                "model_profile_id": "local-model",
+            },
+        )
+
+    assert response.status_code == 200
+    assert len(runner.calls) == 1
+    assert runner.calls[0][1].model_routing is selected_routing
+    assert runner.calls[0][1].retrieval_runtime is None
 
 
 def test_missing_profile_returns_404_before_workflow(tmp_path: Path) -> None:

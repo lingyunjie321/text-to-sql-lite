@@ -80,10 +80,47 @@ def test_factory_builds_isolated_retrieval_registries_per_datasource() -> None:
     assert first.retrieval_runtime.registry is not second.retrieval_runtime.registry
 
 
-def test_factory_requires_embedding_provider() -> None:
+def test_factory_builds_bm25_only_context_without_embedding_provider() -> None:
     from app.api.context_factory import WorkflowContextFactory
 
-    with pytest.raises(ValueError, match="embedding provider"):
+    context = WorkflowContextFactory().create(
+        connector=_Connector(),
+        model_routing=_runtime(),
+        datasource_id="first",
+        allowed_schemas=("public",),
+        allowed_tables=("public.orders",),
+        embedding_provider=None,
+        semantic_version="semantic-v1",
+    )
+
+    assert context.retrieval_runtime is None
+
+
+def test_factory_reuses_injected_embedding_registry() -> None:
+    from app.api.context_factory import WorkflowContextFactory
+    from app.schema_linking import EmbeddingIndexRegistry
+
+    registry = EmbeddingIndexRegistry()
+    context = WorkflowContextFactory().create(
+        connector=_Connector(),
+        model_routing=_runtime(),
+        datasource_id="first",
+        allowed_schemas=("public",),
+        allowed_tables=("public.orders",),
+        embedding_provider=_EmbeddingProvider(),
+        embedding_registry=registry,
+        semantic_version="semantic-v1",
+    )
+
+    assert context.retrieval_runtime is not None
+    assert context.retrieval_runtime.registry is registry
+
+
+def test_factory_rejects_embedding_registry_without_provider() -> None:
+    from app.api.context_factory import WorkflowContextFactory
+    from app.schema_linking import EmbeddingIndexRegistry
+
+    with pytest.raises(ValueError, match="embedding registry"):
         WorkflowContextFactory().create(
             connector=_Connector(),
             model_routing=_runtime(),
@@ -91,5 +128,6 @@ def test_factory_requires_embedding_provider() -> None:
             allowed_schemas=("public",),
             allowed_tables=("public.orders",),
             embedding_provider=None,
+            embedding_registry=EmbeddingIndexRegistry(),
             semantic_version="semantic-v1",
         )

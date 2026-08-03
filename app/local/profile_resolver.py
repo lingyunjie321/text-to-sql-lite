@@ -16,10 +16,17 @@ from app.local.model_service import (
     ModelProfileNotFoundError,
     ModelProfileService,
 )
+from app.local.model_runtime import ModelRuntimeError
+from app.local.model_runtime_registry import ModelRuntimeRegistry
 from app.local.profile_models import DatasourceProfile, ModelProfile
 from app.local.profile_store import ProfileStoreError
 from app.local.runtime_registry import RuntimeRegistry
 from app.workflow import WorkflowContext
+
+
+class _ContextFactory:
+    def create(self, **kwargs: object) -> WorkflowContext:
+        raise NotImplementedError
 
 
 class ProfileResolutionError(RuntimeError):
@@ -44,6 +51,8 @@ class StaticProfileResolver:
         active_model: ModelProfile | None,
         active_datasources: dict[str, DatasourceProfile],
         runtime_registry: RuntimeRegistry | None = None,
+        model_runtime_registry: ModelRuntimeRegistry | None = None,
+        context_factory: _ContextFactory | None = None,
     ) -> None:
         self._model_profiles = model_profiles
         self._datasource_profiles = datasource_profiles
@@ -51,6 +60,8 @@ class StaticProfileResolver:
         self._active_model = active_model
         self._active_datasources = active_datasources
         self._runtime_registry = runtime_registry
+        self._model_runtime_registry = model_runtime_registry
+        self._context_factory = context_factory
 
     def resolve(
         self,
@@ -81,6 +92,12 @@ class StaticProfileResolver:
             ) from None
         except ProfileStoreError:
             raise _store_unavailable_error() from None
+
+        if self._model_runtime_registry is not None:
+            return self._resolve_dynamic_model_context(
+                datasource=datasource,
+                model=model,
+            )
 
         context = self._contexts.get(datasource_profile_id)
         active_datasource = self._active_datasources.get(
@@ -123,6 +140,104 @@ class StaticProfileResolver:
                 status_code=503,
                 message="The datasource runtime is unavailable.",
             ) from None
+
+    def _resolve_dynamic_model_context(
+        self,
+        *,
+        datasource: DatasourceProfile,
+        model: ModelProfile,
+    ) -> WorkflowContext:
+        if self._context_factory is None:
+            raise ProfileResolutionError(
+                code="MODEL_RUNTIME_UNAVAILABLE",
+                status_code=503,
+                message="The model runtime is unavailable.",
+            )
+        assert self._model_runtime_registry is not None
+        try:
+            model_runtime = self._model_runtime_registry.get_or_create(model)
+        except ModelRuntimeError as error:
+            raise ProfileResolutionError(
+                code=error.code,
+                status_code=error.status_code,
+                message=error.public_message,
+            ) from None
+        except Exception:
+            raise ProfileResolutionError(
+                code="MODEL_RUNTIME_UNAVAILABLE",
+                status_code=503,
+                message="The model runtime is unavailable.",
+            ) from None
+
+        base_context = self._matching_static_context(datasource)
+        semantic_version = "0.0.0"
+        if base_context is None:
+            if self._runtime_registry is None:
+                raise ProfileResolutionError(
+                    code="PROFILE_RUNTIME_UNAVAILABLE",
+                    status_code=409,
+                    message="The selected profiles are not active.",
+                )
+            try:
+                datasource_runtime = self._runtime_registry.get_or_create(
+                    datasource
+                )
+            except DatasourceRuntimeError as error:
+                raise ProfileResolutionError(
+                    code=error.code,
+                    status_code=error.status_code,
+                    message=error.public_message,
+                ) from None
+            except Exception:
+                raise ProfileResolutionError(
+                    code="DATASOURCE_RUNTIME_UNAVAILABLE",
+                    status_code=503,
+                    message="The datasource runtime is unavailable.",
+                ) from None
+            base_context = datasource_runtime.context
+            semantic_version = datasource_runtime.semantic_version
+        elif base_context.retrieval_runtime is not None:
+            semantic_version = (
+                base_context.retrieval_runtime.semantic_version
+            )
+
+        try:
+            return self._context_factory.create(
+                connector=base_context.connector,
+                model_routing=model_runtime.model_routing,
+                datasource_id=datasource.id,
+                allowed_schemas=datasource.allowed_schemas,
+                allowed_tables=datasource.allowed_tables,
+                embedding_provider=model_runtime.embedding_provider,
+                embedding_registry=(
+                    model_runtime.embedding_registry
+                    if model_runtime.embedding_provider is not None
+                    else None
+                ),
+                semantic_version=semantic_version,
+            )
+        except Exception:
+            raise ProfileResolutionError(
+                code="MODEL_RUNTIME_UNAVAILABLE",
+                status_code=503,
+                message="The model runtime is unavailable.",
+            ) from None
+
+    def _matching_static_context(
+        self,
+        datasource: DatasourceProfile,
+    ) -> WorkflowContext | None:
+        context = self._contexts.get(datasource.id)
+        active_datasource = self._active_datasources.get(datasource.id)
+        if (
+            context is not None
+            and active_datasource is not None
+            and context.datasource_id == datasource.id
+            and _datasource_identity(datasource)
+            == _datasource_identity(active_datasource)
+        ):
+            return context
+        return None
 
 
 def build_static_datasource_profile(
