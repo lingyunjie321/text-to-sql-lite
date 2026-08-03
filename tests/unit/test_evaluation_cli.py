@@ -141,11 +141,10 @@ def test_partial_embedding_configuration_fails_with_public_error(
     def partial_settings(env_file: Path) -> EmbeddingSettings:
         assert env_file == Path("settings.env")
         return EmbeddingSettings.model_validate(
-            {
-                "base_url": "https://embedding.invalid/v1",
-                "model": "embedding-stub",
-                "dimension": 2,
-            }
+                {
+                    "base_url": "https://embedding.invalid/v1",
+                    "model": "embedding-stub",
+                }
         )
 
     monkeypatch.setattr(

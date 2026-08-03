@@ -120,6 +120,18 @@ def _services(runner: Runner) -> ApplicationServices:
     )
 
 
+def test_application_services_allow_profile_only_runtime() -> None:
+    services = ApplicationServices(
+        contexts={},
+        model_runtime_registry=object(),
+    )
+
+    assert services.contexts == {}
+    assert services.model_routing is None
+    with pytest.raises(RuntimeError, match="no datasource contexts"):
+        _ = services.context
+
+
 class _PublicSummaryProvider:
     model_id = "public-model"
     endpoint_summary = "https://models.example.test/v1"
@@ -675,7 +687,7 @@ def test_production_manifest_drift_fails_before_llm_credentials(
     )
     monkeypatch.setattr(
         api_bootstrap,
-        "load_llm_route_settings",
+        "load_optional_llm_route_settings",
         load_llm,
     )
     monkeypatch.setattr(
@@ -765,7 +777,7 @@ def test_production_services_inject_versioned_embedding_runtime(
     )
     monkeypatch.setattr(
         api_bootstrap,
-        "load_llm_route_settings",
+        "load_optional_llm_route_settings",
         Mock(return_value=llm_route_settings),
     )
     from app.generation.factory import ModelProviderFactory
@@ -779,7 +791,7 @@ def test_production_services_inject_versioned_embedding_runtime(
     )
     monkeypatch.setattr(
         api_bootstrap,
-        "load_embedding_settings",
+        "load_optional_embedding_settings",
         Mock(return_value=embedding_settings),
     )
     monkeypatch.setattr(
@@ -823,7 +835,7 @@ def test_production_services_inject_versioned_embedding_runtime(
     assert services.close is not None and callable(services.close)
 
 
-def test_production_lifespan_fails_closed_without_credentials(
+def test_production_lifespan_starts_profile_only_without_credentials(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     for name in (
@@ -843,13 +855,11 @@ def test_production_lifespan_fails_closed_without_credentials(
         else __import__("pathlib").Path(".env.missing"),
     )
 
-    from app.api.bootstrap import ApplicationBootstrapError
+    with TestClient(create_app()) as client:
+        response = client.get("/api/v1/local/models")
 
-    with pytest.raises(ApplicationBootstrapError) as captured:
-        with TestClient(create_app()):
-            pass
-
-    assert captured.value.stage == "model"
+    assert response.status_code == 200
+    assert response.json() == []
 
 
 def test_importing_asgi_app_does_not_load_credentials() -> None:

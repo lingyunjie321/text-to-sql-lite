@@ -1,4 +1,5 @@
 from ipaddress import ip_address
+import os
 from pathlib import Path
 from typing import Literal, Self
 
@@ -95,3 +96,31 @@ class EmbeddingSettings(BaseSettings):
 
 def load_embedding_settings(env_file: Path | None = None) -> EmbeddingSettings:
     return EmbeddingSettings(_env_file=_resolve_env_file(env_file))
+
+
+def load_optional_embedding_settings(
+    env_file: Path | None = None,
+) -> EmbeddingSettings | None:
+    resolved_env_file = _resolve_env_file(env_file)
+    if not _embedding_configuration_declared(resolved_env_file):
+        return None
+    return load_embedding_settings(resolved_env_file)
+
+
+def _embedding_configuration_declared(env_file: Path) -> bool:
+    if any(key.startswith("EMBEDDING_") for key in os.environ):
+        return True
+    try:
+        lines = env_file.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        return False
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key = stripped.split("=", 1)[0].strip()
+        if key.startswith("export "):
+            key = key[7:].strip()
+        if key.startswith("EMBEDDING_"):
+            return True
+    return False

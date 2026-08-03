@@ -112,6 +112,8 @@ def _configure(
     embedding_builder: Callable[[object], object] | None = None,
     context_factory: _ContextFactory | None = None,
     static_database_configured: bool = True,
+    static_model_configured: bool = True,
+    static_embedding_configured: bool = True,
 ) -> object:
     from app.api import bootstrap
 
@@ -146,13 +148,15 @@ def _configure(
     )
     monkeypatch.setattr(
         bootstrap,
-        "load_llm_route_settings",
-        lambda: object(),
+        "load_optional_llm_route_settings",
+        lambda: object() if static_model_configured else None,
+        raising=False,
     )
     monkeypatch.setattr(
         bootstrap,
-        "load_embedding_settings",
-        lambda: object(),
+        "load_optional_embedding_settings",
+        lambda: object() if static_embedding_configured else None,
+        raising=False,
     )
     monkeypatch.setattr(
         bootstrap,
@@ -188,6 +192,29 @@ def test_application_can_start_without_static_database_configuration(
     assert services.datasource_profiles is not None
     assert services.datasource_runtime_service is not None
     assert services.runtime_registry is not None
+    assert services.close is not None
+    services.close()
+
+
+def test_application_can_start_with_profiles_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bootstrap = _configure(
+        monkeypatch,
+        connectors=[],
+        static_database_configured=False,
+        static_model_configured=False,
+        static_embedding_configured=False,
+    )
+
+    services = bootstrap.build()  # type: ignore[attr-defined]
+
+    assert services.contexts == {}
+    assert services.model_routing is None
+    assert services.embedding_provider is None
+    assert services.model_runtime_service is not None
+    assert services.model_runtime_registry is not None
+    assert services.profile_resolver is not None
     assert services.close is not None
     services.close()
 

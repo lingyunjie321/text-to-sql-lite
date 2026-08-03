@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from ipaddress import ip_address
+import os
 from pathlib import Path
 from typing import Literal, Self
 
@@ -261,3 +262,41 @@ def load_llm_route_settings(env_file: Path | None = None) -> LLMRouteSettings:
         fallback_route_ids=fallback_route_ids,  # type: ignore[arg-type]
         data_boundary_id=policy.data_boundary_id,
     )
+
+
+def load_optional_llm_route_settings(
+    env_file: Path | None = None,
+) -> LLMRouteSettings | None:
+    resolved_env_file = _resolve_env_file(env_file)
+    if not _configuration_declared(
+        resolved_env_file,
+        prefixes=("LLM_", "MODEL_ROUTING_"),
+    ):
+        return None
+    return load_llm_route_settings(resolved_env_file)
+
+
+def _configuration_declared(
+    env_file: Path,
+    *,
+    prefixes: tuple[str, ...],
+) -> bool:
+    if any(
+        key.startswith(prefixes)
+        for key in os.environ
+    ):
+        return True
+    try:
+        lines = env_file.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        return False
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key = stripped.split("=", 1)[0].strip()
+        if key.startswith("export "):
+            key = key[7:].strip()
+        if key.startswith(prefixes):
+            return True
+    return False

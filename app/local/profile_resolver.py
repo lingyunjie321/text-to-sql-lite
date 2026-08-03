@@ -194,16 +194,31 @@ class StaticProfileResolver:
                     status_code=503,
                     message="The datasource runtime is unavailable.",
                 ) from None
-            base_context = datasource_runtime.context
+            runtime_context = datasource_runtime.context
+            workflow_connector = datasource_runtime.workflow_connector
+            if workflow_connector is None and runtime_context is not None:
+                workflow_connector = runtime_context.connector
+            if workflow_connector is None:
+                raise ProfileResolutionError(
+                    code="DATASOURCE_RUNTIME_UNAVAILABLE",
+                    status_code=503,
+                    message="The datasource runtime is unavailable.",
+                )
+            base_context = runtime_context
             semantic_version = datasource_runtime.semantic_version
-        elif base_context.retrieval_runtime is not None:
+        else:
+            workflow_connector = base_context.connector
+        if (
+            base_context is not None
+            and base_context.retrieval_runtime is not None
+        ):
             semantic_version = (
                 base_context.retrieval_runtime.semantic_version
             )
 
         try:
             return self._context_factory.create(
-                connector=base_context.connector,
+                connector=workflow_connector,
                 model_routing=model_runtime.model_routing,
                 datasource_id=datasource.id,
                 allowed_schemas=datasource.allowed_schemas,

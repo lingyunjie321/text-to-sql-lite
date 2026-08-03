@@ -74,8 +74,12 @@ class DatasourceRuntimeError(RuntimeError):
 class DatasourceRuntime:
     profile: DatasourceProfile
     connector: DatabaseConnector = field(repr=False)
-    context: WorkflowContext = field(repr=False)
+    context: WorkflowContext | None = field(repr=False)
     semantic_version: str = "0.0.0"
+    workflow_connector: DatabaseConnector | None = field(
+        default=None,
+        repr=False,
+    )
 
 
 class DatasourceRuntimeService:
@@ -176,23 +180,26 @@ class DatasourceRuntimeService:
                 allowed_schemas=profile.allowed_schemas,
                 allowed_tables=profile.allowed_tables,
             )
-            try:
-                context = self._context_factory.create(
-                    connector=scoped_connector,
-                    model_routing=self._model_routing,
-                    datasource_id=profile.id,
-                    allowed_schemas=profile.allowed_schemas,
-                    allowed_tables=profile.allowed_tables,
-                    embedding_provider=self._embedding_provider,
-                    semantic_version="0.0.0",
-                )
-            except Exception:
-                raise _runtime_unavailable_error() from None
+            context: WorkflowContext | None = None
+            if self._model_routing is not None:
+                try:
+                    context = self._context_factory.create(
+                        connector=scoped_connector,
+                        model_routing=self._model_routing,
+                        datasource_id=profile.id,
+                        allowed_schemas=profile.allowed_schemas,
+                        allowed_tables=profile.allowed_tables,
+                        embedding_provider=self._embedding_provider,
+                        semantic_version="0.0.0",
+                    )
+                except Exception:
+                    raise _runtime_unavailable_error() from None
             return DatasourceRuntime(
                 profile=profile,
                 connector=connector,
                 context=context,
                 semantic_version="0.0.0",
+                workflow_connector=scoped_connector,
             )
         except BaseException:
             _close_connector(connector)

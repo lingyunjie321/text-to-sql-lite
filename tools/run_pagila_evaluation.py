@@ -328,7 +328,6 @@ def _load_optional_embedding_settings(
 ) -> EmbeddingSettings | None:
     required_locations = {
         ("base_url",),
-        ("api_key",),
         ("model",),
         ("dimension",),
     }

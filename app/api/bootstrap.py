@@ -10,9 +10,9 @@ from app.config import (
     DatabaseSettings,
     load_datasource_allowlist,
     load_datasources_from_file,
-    load_embedding_settings,
-    load_llm_route_settings,
     load_optional_database_settings,
+    load_optional_embedding_settings,
+    load_optional_llm_route_settings,
 )
 from app.connectors.base import DatabaseConnector
 from app.connectors.errors import DatabaseConnectorError
@@ -32,6 +32,8 @@ from app.local.credential_store import InMemoryCredentialStore
 from app.local.datasource_service import DatasourceProfileService
 from app.local.datasource_runtime import DatasourceRuntimeService
 from app.local.model_service import ModelProfileService
+from app.local.model_runtime import ModelRuntimeService
+from app.local.model_runtime_registry import ModelRuntimeRegistry
 from app.local.profile_models import DatasourceProfile
 from app.local.profile_resolver import (
     StaticProfileResolver,
@@ -130,6 +132,8 @@ class ApplicationServices:
         "embedding_provider",
         "datasource_runtime_service",
         "runtime_registry",
+        "model_runtime_service",
+        "model_runtime_registry",
     )
 
     def __init__(
@@ -148,6 +152,8 @@ class ApplicationServices:
         embedding_provider: object | None = None,
         datasource_runtime_service: object | None = None,
         runtime_registry: object | None = None,
+        model_runtime_service: object | None = None,
+        model_runtime_registry: object | None = None,
     ) -> None:
         if context is None and contexts is None:
             raise ValueError("either 'context' or 'contexts' is required")
@@ -162,7 +168,11 @@ class ApplicationServices:
             or not all(
                 isinstance(ctx, WorkflowContext) for ctx in resolved.values()
             )
-            or (not resolved and model_routing is None)
+            or (
+                not resolved
+                and model_routing is None
+                and model_runtime_registry is None
+            )
             or not callable(runner)
             or (close is not None and not callable(close))
         ):
@@ -189,6 +199,16 @@ class ApplicationServices:
             datasource_runtime_service,
         )
         object.__setattr__(self, "runtime_registry", runtime_registry)
+        object.__setattr__(
+            self,
+            "model_runtime_service",
+            model_runtime_service,
+        )
+        object.__setattr__(
+            self,
+            "model_runtime_registry",
+            model_runtime_registry,
+        )
 
     @property
     def context(self) -> WorkflowContext:
@@ -337,6 +357,7 @@ class ApplicationBootstrap:
     def build(self) -> ApplicationServices:
         registry = ConnectorRegistry()
         dynamic_runtime_registry: RuntimeRegistry | None = None
+        model_runtime_registry: ModelRuntimeRegistry | None = None
         credential_store = InMemoryCredentialStore()
         owned_connectors: list[tuple[str, DatabaseConnector]] = []
         pending: list[
@@ -353,9 +374,17 @@ class ApplicationBootstrap:
         try:
             stage = "profiles"
             profile_store = LocalProfileStore()
+            model_runtime_service = ModelRuntimeService(
+                model_factory=self._model_factory,
+            )
+            model_runtime_registry = ModelRuntimeRegistry(
+                runtime_service=model_runtime_service,
+                credential_store=credential_store,
+            )
             model_profiles = ModelProfileService(
                 profile_store,
                 credential_store,
+                runtime_registry=model_runtime_registry,
             )
             stage = "configuration"
             primary_settings = load_optional_database_settings()
@@ -414,34 +443,47 @@ class ApplicationBootstrap:
                 )
 
             stage = "model"
-            llm_route_settings = load_llm_route_settings()
-            active_model_profile = build_static_model_profile(
-                llm_route_settings
+            llm_route_settings = load_optional_llm_route_settings()
+            active_model_profile = (
+                build_static_model_profile(llm_route_settings)
+                if llm_route_settings is not None
+                else None
             )
-            model_routing = self._model_factory.create(llm_route_settings)
+            model_routing = (
+                self._model_factory.create(llm_route_settings)
+                if llm_route_settings is not None
+                else None
+            )
             stage = "embedding"
-            embedding_provider = OpenAICompatibleEmbeddingProvider(
-                load_embedding_settings()
+            embedding_settings = load_optional_embedding_settings()
+            embedding_provider = (
+                OpenAICompatibleEmbeddingProvider(embedding_settings)
+                if embedding_settings is not None
+                else None
             )
             stage = "context"
-            contexts = {
-                datasource_id: self._context_factory.create(
-                    connector=connector,
-                    model_routing=model_routing,
-                    datasource_id=datasource_id,
-                    allowed_schemas=allowed_schemas,
-                    allowed_tables=allowed_tables,
-                    embedding_provider=embedding_provider,
-                    semantic_version=semantic_version,
-                )
-                for (
-                    datasource_id,
-                    connector,
-                    allowed_schemas,
-                    allowed_tables,
-                    semantic_version,
-                ) in pending
-            }
+            contexts = (
+                {
+                    datasource_id: self._context_factory.create(
+                        connector=connector,
+                        model_routing=model_routing,
+                        datasource_id=datasource_id,
+                        allowed_schemas=allowed_schemas,
+                        allowed_tables=allowed_tables,
+                        embedding_provider=embedding_provider,
+                        semantic_version=semantic_version,
+                    )
+                    for (
+                        datasource_id,
+                        connector,
+                        allowed_schemas,
+                        allowed_tables,
+                        semantic_version,
+                    ) in pending
+                }
+                if model_routing is not None
+                else {}
+            )
             dynamic_runtime_service = DatasourceRuntimeService(
                 connector_factory=self._connector_factory,
                 context_factory=self._context_factory,
@@ -468,6 +510,8 @@ class ApplicationBootstrap:
                 active_model=active_model_profile,
                 active_datasources=active_datasource_profiles,
                 runtime_registry=dynamic_runtime_registry,
+                model_runtime_registry=model_runtime_registry,
+                context_factory=self._context_factory,
             )
             services = ApplicationServices(
                 contexts=contexts,
@@ -475,6 +519,7 @@ class ApplicationBootstrap:
                 close=lambda: _close_application_resources(
                     registry,
                     dynamic_runtime_registry,
+                    model_runtime_registry,
                     credential_store,
                 ),
                 llm_route_settings=llm_route_settings,
@@ -486,20 +531,28 @@ class ApplicationBootstrap:
                 embedding_provider=embedding_provider,
                 datasource_runtime_service=dynamic_runtime_service,
                 runtime_registry=dynamic_runtime_registry,
+                model_runtime_service=model_runtime_service,
+                model_runtime_registry=model_runtime_registry,
             )
         except DatabaseConnectorError:
+            if model_runtime_registry is not None:
+                model_runtime_registry.close_all()
             if dynamic_runtime_registry is not None:
                 dynamic_runtime_registry.close_all()
             _close_connectors(owned_connectors)
             credential_store.clear_all()
             raise
         except Exception:
+            if model_runtime_registry is not None:
+                model_runtime_registry.close_all()
             if dynamic_runtime_registry is not None:
                 dynamic_runtime_registry.close_all()
             _close_connectors(owned_connectors)
             credential_store.clear_all()
             raise ApplicationBootstrapError(stage) from None
         except BaseException:
+            if model_runtime_registry is not None:
+                model_runtime_registry.close_all()
             if dynamic_runtime_registry is not None:
                 dynamic_runtime_registry.close_all()
             _close_connectors(owned_connectors)
@@ -525,15 +578,19 @@ def _close_connectors(
 def _close_application_resources(
     registry: ConnectorRegistry,
     dynamic_runtime_registry: RuntimeRegistry,
+    model_runtime_registry: ModelRuntimeRegistry,
     credential_store: InMemoryCredentialStore,
 ) -> None:
     try:
-        dynamic_runtime_registry.close_all()
+        model_runtime_registry.close_all()
     finally:
         try:
-            registry.close_all()
+            dynamic_runtime_registry.close_all()
         finally:
-            credential_store.clear_all()
+            try:
+                registry.close_all()
+            finally:
+                credential_store.clear_all()
 
 
 def build_production_services() -> ApplicationServices:

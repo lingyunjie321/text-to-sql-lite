@@ -148,13 +148,14 @@ def _service(
     connector: ConnectorFake,
     *,
     context_factory: ContextFactoryFake | None = None,
+    model_routing: object | None = object(),
 ) -> tuple[DatasourceRuntimeService, ConnectorFactoryFake, ContextFactoryFake]:
     factory = ConnectorFactoryFake([connector])
     contexts = context_factory or ContextFactoryFake()
     service = DatasourceRuntimeService(
         connector_factory=factory,
         context_factory=contexts,
-        model_routing=object(),
+        model_routing=model_routing,
         embedding_provider=object(),
     )
     return service, factory, contexts
@@ -367,3 +368,48 @@ def test_runtime_build_returns_raw_connector_and_scoped_context():
     assert contexts.calls[0]["datasource_id"] == "orders"
     assert contexts.calls[0]["semantic_version"] == "0.0.0"
     assert connector.events == ["open", "metadata"]
+
+
+def test_runtime_builds_scoped_connector_without_static_model() -> None:
+    from app.connectors.scoped import ProfileScopedConnector
+
+    table = TableMetadata(
+        schema_name="public",
+        table_name="orders",
+        relation_kind="table",
+        comment=None,
+        columns=(
+            ColumnMetadata(
+                schema_name="public",
+                table_name="orders",
+                column_name="id",
+                ordinal_position=1,
+                data_type="integer",
+                formatted_type="integer",
+                nullable=False,
+                comment=None,
+            ),
+        ),
+    )
+    connector = ConnectorFake(
+        metadata_snapshot=build_schema_snapshot(
+            tables=(table,),
+            primary_keys=(),
+            foreign_keys=(),
+            unique_constraints=(),
+            unique_indexes=(),
+        )
+    )
+    service, _, contexts = _service(
+        connector,
+        model_routing=None,
+    )
+
+    runtime = service.build_runtime(
+        _profile(),
+        SecretStr("private-secret"),
+    )
+
+    assert runtime.context is None
+    assert isinstance(runtime.workflow_connector, ProfileScopedConnector)
+    assert contexts.calls == []

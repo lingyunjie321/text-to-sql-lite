@@ -6,9 +6,81 @@ from pydantic import ValidationError
 from app.config import (
     LLMSettings,
     load_embedding_settings,
+    load_optional_embedding_settings,
+    load_optional_llm_route_settings,
     load_llm_route_settings,
     load_llm_settings,
 )
+
+
+def test_optional_model_loaders_return_none_for_empty_configuration(
+    tmp_path: Path,
+) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text("", encoding="utf-8")
+
+    assert load_optional_llm_route_settings(env_file) is None
+    assert load_optional_embedding_settings(env_file) is None
+
+
+def test_optional_model_loaders_accept_complete_no_auth_groups(
+    tmp_path: Path,
+) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "LLM_BASE_URL=http://localhost:11434/v1\n"
+        "LLM_MODEL=local-model\n"
+        "EMBEDDING_BASE_URL=http://localhost:11434/v1\n"
+        "EMBEDDING_MODEL=embedding-model\n"
+        "EMBEDDING_DIMENSION=768\n",
+        encoding="utf-8",
+    )
+
+    routes = load_optional_llm_route_settings(env_file)
+    embedding = load_optional_embedding_settings(env_file)
+
+    assert routes is not None
+    assert routes.simple.api_key is None
+    assert embedding is not None
+    assert embedding.api_key is None
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "LLM_API_KEY=orphan-secret\n",
+        "LLM_BASE_URL=http://localhost:11434/v1\n",
+        "LLM_SIMPLE_MODEL=orphan-model\n",
+    ],
+)
+def test_optional_llm_loader_rejects_partial_group(
+    tmp_path: Path,
+    line: str,
+) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(line, encoding="utf-8")
+
+    with pytest.raises((ValidationError, ValueError)):
+        load_optional_llm_route_settings(env_file)
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "EMBEDDING_API_KEY=orphan-secret\n",
+        "EMBEDDING_MODEL=embedding-model\n",
+        "EMBEDDING_DIMENSION=768\n",
+    ],
+)
+def test_optional_embedding_loader_rejects_partial_group(
+    tmp_path: Path,
+    line: str,
+) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(line, encoding="utf-8")
+
+    with pytest.raises(ValidationError):
+        load_optional_embedding_settings(env_file)
 
 
 def test_default_loaders_read_project_dotenv(
