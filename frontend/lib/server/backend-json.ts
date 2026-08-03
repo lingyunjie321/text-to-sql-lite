@@ -7,14 +7,35 @@ type ForwardBackendJsonOptions = {
   fetchImpl?: typeof fetch;
 };
 
-const LOCAL_API_PREFIX = "/api/v1/local/";
+const MODEL_API_PATH = "/api/v1/local/models";
+const PROFILE_ID_PATTERN = /^[a-z0-9](?:[a-z0-9_-]{0,62}[a-z0-9])?$/;
 
 function errorResponse(status: number, code: string, message: string): Response {
   return Response.json({ detail: { code, message } }, { status });
 }
 
-function isAllowedPath(path: string): boolean {
-  return path.startsWith(LOCAL_API_PREFIX) && !path.includes("://");
+function normalizeModelPath(path: string): string | null {
+  if (path === MODEL_API_PATH || path === `${MODEL_API_PATH}/test`) {
+    return path;
+  }
+
+  const profileIdSegment = path.slice(`${MODEL_API_PATH}/`.length);
+  if (
+    !path.startsWith(`${MODEL_API_PATH}/`) ||
+    profileIdSegment.includes("/") ||
+    path.includes("?") ||
+    path.includes("#")
+  ) {
+    return null;
+  }
+
+  try {
+    const profileId = decodeURIComponent(profileIdSegment);
+    if (!PROFILE_ID_PATTERN.test(profileId)) return null;
+    return `${MODEL_API_PATH}/${encodeURIComponent(profileId)}`;
+  } catch {
+    return null;
+  }
 }
 
 function backendEndpoint(backendUrl: string, path: string): string {
@@ -26,7 +47,8 @@ export async function forwardBackendJson(
   request: Request,
   options: ForwardBackendJsonOptions,
 ): Promise<Response> {
-  if (!isAllowedPath(path)) {
+  const normalizedPath = normalizeModelPath(path);
+  if (normalizedPath === null) {
     return errorResponse(500, "INVALID_BACKEND_PATH", "后端请求路径无效。");
   }
 
@@ -52,7 +74,7 @@ export async function forwardBackendJson(
 
   try {
     const upstream = await (options.fetchImpl ?? fetch)(
-      backendEndpoint(options.backendUrl, path),
+      backendEndpoint(options.backendUrl, normalizedPath),
       {
         method: options.method,
         headers,

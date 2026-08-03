@@ -150,4 +150,62 @@ describe("forwardBackendJson", () => {
       detail: { code: "BACKEND_UNREACHABLE", message: "后端服务暂时不可用。" },
     });
   });
+
+  it("disables caching when listing model profiles", async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(Response.json([]));
+
+    await forwardBackendJson(
+      "/api/v1/local/models",
+      new Request("http://localhost/api/v1/local/models"),
+      { method: "GET", backendUrl, fetchImpl },
+    );
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/api/v1/local/models",
+      expect.objectContaining({ method: "GET", cache: "no-store" }),
+    );
+  });
+
+  it("accepts a URL-encoded valid profile id as one model path segment", async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
+      Response.json({ id: "model-1" }),
+    );
+
+    const response = await forwardBackendJson(
+      "/api/v1/local/models/model%2D1",
+      incomingRequest('{"name":"Local model"}'),
+      { method: "POST", backendUrl, fetchImpl },
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "http://127.0.0.1:8000/api/v1/local/models/model-1",
+      expect.anything(),
+    );
+  });
+
+  it.each([
+    "/api/v1/local/datasources",
+    "/api/v1/local/models/..",
+    "/api/v1/local/models/%2E%2E",
+    "/api/v1/local/models/model-1/extra",
+    "/api/v1/local/models?redirect=/api/v1/local/datasources",
+    "/api/v1/local/models#fragment",
+    "/api/v1/local/models/http:%2F%2Fevil.example",
+    "https://evil.example/api/v1/local/models",
+  ])("rejects non-model or unsafe path %s", async (path) => {
+    const fetchImpl = vi.fn<typeof fetch>();
+
+    const response = await forwardBackendJson(
+      path,
+      incomingRequest('{"name":"Local model"}'),
+      { method: "POST", backendUrl, fetchImpl },
+    );
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({
+      detail: { code: "INVALID_BACKEND_PATH", message: "后端请求路径无效。" },
+    });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
 });
