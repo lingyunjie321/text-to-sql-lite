@@ -13,6 +13,7 @@ from app.local.model_runtime import (
     ModelRuntimeError,
     ModelRuntimeService,
 )
+from app.local.model_runtime_registry import ModelRuntimeRegistry
 from app.local.runtime_registry import RuntimeRegistry
 
 __all__ = [
@@ -26,5 +27,6 @@ __all__ = [
     "ModelRuntime",
     "ModelRuntimeError",
     "ModelRuntimeService",
+    "ModelRuntimeRegistry",
     "RuntimeRegistry",
 ]

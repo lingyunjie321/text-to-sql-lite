@@ -40,6 +40,28 @@ def test_empty_model_credentials_remove_existing_entry() -> None:
     assert store.has_model("local-model") is False
 
 
+def test_model_credential_revision_changes_on_put_discard_and_clear() -> None:
+    store = InMemoryCredentialStore()
+    assert store.model_revision("local-model") == 0
+
+    store.put_model(
+        "local-model",
+        ModelCredentials(generation_api_key=SecretStr("secret")),
+    )
+    after_put = store.model_revision("local-model")
+    store.discard_model("local-model")
+    after_discard = store.model_revision("local-model")
+    store.put_model(
+        "local-model",
+        ModelCredentials(generation_api_key=SecretStr("new-secret")),
+    )
+    store.clear_all()
+
+    assert after_put == 1
+    assert after_discard == 2
+    assert store.model_revision("local-model") == 4
+
+
 def test_datasource_credentials_can_be_replaced_and_discarded() -> None:
     store = InMemoryCredentialStore()
     store.put_datasource(

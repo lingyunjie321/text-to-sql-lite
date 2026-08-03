@@ -96,6 +96,19 @@ class _RuntimeRegistry:
         self.invalidated.append(profile_id)
 
 
+class _ModelRuntimeRegistry:
+    def __init__(self) -> None:
+        self.invalidated: list[tuple[str, ModelProfile | None]] = []
+
+    def invalidate(
+        self,
+        profile_id: str,
+        *,
+        expected_profile: ModelProfile | None = None,
+    ) -> None:
+        self.invalidated.append((profile_id, expected_profile))
+
+
 def _datasource_service(
     database_path: Path,
     credentials: InMemoryCredentialStore | None = None,
@@ -194,6 +207,35 @@ def test_model_service_delete_clears_credentials_and_reports_missing(
     with pytest.raises(ModelProfileNotFoundError) as exc_info:
         service.get("local-model")
     assert exc_info.value.code == "MODEL_PROFILE_NOT_FOUND"
+
+
+def test_model_service_invalidates_runtime_after_successful_writes(
+    tmp_path: Path,
+) -> None:
+    credentials = InMemoryCredentialStore()
+    registry = _ModelRuntimeRegistry()
+    service = ModelProfileService(
+        LocalProfileStore(tmp_path / "config.db"),
+        credentials,
+        runtime_registry=registry,  # type: ignore[arg-type]
+    )
+    original = _model()
+    changed = ModelProfile(
+        **{
+            **original.model_dump(),
+            "model_name": "replacement-model",
+        }
+    )
+
+    service.create(original)
+    service.replace(changed)
+    service.delete(original.id)
+
+    assert registry.invalidated == [
+        (original.id, original),
+        (original.id, changed),
+        (original.id, None),
+    ]
 
 
 def test_datasource_service_persists_profile_but_not_password(

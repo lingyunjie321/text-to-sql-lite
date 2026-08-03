@@ -32,6 +32,7 @@ class InMemoryCredentialStore:
 
     def __init__(self) -> None:
         self._model_credentials: dict[str, ModelCredentials] = {}
+        self._model_revisions: dict[str, int] = {}
         self._datasource_credentials: dict[str, DatasourceCredentials] = {}
         self._lock = threading.RLock()
 
@@ -41,6 +42,9 @@ class InMemoryCredentialStore:
         credentials: ModelCredentials,
     ) -> None:
         with self._lock:
+            self._model_revisions[profile_id] = (
+                self._model_revisions.get(profile_id, 0) + 1
+            )
             if credentials.is_empty:
                 self._model_credentials.pop(profile_id, None)
             else:
@@ -56,7 +60,14 @@ class InMemoryCredentialStore:
 
     def discard_model(self, profile_id: str) -> None:
         with self._lock:
+            self._model_revisions[profile_id] = (
+                self._model_revisions.get(profile_id, 0) + 1
+            )
             self._model_credentials.pop(profile_id, None)
+
+    def model_revision(self, profile_id: str) -> int:
+        with self._lock:
+            return self._model_revisions.get(profile_id, 0)
 
     def put_datasource(
         self,
@@ -83,5 +94,9 @@ class InMemoryCredentialStore:
 
     def clear_all(self) -> None:
         with self._lock:
+            for profile_id in self._model_credentials:
+                self._model_revisions[profile_id] = (
+                    self._model_revisions.get(profile_id, 0) + 1
+                )
             self._model_credentials.clear()
             self._datasource_credentials.clear()

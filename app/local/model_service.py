@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import threading
 from typing import Literal, cast
 
 from pydantic import SecretStr
@@ -13,6 +14,7 @@ from app.local.credential_store import (
 )
 from app.local.profile_models import ModelProfile
 from app.local.profile_store import LocalProfileStore
+from app.local.model_runtime_registry import ModelRuntimeRegistry
 
 _NOT_PROVIDED = object()
 
@@ -42,9 +44,13 @@ class ModelProfileService:
         self,
         store: LocalProfileStore,
         credentials: InMemoryCredentialStore,
+        *,
+        runtime_registry: ModelRuntimeRegistry | None = None,
     ) -> None:
         self._store = store
         self._credentials = credentials
+        self._runtime_registry = runtime_registry
+        self._write_lock = threading.RLock()
 
     def create(
         self,
@@ -53,19 +59,25 @@ class ModelProfileService:
         generation_api_key: SecretStr | None = None,
         embedding_api_key: SecretStr | None = None,
     ) -> ModelProfileView:
-        created = self._store.create_model(profile)
-        self._credentials.put_model(
-            profile.id,
-            ModelCredentials(
-                generation_api_key=generation_api_key,
-                embedding_api_key=(
-                    embedding_api_key
-                    if profile.embedding_base_url is not None
-                    else None
+        with self._write_lock:
+            created = self._store.create_model(profile)
+            self._credentials.put_model(
+                profile.id,
+                ModelCredentials(
+                    generation_api_key=generation_api_key,
+                    embedding_api_key=(
+                        embedding_api_key
+                        if profile.embedding_base_url is not None
+                        else None
+                    ),
                 ),
-            ),
-        )
-        return self._view(created)
+            )
+            if self._runtime_registry is not None:
+                self._runtime_registry.invalidate(
+                    profile.id,
+                    expected_profile=created,
+                )
+            return self._view(created)
 
     def get(self, profile_id: str) -> ModelProfileView:
         profile = self._store.get_model(profile_id)
@@ -83,59 +95,68 @@ class ModelProfileService:
         generation_api_key: SecretStr | None | object = _NOT_PROVIDED,
         embedding_api_key: SecretStr | None | object = _NOT_PROVIDED,
     ) -> ModelProfileView:
-        current = self._store.get_model(profile.id)
-        if current is None:
-            raise ModelProfileNotFoundError()
-        existing = self._credentials.get_model(profile.id) or ModelCredentials()
+        with self._write_lock:
+            current = self._store.get_model(profile.id)
+            if current is None:
+                raise ModelProfileNotFoundError()
+            existing = self._credentials.get_model(profile.id) or ModelCredentials()
 
-        generation_identity_changed = (
-            current.provider_type != profile.provider_type
-            or current.base_url != profile.base_url
-        )
-        if generation_api_key is _NOT_PROVIDED:
-            next_generation_key = (
-                None
-                if generation_identity_changed
-                else existing.generation_api_key
+            generation_identity_changed = (
+                current.provider_type != profile.provider_type
+                or current.base_url != profile.base_url
             )
-        else:
-            next_generation_key = generation_api_key
+            if generation_api_key is _NOT_PROVIDED:
+                next_generation_key = (
+                    None
+                    if generation_identity_changed
+                    else existing.generation_api_key
+                )
+            else:
+                next_generation_key = generation_api_key
 
-        embedding_identity_changed = (
-            current.embedding_base_url != profile.embedding_base_url
-            or current.embedding_model != profile.embedding_model
-        )
-        if profile.embedding_base_url is None:
-            next_embedding_key = None
-        elif embedding_api_key is _NOT_PROVIDED:
-            next_embedding_key = (
-                None
-                if embedding_identity_changed
-                else existing.embedding_api_key
+            embedding_identity_changed = (
+                current.embedding_base_url != profile.embedding_base_url
+                or current.embedding_model != profile.embedding_model
             )
-        else:
-            next_embedding_key = embedding_api_key
+            if profile.embedding_base_url is None:
+                next_embedding_key = None
+            elif embedding_api_key is _NOT_PROVIDED:
+                next_embedding_key = (
+                    None
+                    if embedding_identity_changed
+                    else existing.embedding_api_key
+                )
+            else:
+                next_embedding_key = embedding_api_key
 
-        replaced = self._store.replace_model(profile)
-        self._credentials.put_model(
-            profile.id,
-            ModelCredentials(
-                generation_api_key=cast(
-                    SecretStr | None,
-                    next_generation_key,
+            replaced = self._store.replace_model(profile)
+            self._credentials.put_model(
+                profile.id,
+                ModelCredentials(
+                    generation_api_key=cast(
+                        SecretStr | None,
+                        next_generation_key,
+                    ),
+                    embedding_api_key=cast(
+                        SecretStr | None,
+                        next_embedding_key,
+                    ),
                 ),
-                embedding_api_key=cast(
-                    SecretStr | None,
-                    next_embedding_key,
-                ),
-            ),
-        )
-        return self._view(replaced)
+            )
+            if self._runtime_registry is not None:
+                self._runtime_registry.invalidate(
+                    profile.id,
+                    expected_profile=replaced,
+                )
+            return self._view(replaced)
 
     def delete(self, profile_id: str) -> None:
-        if not self._store.delete_model(profile_id):
-            raise ModelProfileNotFoundError()
-        self._credentials.discard_model(profile_id)
+        with self._write_lock:
+            if not self._store.delete_model(profile_id):
+                raise ModelProfileNotFoundError()
+            self._credentials.discard_model(profile_id)
+            if self._runtime_registry is not None:
+                self._runtime_registry.invalidate(profile_id)
 
     def _view(self, profile: ModelProfile) -> ModelProfileView:
         credentials = self._credentials.get_model(profile.id)
