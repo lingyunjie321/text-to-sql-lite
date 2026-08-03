@@ -194,7 +194,7 @@ SQL attempt、校验/执行结果、错误、修复计数和观测数据。完�
 | 2 本地 Profile | Profile、SQLite 非敏感配置、内存凭据和 ID 查询 | 只绑定现有静态 runtime |
 | 3 动态数据库 | 连接测试、metadata、RuntimeRegistry、PostgreSQL/MySQL | MySQL 安全修复需真实环境 |
 | 4 模型与离线 | 动态 Provider、单模型默认路由、可选 Embedding | 本地 HTTP 仅允许 loopback |
-| 5 前端闭环 | 设置页、Schema 选择和 Profile-ID Workbench | localStorage 不再保存凭据 |
+| 5 前端闭环 | 设置页、Schema 选择和 Profile-ID Workbench（总体阶段目标） | 当前首个切片仅模型设置；Schema 选择和 Profile-ID Workbench 为后续阶段 5 切片 |
 | 6 本地交付 | 统一启动、安装、真实数据库验证和交接 | 不引入 SaaS/多租户 |
 
 ## 3. 系统架构与请求链路
