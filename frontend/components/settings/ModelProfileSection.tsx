@@ -19,6 +19,11 @@ import {
 } from "../../lib/profile-selection";
 import { ModelProfileDeleteDialog } from "./ModelProfileDeleteDialog";
 import { ModelProfileList } from "./ModelProfileList";
+import {
+  deleteModelProfileFromState,
+  loadModelProfileState,
+  type ModelProfileState,
+} from "./model-profile-coordinator";
 
 interface ModelProfileSectionProps {
   onToast: (message: string, type?: "success" | "info" | "error") => void;
@@ -33,6 +38,21 @@ function isMissingProfileError(error: unknown): boolean {
   );
 }
 
+const loadDependencies = {
+  removeLegacyConfig: removeLegacyModelConfig,
+  listProfiles: listModelProfiles,
+  reconcileSelectedId: reconcileSelectedModelProfileId,
+};
+
+const deleteDependencies = {
+  deleteProfile: deleteModelProfile,
+  listProfiles: listModelProfiles,
+  getSelectedId: getSelectedModelProfileId,
+  clearSelectedId: clearSelectedModelProfileId,
+  reconcileSelectedId: reconcileSelectedModelProfileId,
+  isMissingError: isMissingProfileError,
+};
+
 export function ModelProfileSection({
   onToast,
   onProfileCountChange,
@@ -45,16 +65,16 @@ export function ModelProfileSection({
     useState<ModelProfileResponse | null>(null);
   const [deleteSubmitting, setDeleteSubmitting] = useState(false);
 
-  const handleProfilesLoaded = useCallback((nextProfiles: ModelProfileResponse[]) => {
-    const nextSelectedId = reconcileSelectedModelProfileId(
-      nextProfiles.map((profile) => profile.id),
-    );
-    setProfiles(nextProfiles);
-    setSelectedId(nextSelectedId);
-    setLoadFailed(false);
-    setLoading(false);
-    onProfileCountChange(nextProfiles.length);
-  }, [onProfileCountChange]);
+  const handleProfilesLoaded = useCallback(
+    (state: ModelProfileState) => {
+      setProfiles(state.profiles);
+      setSelectedId(state.selectedId);
+      setLoadFailed(false);
+      setLoading(false);
+      onProfileCountChange(state.profileCount);
+    },
+    [onProfileCountChange],
+  );
 
   const handleProfilesLoadFailure = useCallback(() => {
     setProfiles([]);
@@ -65,18 +85,17 @@ export function ModelProfileSection({
 
   const refreshProfiles = useCallback(async () => {
     try {
-      handleProfilesLoaded(await listModelProfiles());
+      handleProfilesLoaded(await loadModelProfileState(loadDependencies));
     } catch {
       handleProfilesLoadFailure();
     }
   }, [handleProfilesLoadFailure, handleProfilesLoaded]);
 
   useEffect(() => {
-    removeLegacyModelConfig();
     let active = true;
-    listModelProfiles().then(
-      (nextProfiles) => {
-        if (active) handleProfilesLoaded(nextProfiles);
+    loadModelProfileState(loadDependencies).then(
+      (state) => {
+        if (active) handleProfilesLoaded(state);
       },
       () => {
         if (active) handleProfilesLoadFailure();
@@ -96,12 +115,9 @@ export function ModelProfileSection({
     [onToast],
   );
 
-  const handleEdit = useCallback(
-    () => {
-      onToast("模型编辑表单将在下一步提供", "info");
-    },
-    [onToast],
-  );
+  const handleEdit = useCallback(() => {
+    onToast("模型编辑表单将在下一步提供", "info");
+  }, [onToast]);
 
   const handleAdd = useCallback(() => {
     onToast("模型创建表单将在下一步提供", "info");
@@ -118,34 +134,29 @@ export function ModelProfileSection({
 
     setDeleteSubmitting(true);
     try {
-      await deleteModelProfile(deleteTarget.id);
-      if (deleteTarget.id === getSelectedModelProfileId()) {
-        clearSelectedModelProfileId();
-        setSelectedId(null);
-      }
+      const result = await deleteModelProfileFromState(
+        profiles,
+        deleteTarget.id,
+        deleteDependencies,
+      );
+      handleProfilesLoaded(result);
       setDeleteTarget(null);
-      onToast("模型 Profile 已删除", "success");
-      await refreshProfiles();
-    } catch (error) {
-      if (isMissingProfileError(error)) {
-        if (deleteTarget.id === getSelectedModelProfileId()) {
-          clearSelectedModelProfileId();
-          setSelectedId(null);
-        }
-        setDeleteTarget(null);
+      if (result.refreshed) {
         onToast("模型 Profile 已不存在，列表已刷新", "info");
-        await refreshProfiles();
       } else {
-        onToast("删除模型 Profile 失败，请重试", "error");
+        onToast("模型 Profile 已删除", "success");
       }
+    } catch {
+      onToast("删除模型 Profile 失败，请重试", "error");
     } finally {
       setDeleteSubmitting(false);
     }
   }, [
     deleteSubmitting,
     deleteTarget,
+    handleProfilesLoaded,
     onToast,
-    refreshProfiles,
+    profiles,
   ]);
 
   return (

@@ -5,6 +5,10 @@ import { Cpu, Database, Info } from "lucide-react";
 import { ModelProfileSection } from "./ModelProfileSection";
 import { DatabaseConfigSection } from "./DatabaseConfigSection";
 import { AboutSection } from "./AboutSection";
+import {
+  modelProfileCountStatus,
+  renderActiveSection,
+} from "./model-profile-coordinator";
 import { getDbConfig, isDbConfigured } from "@/lib/datasource-config";
 
 type SectionId = "models" | "database" | "about";
@@ -64,9 +68,7 @@ export function SettingsLayout() {
 
   const statusFor = (id: SectionId): string | null => {
     if (id === "models") {
-      if (modelProfileCount === undefined) return "加载中";
-      if (modelProfileCount === null) return "不可用";
-      return modelProfileCount > 0 ? "已配置" : "未配置";
+      return modelProfileCountStatus(modelProfileCount);
     }
     if (id === "database") return dbConfigured ? "已配置" : "未配置";
     return null;
@@ -194,7 +196,7 @@ export function SettingsLayout() {
           </nav>
 
           {/* Shared desktop/mobile content instance. */}
-          {renderSection(activeSection)}
+          {renderActiveSection(activeSection, renderSection)}
         </div>
       </div>
     </div>
