@@ -9,6 +9,8 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Response, status
 from app.api.bootstrap import ApplicationServices, RequestIdentity
 from app.api.dependencies import authenticate, services_from_request
 from app.api.profile_models import (
+    ModelConnectionTestRequest,
+    ModelConnectionTestResponse,
     ModelProfileCreate,
     ProfileErrorResponse,
     ModelProfileReplace,
@@ -19,6 +21,7 @@ from app.api.routes._profile_common import (
     profile_service_unavailable,
 )
 from app.local.model_service import ModelProfileService
+from app.local.model_runtime import ModelRuntimeService
 from app.local.profile_models import PROFILE_ID_PATTERN
 
 model_profiles_router = APIRouter(prefix="/api/v1/local/models")
@@ -47,6 +50,13 @@ def _service(services: ApplicationServices) -> ModelProfileService:
     return service
 
 
+def _runtime_service(services: ApplicationServices) -> ModelRuntimeService:
+    service = services.model_runtime_service
+    if service is None:
+        raise profile_service_unavailable()
+    return service  # type: ignore[return-value]
+
+
 @model_profiles_router.post(
     "",
     response_model=ModelProfileResponse,
@@ -71,6 +81,32 @@ async def create_model_profile(
         return ModelProfileResponse.from_view(view)
     except Exception as error:
         raise profile_http_error(error, operation="create_model") from None
+
+
+@model_profiles_router.post(
+    "/test",
+    response_model=ModelConnectionTestResponse,
+    responses={
+        422: {"model": ProfileErrorResponse},
+        500: {"model": ProfileErrorResponse},
+        503: {"model": ProfileErrorResponse},
+        504: {"model": ProfileErrorResponse},
+    },
+)
+async def test_model_connection(
+    request: ModelConnectionTestRequest,
+    services: Annotated[ApplicationServices, Depends(services_from_request)],
+    identity: Annotated[RequestIdentity, Depends(authenticate)],
+) -> ModelConnectionTestResponse:
+    del identity
+    try:
+        result = _runtime_service(services).test_connection(
+            request.to_profile(),
+            request.to_credentials(),
+        )
+        return ModelConnectionTestResponse.from_result(result)
+    except Exception as error:
+        raise profile_http_error(error, operation="test_model") from None
 
 
 @model_profiles_router.get(

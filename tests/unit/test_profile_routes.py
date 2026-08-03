@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import Mock
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.api import ApplicationServices, create_app
@@ -21,6 +22,10 @@ from app.local.credential_store import InMemoryCredentialStore
 from app.local.datasource_service import DatasourceProfileService
 from app.local.datasource_runtime import DatasourceRuntimeError
 from app.local.model_service import ModelProfileService
+from app.local.model_runtime import (
+    ModelConnectionTestResult,
+    ModelRuntimeError,
+)
 from app.local.profile_store import LocalProfileStore
 from app.workflow import WorkflowContext
 from tests.routing_support import single_provider_test_routing
@@ -117,11 +122,25 @@ class _RuntimeRegistry:
         return object()
 
 
+class _ModelRuntimeService:
+    def __init__(self) -> None:
+        self.calls = []
+        self.result = ModelConnectionTestResult()
+        self.error: Exception | None = None
+
+    def test_connection(self, profile, credentials):  # type: ignore[no-untyped-def]
+        self.calls.append((profile, credentials))
+        if self.error is not None:
+            raise self.error
+        return self.result
+
+
 def _services(tmp_path: Path) -> ApplicationServices:
     store = LocalProfileStore(tmp_path / "config.db")
     credentials = InMemoryCredentialStore()
     runtime_service = _DatasourceRuntimeService()
     runtime_registry = _RuntimeRegistry()
+    model_runtime_service = _ModelRuntimeService()
     model_routing = single_provider_test_routing(Mock())
 
     def runner(*args, **kwargs):  # type: ignore[no-untyped-def]
@@ -147,6 +166,7 @@ def _services(tmp_path: Path) -> ApplicationServices:
         model_routing=model_routing,
         datasource_runtime_service=runtime_service,
         runtime_registry=runtime_registry,
+        model_runtime_service=model_runtime_service,
     )
 
 
@@ -175,6 +195,105 @@ def _datasource_payload() -> dict[str, object]:
         "allowed_schemas": ["public"],
         "allowed_tables": ["public.orders"],
         "password": "stage2-database-secret",
+    }
+
+
+def _model_test_payload() -> dict[str, object]:
+    return {
+        "provider_type": "openai_compatible",
+        "base_url": "http://localhost:11434/v1",
+        "model_name": "qwen2.5-coder",
+    }
+
+
+def test_model_connection_test_is_transient_and_supports_no_auth(
+    tmp_path: Path,
+) -> None:
+    services = _services(tmp_path)
+
+    with TestClient(create_app(services=services)) as client:
+        response = client.post(
+            "/api/v1/local/models/test",
+            json=_model_test_payload(),
+        )
+        profiles = client.get("/api/v1/local/models")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "generation": "connected",
+        "embedding": "not_configured",
+        "embedding_error": None,
+    }
+    assert profiles.json() == []
+    assert services.credential_store is not None
+    assert not services.credential_store.has_model("connection-test")
+    assert len(services.model_runtime_service.calls) == 1
+
+
+def test_model_connection_test_reports_embedding_degradation(
+    tmp_path: Path,
+) -> None:
+    services = _services(tmp_path)
+    services.model_runtime_service.result = ModelConnectionTestResult(
+        embedding_status="unavailable",
+        embedding_error_code="EMBEDDING_TIMEOUT",
+    )
+    payload = _model_test_payload()
+    payload.update(
+        embedding_base_url="http://localhost:11434/v1",
+        embedding_model="nomic-embed-text",
+        embedding_dimension=768,
+    )
+
+    with TestClient(create_app(services=services)) as client:
+        response = client.post(
+            "/api/v1/local/models/test",
+            json=payload,
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "generation": "connected",
+        "embedding": "unavailable",
+        "embedding_error": {
+            "code": "EMBEDDING_TIMEOUT",
+            "message": "Embedding is unavailable; BM25-only mode remains available.",
+        },
+    }
+
+
+@pytest.mark.parametrize(
+    ("status_code", "code"),
+    [
+        (422, "MODEL_TEST_INVALID_OUTPUT"),
+        (503, "MODEL_CONNECTION_FAILED"),
+        (504, "MODEL_TEST_TIMEOUT"),
+    ],
+)
+def test_model_connection_test_returns_stable_generation_errors(
+    tmp_path: Path,
+    status_code: int,
+    code: str,
+) -> None:
+    services = _services(tmp_path)
+    services.model_runtime_service.error = ModelRuntimeError(
+        code=code,
+        public_message="Public model test failure.",
+        status_code=status_code,
+    )
+
+    with TestClient(create_app(services=services)) as client:
+        response = client.post(
+            "/api/v1/local/models/test",
+            json=_model_test_payload(),
+        )
+
+    assert response.status_code == status_code
+    assert response.json() == {
+        "detail": {
+            "code": code,
+            "message": "Public model test failure.",
+        }
     }
 
 
@@ -546,6 +665,7 @@ def test_openapi_marks_credentials_write_only_and_registers_crud_paths(
         "put",
         "delete",
     }
+    assert set(schema["paths"]["/api/v1/local/models/test"]) == {"post"}
     assert set(schema["paths"]["/api/v1/local/datasources"]) == {
         "get",
         "post",
@@ -566,6 +686,13 @@ def test_openapi_marks_credentials_write_only_and_registers_crud_paths(
         "DatasourceProfileCreate"
     ]
     assert model_create["properties"]["api_key"]["writeOnly"] is True
+    model_test = schema["components"]["schemas"][
+        "ModelConnectionTestRequest"
+    ]
+    assert model_test["properties"]["api_key"]["writeOnly"] is True
+    assert model_test["properties"]["embedding_api_key"][
+        "writeOnly"
+    ] is True
     assert datasource_create["properties"]["password"]["writeOnly"] is True
     datasource_test = schema["components"]["schemas"][
         "DatasourceConnectionTestRequest"
@@ -574,6 +701,11 @@ def test_openapi_marks_credentials_write_only_and_registers_crud_paths(
     assert "api_key" not in schema["components"]["schemas"][
         "ModelProfileResponse"
     ]["properties"]
+    model_test_response = schema["components"]["schemas"][
+        "ModelConnectionTestResponse"
+    ]["properties"]
+    assert "api_key" not in model_test_response
+    assert "base_url" not in model_test_response
     assert "password" not in schema["components"]["schemas"][
         "DatasourceProfileResponse"
     ]["properties"]
@@ -584,6 +716,13 @@ def test_openapi_marks_credentials_write_only_and_registers_crud_paths(
         "deprecated"
     ] is True
     expected_responses = {
+        ("/api/v1/local/models/test", "post"): {
+            "200",
+            "422",
+            "500",
+            "503",
+            "504",
+        },
         ("/api/v1/local/models", "post"): {"201", "409", "422", "500", "503"},
         ("/api/v1/local/models", "get"): {"200", "500", "503"},
         ("/api/v1/local/models/{profile_id}", "get"): {

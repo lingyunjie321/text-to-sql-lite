@@ -9,6 +9,7 @@ from fastapi import HTTPException
 from app.local.datasource_service import DatasourceProfileNotFoundError
 from app.local.datasource_runtime import DatasourceRuntimeError
 from app.local.model_service import ModelProfileNotFoundError
+from app.local.model_runtime import ModelRuntimeError
 from app.local.profile_store import (
     ProfileAlreadyExistsError,
     ProfileStoreError,
@@ -49,6 +50,12 @@ def profile_http_error(
             "Profile storage is unavailable.",
         )
     if isinstance(error, DatasourceRuntimeError):
+        return _http_error(
+            error.status_code,
+            error.code,
+            error.public_message,
+        )
+    if isinstance(error, ModelRuntimeError):
         return _http_error(
             error.status_code,
             error.code,
