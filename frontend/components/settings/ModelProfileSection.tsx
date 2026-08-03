@@ -160,7 +160,7 @@ export function ModelProfileSection({
   ]);
 
   return (
-    <section>
+    <section data-settings-section="model-profiles">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h2 className="text-xl font-semibold text-[var(--color-text-primary)]">

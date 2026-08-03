@@ -4,7 +4,6 @@ import {
   deleteModelProfileFromState,
   loadModelProfileState,
   modelProfileCountStatus,
-  renderActiveSection,
 } from "./model-profile-coordinator";
 import type { ModelProfileResponse } from "../../lib/model-profiles";
 
@@ -147,15 +146,5 @@ describe("settings state helpers", () => {
     expect(modelProfileCountStatus(null)).toBe("不可用");
     expect(modelProfileCountStatus(0)).toBe("未配置");
     expect(modelProfileCountStatus(2)).toBe("已配置");
-  });
-
-  it("renders only the active settings section once", () => {
-    const renderSection = vi.fn((section: string) => `${section}-content`);
-
-    expect(renderActiveSection("models", renderSection)).toBe(
-      "models-content",
-    );
-    expect(renderSection).toHaveBeenCalledOnce();
-    expect(renderSection).toHaveBeenCalledWith("models");
   });
 });

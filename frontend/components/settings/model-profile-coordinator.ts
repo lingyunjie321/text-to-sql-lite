@@ -86,10 +86,3 @@ export function modelProfileCountStatus(
   if (profileCount === null) return "不可用";
   return profileCount > 0 ? "已配置" : "未配置";
 }
-
-export function renderActiveSection<SectionId, Content>(
-  activeSection: SectionId,
-  renderSection: (section: SectionId) => Content,
-): Content {
-  return renderSection(activeSection);
-}

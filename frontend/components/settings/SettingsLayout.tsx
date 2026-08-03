@@ -5,10 +5,7 @@ import { Cpu, Database, Info } from "lucide-react";
 import { ModelProfileSection } from "./ModelProfileSection";
 import { DatabaseConfigSection } from "./DatabaseConfigSection";
 import { AboutSection } from "./AboutSection";
-import {
-  modelProfileCountStatus,
-  renderActiveSection,
-} from "./model-profile-coordinator";
+import { modelProfileCountStatus } from "./model-profile-coordinator";
 import { getDbConfig, isDbConfigured } from "@/lib/datasource-config";
 
 type SectionId = "models" | "database" | "about";
@@ -196,7 +193,7 @@ export function SettingsLayout() {
           </nav>
 
           {/* Shared desktop/mobile content instance. */}
-          {renderActiveSection(activeSection, renderSection)}
+          {renderSection(activeSection)}
         </div>
       </div>
     </div>
