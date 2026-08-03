@@ -4,7 +4,7 @@
 
 **Goal:** 将阶段 2 的 DatasourceProfile 接入可测试、可发现 metadata、可复用且严格受 allowlist 限制的 PostgreSQL/MySQL 动态运行时。
 
-**Architecture:** `DatasourceRuntimeService` 负责临时连接、catalog 发现和 allowlist 在线校验；`RuntimeRegistry` 懒加载并缓存原始 Connector 与仅供 Workflow 使用的 `ProfileScopedConnector` Context。受限 Connector 允许既有权限节点选择 Profile 内的非空 Schema 子集，但绝不允许扩大到 Profile 外。Profile Resolver 保留静态精确匹配兼容，其他 Profile 只能进入动态 Registry，任何失败都不得回退默认资源。
+**Architecture:** `DatasourceRuntimeService` 负责临时连接、catalog 发现和 allowlist 在线校验；metadata 使用独立临时原始 Connector，以便 allowlist 漂移后仍能重新发现结构。`RuntimeRegistry` 只为查询懒加载并缓存原始 Connector 与仅供 Workflow 使用的 `ProfileScopedConnector` Context。受限 Connector 允许既有权限节点选择 Profile 内的非空 Schema 子集，但绝不允许扩大到 Profile 外。Profile Resolver 保留静态精确匹配兼容，其他 Profile 只能进入动态 Registry，任何失败都不得回退默认资源。
 
 **Tech Stack:** Python 3.12、FastAPI 0.139.2、Pydantic 2、sqlite3、psycopg 3、PyMySQL 1.2.0、SQLGlot 30.13.0、pytest 9.1.1、Docker Compose、MySQL 8.4、Sakila。
 

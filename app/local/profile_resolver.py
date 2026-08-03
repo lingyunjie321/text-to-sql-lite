@@ -11,12 +11,14 @@ from app.local.datasource_service import (
     DatasourceProfileNotFoundError,
     DatasourceProfileService,
 )
+from app.local.datasource_runtime import DatasourceRuntimeError
 from app.local.model_service import (
     ModelProfileNotFoundError,
     ModelProfileService,
 )
 from app.local.profile_models import DatasourceProfile, ModelProfile
 from app.local.profile_store import ProfileStoreError
+from app.local.runtime_registry import RuntimeRegistry
 from app.workflow import WorkflowContext
 
 
@@ -41,12 +43,14 @@ class StaticProfileResolver:
         contexts: dict[str, WorkflowContext],
         active_model: ModelProfile | None,
         active_datasources: dict[str, DatasourceProfile],
+        runtime_registry: RuntimeRegistry | None = None,
     ) -> None:
         self._model_profiles = model_profiles
         self._datasource_profiles = datasource_profiles
         self._contexts = contexts
         self._active_model = active_model
         self._active_datasources = active_datasources
+        self._runtime_registry = runtime_registry
 
     def resolve(
         self,
@@ -83,12 +87,7 @@ class StaticProfileResolver:
             datasource_profile_id
         )
         if (
-            context is None
-            or active_datasource is None
-            or context.datasource_id != datasource_profile_id
-            or _datasource_identity(datasource)
-            != _datasource_identity(active_datasource)
-            or self._active_model is None
+            self._active_model is None
             or _model_identity(model) != _model_identity(self._active_model)
         ):
             raise ProfileResolutionError(
@@ -96,7 +95,34 @@ class StaticProfileResolver:
                 status_code=409,
                 message="The selected profiles are not active.",
             )
-        return context
+        if (
+            context is not None
+            and active_datasource is not None
+            and context.datasource_id == datasource_profile_id
+            and _datasource_identity(datasource)
+            == _datasource_identity(active_datasource)
+        ):
+            return context
+        if self._runtime_registry is None:
+            raise ProfileResolutionError(
+                code="PROFILE_RUNTIME_UNAVAILABLE",
+                status_code=409,
+                message="The selected profiles are not active.",
+            )
+        try:
+            return self._runtime_registry.get_or_create(datasource).context
+        except DatasourceRuntimeError as error:
+            raise ProfileResolutionError(
+                code=error.code,
+                status_code=error.status_code,
+                message=error.public_message,
+            ) from None
+        except Exception:
+            raise ProfileResolutionError(
+                code="DATASOURCE_RUNTIME_UNAVAILABLE",
+                status_code=503,
+                message="The datasource runtime is unavailable.",
+            ) from None
 
 
 def build_static_datasource_profile(

@@ -271,7 +271,7 @@ def test_openapi_exposes_only_the_specified_post_endpoint() -> None:
     schema = app.openapi()
 
     # POST /api/v1/text-to-sql 是核心契约；GET /health 与 GET /api/v1/config
-    # 是只读辅助端点；/local 路由只保存阶段 2 Profile 配置。
+    # 是只读辅助端点；/local 路由提供 Profile 与阶段 3 数据源能力。
     assert set(schema["paths"]) == {
         "/api/v1/text-to-sql",
         "/api/v1/config",
@@ -279,6 +279,8 @@ def test_openapi_exposes_only_the_specified_post_endpoint() -> None:
         "/api/v1/local/models/{profile_id}",
         "/api/v1/local/datasources",
         "/api/v1/local/datasources/{profile_id}",
+        "/api/v1/local/datasources/test",
+        "/api/v1/local/datasources/{profile_id}/metadata",
         "/health",
     }
     assert set(schema["paths"]["/health"]) == {"get"}
@@ -310,6 +312,7 @@ def test_openapi_exposes_only_the_specified_post_endpoint() -> None:
         "422",
         "500",
         "503",
+        "504",
     }
     assert operation["requestBody"]["required"] is True
     assert operation["responses"]["200"]["content"][
@@ -343,6 +346,26 @@ def test_config_uses_public_provider_metadata_without_private_settings() -> None
     assert response.json()["models"]["fallback"] == {
         "base_url": "unknown",
         "model_name": "unknown",
+    }
+
+
+def test_config_works_without_static_datasource_context() -> None:
+    provider = _PublicSummaryProvider()
+    configured = _config_services(provider)
+    services = ApplicationServices(
+        contexts={},
+        runner=lambda state, *, context: state,
+        model_routing=configured.model_routing,
+    )
+
+    with TestClient(create_app(services=services)) as client:
+        response = client.get("/api/v1/config")
+
+    assert response.status_code == 200
+    assert response.json()["datasources"] == {}
+    assert response.json()["models"]["simple"] == {
+        "base_url": provider.endpoint_summary,
+        "model_name": provider.model_id,
     }
 
 
@@ -603,7 +626,7 @@ def test_production_services_reject_non_pagila_datasource_before_open(
     )
     monkeypatch.setattr(
         api_bootstrap,
-        "load_database_settings",
+        "load_optional_database_settings",
         lambda: settings,
     )
     connector_factory = Mock()
@@ -642,7 +665,7 @@ def test_production_manifest_drift_fails_before_llm_credentials(
 
     monkeypatch.setattr(
         api_bootstrap,
-        "load_database_settings",
+        "load_optional_database_settings",
         lambda: settings,
     )
     monkeypatch.setattr(
@@ -722,7 +745,7 @@ def test_production_services_inject_versioned_embedding_runtime(
 
     monkeypatch.setattr(
         api_bootstrap,
-        "load_database_settings",
+        "load_optional_database_settings",
         lambda: settings,
     )
     monkeypatch.setattr(
@@ -826,7 +849,7 @@ def test_production_lifespan_fails_closed_without_credentials(
         with TestClient(create_app()):
             pass
 
-    assert captured.value.stage == "configuration"
+    assert captured.value.stage == "model"
 
 
 def test_importing_asgi_app_does_not_load_credentials() -> None:

@@ -17,10 +17,11 @@ def _model_summary(
     services: ApplicationServices,
     tier: str,
 ) -> dict[str, str]:
+    model_routing = services.model_routing
+    if model_routing is None:
+        return {"base_url": "unknown", "model_name": "unknown"}
     try:
-        provider = services.context.model_routing.provider_registry.resolve(
-            tier
-        ).provider
+        provider = model_routing.provider_registry.resolve(tier).provider
     except ValueError:
         return {"base_url": "unknown", "model_name": "unknown"}
     endpoint_summary = getattr(provider, "endpoint_summary", None)

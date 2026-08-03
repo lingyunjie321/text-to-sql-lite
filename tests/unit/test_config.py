@@ -8,6 +8,7 @@ from app.config import (
     DatabaseSettings,
     default_profile_database_path,
     load_database_settings,
+    load_optional_database_settings,
     load_datasources_from_file,
 )
 
@@ -89,6 +90,40 @@ def test_load_database_settings_reads_explicit_env_file(tmp_path: Path) -> None:
 
     assert settings.datasource_id == "pagila"
     assert "secret" not in repr(settings)
+
+
+def test_optional_database_settings_returns_none_when_not_configured(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for key in (
+        "TYPE",
+        "DATASOURCE_ID",
+        "DSN",
+        "HOST",
+        "PORT",
+        "DATABASE",
+        "USERNAME",
+        "PASSWORD",
+    ):
+        monkeypatch.delenv(f"TEXT_TO_SQL_DATABASE_{key}", raising=False)
+
+    settings = load_optional_database_settings(tmp_path / "missing.env")
+
+    assert settings is None
+
+
+def test_optional_database_settings_rejects_malformed_explicit_config(
+    tmp_path: Path,
+) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "TEXT_TO_SQL_DATABASE_DSN=not-a-postgresql-dsn\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValidationError):
+        load_optional_database_settings(env_file)
 
 
 def test_datasource_file_uses_explicit_allowlist_fields_and_config_package(

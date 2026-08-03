@@ -25,16 +25,24 @@ API
 
 ## 2. Metadata 发现与查询授权分离
 
-每个动态数据源运行时同时持有两个用途严格分离的 Connector 视图：
+metadata 与查询运行时使用两个用途严格分离的 Connector 路径：
 
 ```text
+metadata 接口
+└── 临时 raw_connector
+    └── 只执行服务端固定结构发现逻辑，完成后立即关闭
+
 DatasourceRuntime
 ├── raw_connector
-│   └── 只供服务端固定 metadata 发现逻辑使用
+│   └── 由 RuntimeRegistry 持有，不直接交给 API 或 Workflow
 └── scoped_context
     └── ProfileScopedConnector
-        └── 只接受 DatasourceProfile allowlist
+        └── 只接受 DatasourceProfile allowlist 内的授权子集
 ```
+
+metadata 不复用查询 Runtime，因此即使已保存 allowlist 因数据库结构变化而失效，
+用户仍可读取当前可发现结构并重新选择；查询 Runtime 仍会独立校验 allowlist 并
+fail closed。
 
 metadata 可发现范围不等于 AI 查询授权范围：
 

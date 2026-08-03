@@ -7,12 +7,21 @@ from typing import Literal, cast
 
 from pydantic import SecretStr
 
+from app.connectors.catalog import DiscoveredMetadata
 from app.local.credential_store import (
     DatasourceCredentials,
     InMemoryCredentialStore,
 )
+from app.local.datasource_runtime import (
+    DatasourceRuntimeError,
+    DatasourceRuntimeService,
+)
 from app.local.profile_models import DatasourceProfile
-from app.local.profile_store import LocalProfileStore
+from app.local.profile_store import (
+    LocalProfileStore,
+    ProfileAlreadyExistsError,
+)
+from app.local.runtime_registry import RuntimeRegistry
 
 _NOT_PROVIDED = object()
 
@@ -37,9 +46,14 @@ class DatasourceProfileService:
         self,
         store: LocalProfileStore,
         credentials: InMemoryCredentialStore,
+        *,
+        runtime_service: DatasourceRuntimeService,
+        runtime_registry: RuntimeRegistry,
     ) -> None:
         self._store = store
         self._credentials = credentials
+        self._runtime_service = runtime_service
+        self._runtime_registry = runtime_registry
 
     def create(
         self,
@@ -47,6 +61,11 @@ class DatasourceProfileService:
         *,
         password: SecretStr | None = None,
     ) -> DatasourceProfileView:
+        if self._store.get_datasource(profile.id) is not None:
+            raise ProfileAlreadyExistsError()
+        if password is None:
+            raise _credential_missing_error()
+        self._runtime_service.validate_profile(profile, password)
         created = self._store.create_datasource(profile)
         self._credentials.put_datasource(
             profile.id,
@@ -63,6 +82,18 @@ class DatasourceProfileService:
     def list(self) -> tuple[DatasourceProfileView, ...]:
         return tuple(
             self._view(profile) for profile in self._store.list_datasources()
+        )
+
+    def discover_metadata(self, profile_id: str) -> DiscoveredMetadata:
+        profile = self._store.get_datasource(profile_id)
+        if profile is None:
+            raise DatasourceProfileNotFoundError()
+        credentials = self._credentials.get_datasource(profile_id)
+        if credentials is None or credentials.password is None:
+            raise _credential_missing_error()
+        return self._runtime_service.discover_profile(
+            profile,
+            credentials.password,
         )
 
     def replace(
@@ -85,10 +116,36 @@ class DatasourceProfileService:
             or current.database != profile.database
             or current.username != profile.username
         )
-        if password is _NOT_PROVIDED:
-            next_password = None if identity_changed else existing.password
-        else:
-            next_password = password
+        allowlist_changed = (
+            current.allowed_schemas != profile.allowed_schemas
+            or current.allowed_tables != profile.allowed_tables
+        )
+        protected_configuration_changed = (
+            identity_changed or allowlist_changed
+        )
+
+        if password is None:
+            if protected_configuration_changed:
+                raise _credential_missing_error()
+            self._runtime_registry.invalidate(profile.id)
+            replaced = self._store.replace_datasource(profile)
+            self._credentials.discard_datasource(profile.id)
+            return self._view(replaced)
+
+        next_password = (
+            existing.password
+            if password is _NOT_PROVIDED
+            else cast(SecretStr, password)
+        )
+        should_validate = (
+            protected_configuration_changed
+            or password is not _NOT_PROVIDED
+        )
+        if should_validate:
+            if next_password is None:
+                raise _credential_missing_error()
+            self._runtime_service.validate_profile(profile, next_password)
+            self._runtime_registry.invalidate(profile.id)
 
         replaced = self._store.replace_datasource(profile)
         self._credentials.put_datasource(
@@ -100,6 +157,9 @@ class DatasourceProfileService:
         return self._view(replaced)
 
     def delete(self, profile_id: str) -> None:
+        if self._store.get_datasource(profile_id) is None:
+            raise DatasourceProfileNotFoundError()
+        self._runtime_registry.invalidate(profile_id)
         if not self._store.delete_datasource(profile_id):
             raise DatasourceProfileNotFoundError()
         self._credentials.discard_datasource(profile_id)
@@ -112,3 +172,11 @@ class DatasourceProfileService:
             else "missing"
         )
         return DatasourceProfileView(profile=profile, password_status=status)
+
+
+def _credential_missing_error() -> DatasourceRuntimeError:
+    return DatasourceRuntimeError(
+        code="DATASOURCE_CREDENTIAL_MISSING",
+        public_message="The datasource password is not available.",
+        status_code=409,
+    )

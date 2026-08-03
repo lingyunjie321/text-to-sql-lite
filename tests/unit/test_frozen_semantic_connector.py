@@ -90,6 +90,8 @@ def _manifest():
 
 
 class Delegate:
+    dialect_name = "postgres"
+
     def __init__(self) -> None:
         self.execute_calls = 0
         self.execute_timeouts: list[float | None] = []
@@ -162,6 +164,12 @@ def test_wrapper_filters_semantics_to_request_metadata_scope() -> None:
     assert asset.tables[0].columns[0].aliases == ("retired",)
     assert owner.tables[0].columns[0].aliases == ()
     assert "asset" not in owner.schema_version
+
+
+def test_wrapper_exposes_delegate_dialect() -> None:
+    wrapper = FrozenSemanticConnector(Delegate(), _manifest())
+
+    assert wrapper.dialect_name == "postgres"
 
 
 def test_wrapper_rejects_delegate_metadata_outside_request_scope() -> None:

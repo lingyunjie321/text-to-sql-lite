@@ -7,6 +7,7 @@ import logging
 from fastapi import HTTPException
 
 from app.local.datasource_service import DatasourceProfileNotFoundError
+from app.local.datasource_runtime import DatasourceRuntimeError
 from app.local.model_service import ModelProfileNotFoundError
 from app.local.profile_store import (
     ProfileAlreadyExistsError,
@@ -46,6 +47,12 @@ def profile_http_error(
             503,
             "PROFILE_STORE_UNAVAILABLE",
             "Profile storage is unavailable.",
+        )
+    if isinstance(error, DatasourceRuntimeError):
+        return _http_error(
+            error.status_code,
+            error.code,
+            error.public_message,
         )
     logger.warning(
         "api_profile_unexpected_error",

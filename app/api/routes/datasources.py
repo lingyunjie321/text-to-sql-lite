@@ -7,6 +7,11 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Path, Response, status
 
 from app.api.bootstrap import ApplicationServices, RequestIdentity
+from app.api.datasource_models import (
+    DatasourceConnectionTestRequest,
+    DatasourceConnectionTestResponse,
+    DatasourceMetadataResponse,
+)
 from app.api.dependencies import authenticate, services_from_request
 from app.api.profile_models import (
     DatasourceProfileCreate,
@@ -18,6 +23,7 @@ from app.api.routes._profile_common import (
     profile_http_error,
     profile_service_unavailable,
 )
+from app.connectors.catalog import MetadataLimits
 from app.local.datasource_service import DatasourceProfileService
 from app.local.profile_models import PROFILE_ID_PATTERN
 
@@ -47,12 +53,48 @@ def _service(services: ApplicationServices) -> DatasourceProfileService:
     return service
 
 
+def _runtime_service(services: ApplicationServices):
+    service = services.datasource_runtime_service
+    if service is None:
+        raise profile_service_unavailable()
+    return service
+
+
+@datasource_profiles_router.post(
+    "/test",
+    response_model=DatasourceConnectionTestResponse,
+    responses={
+        409: {"model": ProfileErrorResponse},
+        504: {"model": ProfileErrorResponse},
+        **_STORE_ERROR_RESPONSES,
+    },
+)
+async def test_datasource_connection(
+    request: DatasourceConnectionTestRequest,
+    services: Annotated[ApplicationServices, Depends(services_from_request)],
+    identity: Annotated[RequestIdentity, Depends(authenticate)],
+) -> DatasourceConnectionTestResponse:
+    del identity
+    try:
+        discovered = _runtime_service(services).test_connection(
+            request.to_config(),
+            request.password,
+        )
+        return DatasourceConnectionTestResponse.from_discovered(
+            discovered,
+            limits=MetadataLimits(),
+        )
+    except Exception as error:
+        raise profile_http_error(error, operation="test_datasource") from None
+
+
 @datasource_profiles_router.post(
     "",
     response_model=DatasourceProfileResponse,
     status_code=status.HTTP_201_CREATED,
     responses={
         409: {"model": ProfileErrorResponse},
+        504: {"model": ProfileErrorResponse},
         **_STORE_ERROR_RESPONSES,
     },
 )
@@ -110,11 +152,39 @@ async def get_datasource_profile(
         raise profile_http_error(error, operation="get_datasource") from None
 
 
+@datasource_profiles_router.get(
+    "/{profile_id}/metadata",
+    response_model=DatasourceMetadataResponse,
+    responses={
+        404: {"model": ProfileErrorResponse},
+        409: {"model": ProfileErrorResponse},
+        504: {"model": ProfileErrorResponse},
+        **_STORE_ERROR_RESPONSES,
+    },
+)
+async def get_datasource_metadata(
+    profile_id: ProfileId,
+    services: Annotated[ApplicationServices, Depends(services_from_request)],
+    identity: Annotated[RequestIdentity, Depends(authenticate)],
+) -> DatasourceMetadataResponse:
+    del identity
+    try:
+        discovered = _service(services).discover_metadata(profile_id)
+        return DatasourceMetadataResponse.from_discovered(
+            profile_id,
+            discovered,
+            limits=MetadataLimits(),
+        )
+    except Exception as error:
+        raise profile_http_error(error, operation="get_metadata") from None
+
+
 @datasource_profiles_router.put(
     "/{profile_id}",
     response_model=DatasourceProfileResponse,
     responses={
         409: {"model": ProfileErrorResponse},
+        504: {"model": ProfileErrorResponse},
         **_ITEM_ERROR_RESPONSES,
     },
 )

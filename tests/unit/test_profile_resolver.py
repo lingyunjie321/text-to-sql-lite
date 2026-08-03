@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
+from pydantic import SecretStr
 
 from app.config import DatabaseSettings, LLMRouteSettings, LLMSettings
 from app.local.credential_store import InMemoryCredentialStore
@@ -17,6 +19,7 @@ from app.local.profile_resolver import (
     build_static_model_profile,
 )
 from app.local.profile_store import LocalProfileStore
+from app.local.datasource_runtime import DatasourceRuntimeError
 from app.workflow import WorkflowContext
 from tests.routing_support import single_provider_test_routing
 
@@ -55,19 +58,48 @@ def _context() -> WorkflowContext:
     )
 
 
+class _RuntimeService:
+    def validate_profile(self, profile, password):  # type: ignore[no-untyped-def]
+        del profile, password
+
+
+class _RuntimeRegistry:
+    def __init__(self) -> None:
+        self.get_calls: list[DatasourceProfile] = []
+        self.invalidated: list[str] = []
+        self.error: Exception | None = None
+        self.context = _context()
+
+    def get_or_create(self, profile):  # type: ignore[no-untyped-def]
+        self.get_calls.append(profile)
+        if self.error is not None:
+            raise self.error
+        return SimpleNamespace(context=self.context)
+
+    def invalidate(self, profile_id: str) -> None:
+        self.invalidated.append(profile_id)
+
+
 def _resolver(
     tmp_path: Path,
 ) -> tuple[
     StaticProfileResolver,
     ModelProfileService,
     DatasourceProfileService,
+    _RuntimeRegistry,
 ]:
     store = LocalProfileStore(tmp_path / "config.db")
     credentials = InMemoryCredentialStore()
     models = ModelProfileService(store, credentials)
-    datasources = DatasourceProfileService(store, credentials)
+    runtime_registry = _RuntimeRegistry()
+    datasources = DatasourceProfileService(
+        store,
+        credentials,
+        runtime_service=_RuntimeService(),
+        runtime_registry=runtime_registry,
+    )
     models.create(_stored_model())
-    datasources.create(_stored_datasource())
+    datasources.create(_stored_datasource(), password=SecretStr("secret"))
     resolver = StaticProfileResolver(
         model_profiles=models,
         datasource_profiles=datasources,
@@ -92,14 +124,15 @@ def _resolver(
                 allowed_tables=("public.film",),
             )
         },
+        runtime_registry=runtime_registry,
     )
-    return resolver, models, datasources
+    return resolver, models, datasources, runtime_registry
 
 
 def test_resolver_returns_only_explicitly_matching_static_context(
     tmp_path: Path,
 ) -> None:
-    resolver, _, _ = _resolver(tmp_path)
+    resolver, _, _, runtime_registry = _resolver(tmp_path)
 
     context = resolver.resolve(
         datasource_profile_id="pagila",
@@ -107,12 +140,13 @@ def test_resolver_returns_only_explicitly_matching_static_context(
     )
 
     assert context.datasource_id == "pagila"
+    assert runtime_registry.get_calls == []
 
 
 def test_resolver_returns_specific_not_found_error_without_echoing_id(
     tmp_path: Path,
 ) -> None:
-    resolver, _, _ = _resolver(tmp_path)
+    resolver, _, _, _ = _resolver(tmp_path)
 
     with pytest.raises(ProfileResolutionError) as exc_info:
         resolver.resolve(
@@ -125,23 +159,27 @@ def test_resolver_returns_specific_not_found_error_without_echoing_id(
     assert "missing-database" not in str(exc_info.value)
 
 
-@pytest.mark.parametrize(
-    ("profile_kind", "expected_code"),
-    [
-        ("datasource", "PROFILE_RUNTIME_UNAVAILABLE"),
-        ("model", "PROFILE_RUNTIME_UNAVAILABLE"),
-    ],
-)
-def test_resolver_rejects_profiles_that_do_not_match_static_runtime(
+def test_resolver_uses_dynamic_runtime_for_non_static_datasource(
     tmp_path: Path,
-    profile_kind: str,
-    expected_code: str,
 ) -> None:
-    resolver, models, datasources = _resolver(tmp_path)
-    if profile_kind == "datasource":
-        datasources.replace(_stored_datasource(host="localhost"))
-    else:
-        models.replace(_stored_model(base_url="https://other.example.test/v1"))
+    resolver, _, datasources, runtime_registry = _resolver(tmp_path)
+    changed = _stored_datasource(host="localhost")
+    datasources.replace(changed)
+
+    context = resolver.resolve(
+        datasource_profile_id="pagila",
+        model_profile_id="local-model",
+    )
+
+    assert context is runtime_registry.context
+    assert runtime_registry.get_calls == [changed]
+
+
+def test_resolver_rejects_model_that_does_not_match_static_runtime(
+    tmp_path: Path,
+) -> None:
+    resolver, models, _, runtime_registry = _resolver(tmp_path)
+    models.replace(_stored_model(base_url="https://other.example.test/v1"))
 
     with pytest.raises(ProfileResolutionError) as exc_info:
         resolver.resolve(
@@ -149,8 +187,30 @@ def test_resolver_rejects_profiles_that_do_not_match_static_runtime(
             model_profile_id="local-model",
         )
 
-    assert exc_info.value.code == expected_code
+    assert exc_info.value.code == "PROFILE_RUNTIME_UNAVAILABLE"
     assert exc_info.value.status_code == 409
+    assert runtime_registry.get_calls == []
+
+
+def test_dynamic_runtime_error_is_preserved_without_static_fallback(
+    tmp_path: Path,
+) -> None:
+    resolver, _, datasources, runtime_registry = _resolver(tmp_path)
+    datasources.replace(_stored_datasource(host="localhost"))
+    runtime_registry.error = DatasourceRuntimeError(
+        code="DATASOURCE_CONNECTION_FAILED",
+        public_message="The datasource connection failed.",
+        status_code=503,
+    )
+
+    with pytest.raises(ProfileResolutionError) as exc_info:
+        resolver.resolve(
+            datasource_profile_id="pagila",
+            model_profile_id="local-model",
+        )
+
+    assert exc_info.value.code == "DATASOURCE_CONNECTION_FAILED"
+    assert exc_info.value.status_code == 503
 
 
 def test_static_datasource_profile_parses_postgres_dsn_without_password() -> None:

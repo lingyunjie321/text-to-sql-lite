@@ -111,13 +111,18 @@ def _configure(
     model_factory: object | None = None,
     embedding_builder: Callable[[object], object] | None = None,
     context_factory: _ContextFactory | None = None,
+    static_database_configured: bool = True,
 ) -> object:
     from app.api import bootstrap
 
     monkeypatch.setattr(
         bootstrap,
-        "load_database_settings",
-        lambda: _settings(primary_id),
+        "load_optional_database_settings",
+        lambda: (
+            _settings(primary_id)
+            if static_database_configured
+            else None
+        ),
     )
     monkeypatch.setattr(
         bootstrap,
@@ -165,6 +170,26 @@ def _configure(
         lambda: object(),
     )
     return bootstrap.ApplicationBootstrap()
+
+
+def test_application_can_start_without_static_database_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bootstrap = _configure(
+        monkeypatch,
+        connectors=[],
+        static_database_configured=False,
+    )
+
+    services = bootstrap.build()  # type: ignore[attr-defined]
+
+    assert services.contexts == {}
+    assert services.model_routing is not None
+    assert services.datasource_profiles is not None
+    assert services.datasource_runtime_service is not None
+    assert services.runtime_registry is not None
+    assert services.close is not None
+    services.close()
 
 
 def test_constructor_failure_has_no_connector_to_close(

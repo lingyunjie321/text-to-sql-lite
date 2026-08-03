@@ -25,6 +25,13 @@ IdFactory = Callable[[], str]
 logger = logging.getLogger(__name__)
 
 
+def _connector_dialect(connector: object) -> str:
+    dialect_name = getattr(connector, "dialect_name", None)
+    if dialect_name in {"postgres", "mysql"}:
+        return dialect_name
+    return "postgres"
+
+
 def _error_response(
     *,
     request_id: str,
@@ -70,6 +77,7 @@ def create_query_router(id_factory: IdFactory) -> APIRouter:
             409: {"model": QueryResponse},
             500: {"model": QueryResponse},
             503: {"model": QueryResponse},
+            504: {"model": QueryResponse},
         },
     )
     async def query_text_to_sql(
@@ -126,6 +134,7 @@ def create_query_router(id_factory: IdFactory) -> APIRouter:
                 question=query.question,
                 datasource_id=resolved_datasource_id,
                 requested_schemas=query.schemas,
+                dialect=_connector_dialect(context.connector),
             )
             terminal_state = await asyncio.to_thread(
                 active_services.runner,

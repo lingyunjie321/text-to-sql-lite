@@ -138,6 +138,16 @@ class DatasourceRuntimeService:
         finally:
             _close_connector(connector)
 
+    def discover_profile(
+        self,
+        profile: DatasourceProfile,
+        password: SecretStr | None,
+    ) -> DiscoveredMetadata:
+        return self.test_connection(
+            DatasourceConnectionConfig.from_profile(profile),
+            password,
+        )
+
     def build_runtime(
         self,
         profile: DatasourceProfile,

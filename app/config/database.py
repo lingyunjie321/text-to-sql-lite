@@ -85,8 +85,46 @@ class DatabaseSettings(BaseSettings):
         return self
 
 
+class _DatabaseConfigurationMarker(BaseSettings):
+    """仅判断用户是否显式提供过任一静态数据库配置。"""
+
+    model_config = SettingsConfigDict(
+        env_prefix="TEXT_TO_SQL_DATABASE_",
+        extra="ignore",
+    )
+
+    type: str | None = None
+    datasource_id: str | None = None
+    dsn: SecretStr | None = None
+    host: str | None = None
+    port: str | None = None
+    database: str | None = None
+    username: str | None = None
+    password: SecretStr | None = None
+    min_pool_size: str | None = None
+    max_pool_size: str | None = None
+    pool_timeout_seconds: str | None = None
+    statement_timeout_seconds: str | None = None
+    max_result_rows: str | None = None
+    connection_retry_count: str | None = None
+
+
 def load_database_settings(env_file: Path | None = None) -> DatabaseSettings:
     return DatabaseSettings(_env_file=_resolve_env_file(env_file))
+
+
+def load_optional_database_settings(
+    env_file: Path | None = None,
+) -> DatabaseSettings | None:
+    """无静态数据库配置时返回 ``None``；显式坏配置仍抛校验错误。"""
+    resolved_env_file = _resolve_env_file(env_file)
+    marker = _DatabaseConfigurationMarker(_env_file=resolved_env_file)
+    if all(
+        value is None
+        for value in marker.model_dump().values()
+    ):
+        return None
+    return DatabaseSettings(_env_file=resolved_env_file)
 
 
 class DatasourceAllowList(BaseSettings):

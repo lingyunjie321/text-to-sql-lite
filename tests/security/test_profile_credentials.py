@@ -21,9 +21,21 @@ from app.workflow import WorkflowContext
 from tests.routing_support import single_provider_test_routing
 
 
+class _DatasourceRuntimeService:
+    def validate_profile(self, profile, password):  # type: ignore[no-untyped-def]
+        del profile, password
+
+
+class _RuntimeRegistry:
+    def invalidate(self, profile_id: str) -> None:
+        del profile_id
+
+
 def _services(tmp_path: Path) -> ApplicationServices:
     store = LocalProfileStore(tmp_path / "config.db")
     credentials = InMemoryCredentialStore()
+    runtime_service = _DatasourceRuntimeService()
+    runtime_registry = _RuntimeRegistry()
     return ApplicationServices(
         context=WorkflowContext(
             connector=Mock(),
@@ -34,8 +46,15 @@ def _services(tmp_path: Path) -> ApplicationServices:
         ),
         runner=lambda state, *, context: state,
         model_profiles=ModelProfileService(store, credentials),
-        datasource_profiles=DatasourceProfileService(store, credentials),
+        datasource_profiles=DatasourceProfileService(
+            store,
+            credentials,
+            runtime_service=runtime_service,
+            runtime_registry=runtime_registry,
+        ),
         credential_store=credentials,
+        datasource_runtime_service=runtime_service,
+        runtime_registry=runtime_registry,
     )
 
 

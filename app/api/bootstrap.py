@@ -8,11 +8,11 @@ from typing import Literal, Protocol
 
 from app.config import (
     DatabaseSettings,
-    load_database_settings,
     load_datasource_allowlist,
     load_datasources_from_file,
     load_embedding_settings,
     load_llm_route_settings,
+    load_optional_database_settings,
 )
 from app.connectors.base import DatabaseConnector
 from app.connectors.errors import DatabaseConnectorError
@@ -30,6 +30,7 @@ from app.connectors.view_semantics_lock import (
 from app.generation.factory import ModelProviderFactory
 from app.local.credential_store import InMemoryCredentialStore
 from app.local.datasource_service import DatasourceProfileService
+from app.local.datasource_runtime import DatasourceRuntimeService
 from app.local.model_service import ModelProfileService
 from app.local.profile_models import DatasourceProfile
 from app.local.profile_resolver import (
@@ -38,6 +39,7 @@ from app.local.profile_resolver import (
     build_static_model_profile,
 )
 from app.local.profile_store import LocalProfileStore
+from app.local.runtime_registry import RuntimeRegistry
 from app.observability import default_traced_runner
 from app.schema_linking import OpenAICompatibleEmbeddingProvider
 from app.workflow import (
@@ -124,6 +126,10 @@ class ApplicationServices:
         "datasource_profiles",
         "credential_store",
         "profile_resolver",
+        "model_routing",
+        "embedding_provider",
+        "datasource_runtime_service",
+        "runtime_registry",
     )
 
     def __init__(
@@ -138,6 +144,10 @@ class ApplicationServices:
         datasource_profiles: DatasourceProfileService | None = None,
         credential_store: InMemoryCredentialStore | None = None,
         profile_resolver: StaticProfileResolver | None = None,
+        model_routing: object | None = None,
+        embedding_provider: object | None = None,
+        datasource_runtime_service: object | None = None,
+        runtime_registry: object | None = None,
     ) -> None:
         if context is None and contexts is None:
             raise ValueError("either 'context' or 'contexts' is required")
@@ -149,10 +159,10 @@ class ApplicationServices:
         )
         if (
             not isinstance(resolved, dict)
-            or not resolved
             or not all(
                 isinstance(ctx, WorkflowContext) for ctx in resolved.values()
             )
+            or (not resolved and model_routing is None)
             or not callable(runner)
             or (close is not None and not callable(close))
         ):
@@ -166,6 +176,19 @@ class ApplicationServices:
         object.__setattr__(self, "datasource_profiles", datasource_profiles)
         object.__setattr__(self, "credential_store", credential_store)
         object.__setattr__(self, "profile_resolver", profile_resolver)
+        selected_model_routing = model_routing
+        if selected_model_routing is None and resolved:
+            selected_model_routing = next(
+                iter(resolved.values())
+            ).model_routing
+        object.__setattr__(self, "model_routing", selected_model_routing)
+        object.__setattr__(self, "embedding_provider", embedding_provider)
+        object.__setattr__(
+            self,
+            "datasource_runtime_service",
+            datasource_runtime_service,
+        )
+        object.__setattr__(self, "runtime_registry", runtime_registry)
 
     @property
     def context(self) -> WorkflowContext:
@@ -313,6 +336,7 @@ class ApplicationBootstrap:
 
     def build(self) -> ApplicationServices:
         registry = ConnectorRegistry()
+        dynamic_runtime_registry: RuntimeRegistry | None = None
         credential_store = InMemoryCredentialStore()
         owned_connectors: list[tuple[str, DatabaseConnector]] = []
         pending: list[
@@ -333,19 +357,17 @@ class ApplicationBootstrap:
                 profile_store,
                 credential_store,
             )
-            datasource_profiles = DatasourceProfileService(
-                profile_store,
-                credential_store,
-            )
             stage = "configuration"
-            primary_settings = load_database_settings()
+            primary_settings = load_optional_database_settings()
             extra_configs = load_datasources_from_file(
                 _DEFAULT_DATASOURCES_JSON
             )
-            configured_datasources = [
-                (primary_settings.datasource_id, primary_settings),
-                *extra_configs.items(),
-            ]
+            configured_datasources = list(extra_configs.items())
+            if primary_settings is not None:
+                configured_datasources.insert(
+                    0,
+                    (primary_settings.datasource_id, primary_settings),
+                )
             configured_ids: set[str] = set()
             for datasource_id, settings in configured_datasources:
                 stage = "configuration"
@@ -420,6 +442,22 @@ class ApplicationBootstrap:
                     semantic_version,
                 ) in pending
             }
+            dynamic_runtime_service = DatasourceRuntimeService(
+                connector_factory=self._connector_factory,
+                context_factory=self._context_factory,
+                model_routing=model_routing,
+                embedding_provider=embedding_provider,
+            )
+            dynamic_runtime_registry = RuntimeRegistry(
+                runtime_service=dynamic_runtime_service,
+                credential_store=credential_store,
+            )
+            datasource_profiles = DatasourceProfileService(
+                profile_store,
+                credential_store,
+                runtime_service=dynamic_runtime_service,
+                runtime_registry=dynamic_runtime_registry,
+            )
             stage = "runner"
             runner = default_traced_runner()
             stage = "services"
@@ -429,12 +467,14 @@ class ApplicationBootstrap:
                 contexts=contexts,
                 active_model=active_model_profile,
                 active_datasources=active_datasource_profiles,
+                runtime_registry=dynamic_runtime_registry,
             )
             services = ApplicationServices(
                 contexts=contexts,
                 runner=runner,
                 close=lambda: _close_application_resources(
                     registry,
+                    dynamic_runtime_registry,
                     credential_store,
                 ),
                 llm_route_settings=llm_route_settings,
@@ -442,16 +482,26 @@ class ApplicationBootstrap:
                 datasource_profiles=datasource_profiles,
                 credential_store=credential_store,
                 profile_resolver=profile_resolver,
+                model_routing=model_routing,
+                embedding_provider=embedding_provider,
+                datasource_runtime_service=dynamic_runtime_service,
+                runtime_registry=dynamic_runtime_registry,
             )
         except DatabaseConnectorError:
+            if dynamic_runtime_registry is not None:
+                dynamic_runtime_registry.close_all()
             _close_connectors(owned_connectors)
             credential_store.clear_all()
             raise
         except Exception:
+            if dynamic_runtime_registry is not None:
+                dynamic_runtime_registry.close_all()
             _close_connectors(owned_connectors)
             credential_store.clear_all()
             raise ApplicationBootstrapError(stage) from None
         except BaseException:
+            if dynamic_runtime_registry is not None:
+                dynamic_runtime_registry.close_all()
             _close_connectors(owned_connectors)
             credential_store.clear_all()
             raise
@@ -474,12 +524,16 @@ def _close_connectors(
 
 def _close_application_resources(
     registry: ConnectorRegistry,
+    dynamic_runtime_registry: RuntimeRegistry,
     credential_store: InMemoryCredentialStore,
 ) -> None:
     try:
-        registry.close_all()
+        dynamic_runtime_registry.close_all()
     finally:
-        credential_store.clear_all()
+        try:
+            registry.close_all()
+        finally:
+            credential_store.clear_all()
 
 
 def build_production_services() -> ApplicationServices:

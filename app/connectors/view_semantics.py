@@ -1108,6 +1108,13 @@ class FrozenSemanticConnector:
     _delegate: object = field(repr=False)
     manifest: ViewSemanticManifest
 
+    @property
+    def dialect_name(self) -> str:
+        dialect_name = getattr(self._delegate, "dialect_name", None)
+        if not isinstance(dialect_name, str):
+            raise ValueError("semantic connector is invalid")
+        return dialect_name
+
     def read_metadata(
         self,
         allowed_schemas: tuple[str, ...],

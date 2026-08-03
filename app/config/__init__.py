@@ -3,6 +3,7 @@ from app.config.database import (
     DatabaseSettings,
     DatasourceAllowList,
     load_database_settings,
+    load_optional_database_settings,
     load_datasource_allowlist,
     load_datasources_from_file,
 )
@@ -34,6 +35,7 @@ __all__ = (
     "default_profile_database_path",
     "load_auth_settings",
     "load_database_settings",
+    "load_optional_database_settings",
     "load_datasource_allowlist",
     "load_datasources_from_file",
     "load_embedding_settings",
