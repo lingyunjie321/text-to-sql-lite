@@ -7,26 +7,20 @@
 
 > 本文同时记录两条不同的交付路线：原有的“增强能力
 > Stage 0～5”和当前的“本地工具交付阶段 0～6”。本轮“本地工具
-> 阶段 4”专指动态模型与离线模式，不是下文原有的多数据库/多方言
-> Stage 4。
+> 阶段 5”专指本地模型设置前端闭环，不是下文原有的缓存、导出和生产治理
+> Stage 5。
 
-## 当前编码任务：本地工具阶段 4
+## 当前编码任务：本地工具阶段 5
 
-- `ModelProfile` 可按 ID 动态创建、复用和失效 OpenAI-compatible 生成 Provider；
-  不依赖默认 `.env` 模型。
-- 新增保存前模型测试；临时配置和 Key 不写入 Profile Store、运行时缓存、日志、
-  Trace 或查询历史。
-- 单个生成模型默认映射到 simple、standard、complex 三条主路由；动态 Profile
-  不启用 fallback，高级多模型路由继续只保留在底层兼容路径。
-- Embedding 未配置时允许启动并使用 BM25-only；配置后使用现有融合检索，批准的
-  Embedding 故障只降级到同授权、同 Schema 版本的 BM25。
-- 非 loopback endpoint 必须使用 HTTPS；只有 localhost 和 IP loopback 允许 HTTP。
-- 标准查询仍只提交 `datasource_id` 与 `model_profile_id`，动态模型与阶段 3 的动态
-  PostgreSQL/MySQL 数据源在 Resolver 边界组合，不修改 Workflow。
-- `model_overrides` 和 `datasource_override` 继续作为 deprecated 兼容路径；
-  前端 Profile 闭环留到阶段 5，StarRocks 继续标记实验。
-- 不修改 Workflow 图、节点、State、三次修复、32 步限制、Schema Linking、
-  Comparator 或 Gold。
+- 本批只实现模型 Profile 设置前端闭环：列表、保存前测试、CRUD、当前模型 ID，
+  以及旧模型 localStorage Secret 清理。
+- 浏览器通过 BFF 调用既有模型 Profile API；API Key 只存在写请求和组件瞬时状态，
+  不写入 Profile 响应、localStorage 或历史。
+- 编辑时省略 Key 表示保留，显式 `null` 表示清除；当前选择只保存合法的
+  `model_profile_id`，失效或删除后清理。
+- 普通设置 UI 不显示多路模型或 fallback；不修改既有后端 Profile 语义、动态运行时、
+  Workflow 图、节点、State、三次修复、32 步限制、Schema Linking、Comparator 或 Gold。
+- 数据源 Profile、Schema 选择和 Workbench 的 Profile-ID 查询仍是后续切片。
 
 ## 必须实现
 

@@ -5,8 +5,8 @@
 > 容差。权限和危险 SQL Case 单独统计，安全门禁在所有阶段保持 100%。
 
 > 本文中原有的阶段 0～5 统一称为“增强能力 Stage”。当前
-> “本地工具阶段 3”是动态数据库连接交付，其独立门禁见第 14 节；
-> 原业务知识/Few-shot 门禁顺延为第 16 节且含义不变。
+> “本地工具阶段 5”当前只交付模型设置前端闭环，其独立门禁见第 15.1 节；
+> 原业务知识/Few-shot 门禁仍见第 16 节且含义不变。
 
 ## 1. 测试分层
 
@@ -506,6 +506,16 @@ Schema 字段依据已锁定的 Pagila 3.1.0、commit
   MySQL/Sakila 链路可达；旧普通请求、Override 和静态多模型路由保持兼容。
 - 不新增无理由 skip；unit+security 分支覆盖率不低于 83%；Workflow 图、节点、
   State、Comparator、Gold 内容与 `16 verified / 2 draft` 状态不变。
+
+## 15.1 本地工具阶段 5：模型设置前端闭环门禁
+
+- 浏览器只通过 BFF 调用模型 Profile API；BFF 不接受上游 URL/Header。
+- ModelProfile CRUD 和 `/test` 全部可达并保留脱敏 HTTP 语义。
+- API Key 只存在写请求和组件瞬时状态，Profile 响应、localStorage 和历史均不包含。
+- 编辑时省略 Key 表示保留，`null` 表示清除。
+- 当前选择只保存合法 `model_profile_id`，失效或删除后清理。
+- 旧 `text-to-sql-model-config` 被删除且不上传。
+- 普通设置 UI 不显示多路模型和 fallback。
 
 ## 16. 增强能力 Stage 1：检索与路由增强门禁
 
