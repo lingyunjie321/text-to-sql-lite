@@ -1,4 +1,8 @@
+import React from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { PasswordInput } from "../components/settings/PasswordInput";
 import {
   ProfileApiError,
   buildModelTestRequest,
@@ -36,8 +40,302 @@ const editValue = {
   clearEmbeddingApiKey: false,
 };
 
+const embeddingResponse = {
+  ...validResponse,
+  base_url: "https://models.example.test/v1",
+  embedding_base_url: "https://embedding.example.test/v1",
+  embedding_model: "text-embedding-3-small",
+  embedding_dimension: 1536,
+  embedding_credential_status: "configured" as const,
+};
+
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+describe("PasswordInput", () => {
+  it("lets model credential fields request new-password autocomplete without labeling the secret", () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(PasswordInput, {
+        value: "sentinel-secret",
+        onChange: () => undefined,
+        autoComplete: "new-password",
+      }),
+    );
+
+    expect(markup).toContain('autoComplete="new-password"');
+    expect(markup).not.toContain('aria-label="sentinel-secret"');
+  });
+});
+
+describe("ModelProfileForm", () => {
+  it("renders a create form with a fixed provider and collapsed optional embedding", async () => {
+    const formModule = await import(
+      "../components/settings/ModelProfileForm"
+    ).catch(() => null);
+
+    expect(formModule).not.toBeNull();
+    if (formModule === null) return;
+
+    const markup = renderToStaticMarkup(
+      React.createElement(formModule.ModelProfileForm, {
+        mode: "create",
+        onCancel: () => undefined,
+        onSaved: () => undefined,
+      }),
+    );
+
+    expect(markup).toContain("添加模型 Profile");
+    expect(markup).toContain("openai_compatible");
+    expect(markup).toContain('name="id"');
+    expect(markup).not.toMatch(/<input[^>]*readOnly=""[^>]*name="id"/);
+    expect(markup.match(/autoComplete="new-password"/g)).toHaveLength(1);
+    expect(markup).toContain("Embedding（可选增强）");
+    expect(markup).not.toContain('name="embeddingBaseUrl"');
+    expect(markup).not.toContain("保存后会清除 Embedding 配置和凭据");
+    expect(markup).toContain("连接状态：未测试");
+    expect(markup).toMatch(/<button[^>]*type="submit"[^>]*>保存 Profile<\/button>/);
+    expect(markup).not.toContain("fallback");
+  });
+
+  it("keeps edit credentials blank and makes the immutable id read only", async () => {
+    const { ModelProfileForm } = await import(
+      "../components/settings/ModelProfileForm"
+    );
+
+    const markup = renderToStaticMarkup(
+      React.createElement(ModelProfileForm, {
+        mode: "edit",
+        profile: embeddingResponse,
+        onCancel: () => undefined,
+        onSaved: () => undefined,
+      }),
+    );
+
+    expect(markup).toMatch(/<input[^>]*readOnly=""[^>]*name="id"/);
+    expect(markup).toContain("留空则保留当前凭据");
+    expect(markup).toContain("清除已保存凭据");
+    expect(markup.match(/autoComplete="new-password"/g)).toHaveLength(2);
+    expect(markup).not.toContain("sentinel-secret");
+  });
+
+  it("resets a successful test and cancels credential clearing when a new key is entered", async () => {
+    const {
+      createModelFormState,
+      settleModelTestState,
+      updateModelFormState,
+      willClearEmbedding,
+    } = await import(
+      "../components/settings/ModelProfileForm"
+    );
+    const testedState = {
+      ...createModelFormState(embeddingResponse),
+      value: {
+        ...createModelFormState(embeddingResponse).value,
+        clearApiKey: true,
+      },
+      testState: {
+        status: "success" as const,
+        message: "生成模型与 Embedding 均可用",
+      },
+    };
+
+    const changed = updateModelFormState(testedState, {
+      apiKey: "replacement-key",
+    });
+
+    expect(changed.value.apiKey).toBe("replacement-key");
+    expect(changed.value.clearApiKey).toBe(false);
+    expect(changed.testState).toEqual({ status: "untested" });
+    expect(
+      settleModelTestState(changed, testedState.revision, {
+        status: "success",
+        message: "stale success",
+      }).testState,
+    ).toEqual({ status: "untested" });
+
+    const embeddingDisabled = updateModelFormState(testedState, {
+      embeddingEnabled: false,
+    });
+    expect(willClearEmbedding(embeddingResponse, embeddingDisabled.value)).toBe(
+      true,
+    );
+  });
+
+  it("validates the exact profile id, URLs, and enabled embedding dimension", async () => {
+    const { validateModelFormValue } = await import(
+      "../components/settings/ModelProfileForm"
+    );
+
+    expect(
+      validateModelFormValue({
+        ...editValue,
+        id: "BAD ID",
+        name: " ",
+        baseUrl: "not a url",
+        modelName: "",
+        embeddingEnabled: true,
+        embeddingBaseUrl: "invalid",
+        embeddingModel: " ",
+        embeddingDimension: "0",
+      }),
+    ).toEqual({
+      id: "Profile ID 只能包含小写字母、数字、下划线和连字符，长度不超过 64 位",
+      name: "请输入 Profile 名称",
+      baseUrl: "请输入有效的 HTTP 或 HTTPS 地址",
+      modelName: "请输入生成模型名称",
+      embeddingBaseUrl: "请输入有效的 HTTP 或 HTTPS 地址",
+      embeddingModel: "请输入 Embedding 模型名称",
+      embeddingDimension: "请输入 1 到 1000000 之间的整数",
+    });
+  });
+
+  it("requires credential re-entry only for configured authenticated edit endpoints", async () => {
+    const { credentialReentryMessage, createModelFormState } = await import(
+      "../components/settings/ModelProfileForm"
+    );
+
+    expect(
+      credentialReentryMessage(
+        embeddingResponse,
+        createModelFormState(embeddingResponse).value,
+      ),
+    ).toBe("测试不会复用已保存凭据，请重新输入生成模型 API Key");
+    expect(
+      credentialReentryMessage(
+        validResponse,
+        createModelFormState(validResponse).value,
+      ),
+    ).toBe("测试不会复用已保存凭据，请重新输入生成模型 API Key");
+    expect(
+      credentialReentryMessage(
+        { ...validResponse, generation_credential_status: "missing" },
+        createModelFormState({
+          ...validResponse,
+          generation_credential_status: "missing",
+        }).value,
+      ),
+    ).toBeNull();
+    expect(
+      credentialReentryMessage(validResponse, {
+        ...createModelFormState(validResponse).value,
+        baseUrl: "http://127.0.0.1:1234/v1",
+      }),
+    ).toBeNull();
+    expect(
+      credentialReentryMessage(validResponse, {
+        ...createModelFormState(validResponse).value,
+        clearApiKey: true,
+      }),
+    ).toBeNull();
+  });
+
+  it("maps test responses to useful generation and embedding outcomes", async () => {
+    const { connectionTestState } = await import(
+      "../components/settings/ModelProfileForm"
+    );
+
+    expect(
+      connectionTestState({
+        generation: "connected",
+        embedding: "not_configured",
+        embedding_error: null,
+      }),
+    ).toEqual({
+      status: "success",
+      message: "生成模型可用，BM25-only 可用",
+    });
+    expect(
+      connectionTestState({
+        generation: "connected",
+        embedding: "connected",
+        embedding_error: null,
+      }),
+    ).toEqual({
+      status: "success",
+      message: "生成模型与 Embedding 均可用",
+    });
+    expect(
+      connectionTestState({
+        generation: "connected",
+        embedding: "unavailable",
+        embedding_error: {
+          code: "EMBEDDING_UNAVAILABLE",
+          message: "sentinel upstream detail",
+        },
+      }),
+    ).toEqual({
+      status: "warning",
+      message: "生成模型可用，Embedding 当前不可用；可继续使用 BM25-only",
+    });
+  });
+});
+
+describe("ModelProfileSection save settlement", () => {
+  it("appends creates and replaces edits using the sanitized response", async () => {
+    const sectionModule = await import(
+      "../components/settings/ModelProfileSection"
+    );
+    const replacement = { ...validResponse, name: "Renamed model" };
+    const created = {
+      ...validResponse,
+      id: "second-model",
+      name: "Second model",
+    };
+
+    expect(sectionModule.settleSavedProfile([validResponse], replacement)).toEqual([
+      replacement,
+    ]);
+    expect(sectionModule.settleSavedProfile([validResponse], created)).toEqual([
+      validResponse,
+      created,
+    ]);
+  });
+
+  it("locks form entry while list state or another mutation is unsettled", async () => {
+    const { modelProfileActionsLocked, modelProfileListHidden } = await import(
+      "../components/settings/ModelProfileSection"
+    );
+
+    expect(
+      modelProfileActionsLocked({
+        loading: true,
+        loadFailed: false,
+        formOpen: false,
+        deletePending: false,
+      }),
+    ).toBe(true);
+    expect(
+      modelProfileActionsLocked({
+        loading: false,
+        loadFailed: false,
+        formOpen: false,
+        deletePending: false,
+      }),
+    ).toBe(false);
+    expect(
+      modelProfileActionsLocked({
+        loading: false,
+        loadFailed: false,
+        formOpen: true,
+        deletePending: false,
+      }),
+    ).toBe(true);
+    expect(
+      modelProfileActionsLocked({
+        loading: false,
+        loadFailed: false,
+        formOpen: false,
+        deletePending: true,
+      }),
+    ).toBe(true);
+    expect(
+      modelProfileListHidden({ formOpen: false, deletePending: true }),
+    ).toBe(true);
+    expect(
+      modelProfileListHidden({ formOpen: false, deletePending: false }),
+    ).toBe(false);
+  });
 });
 
 describe("buildModelWriteRequest", () => {

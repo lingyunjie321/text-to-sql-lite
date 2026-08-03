@@ -18,6 +18,7 @@ import {
   setSelectedModelProfileId,
 } from "../../lib/profile-selection";
 import { ModelProfileDeleteDialog } from "./ModelProfileDeleteDialog";
+import { ModelProfileForm } from "./ModelProfileForm";
 import { ModelProfileList } from "./ModelProfileList";
 import {
   deleteModelProfileFromState,
@@ -53,6 +54,44 @@ const deleteDependencies = {
   isMissingError: isMissingProfileError,
 };
 
+export function settleSavedProfile(
+  profiles: readonly ModelProfileResponse[],
+  saved: ModelProfileResponse,
+): ModelProfileResponse[] {
+  const index = profiles.findIndex((profile) => profile.id === saved.id);
+  if (index === -1) return [...profiles, saved];
+
+  const next = [...profiles];
+  next[index] = saved;
+  return next;
+}
+
+interface ModelProfileActionState {
+  loading: boolean;
+  loadFailed: boolean;
+  formOpen: boolean;
+  deletePending: boolean;
+}
+
+export function modelProfileActionsLocked({
+  loading,
+  loadFailed,
+  formOpen,
+  deletePending,
+}: ModelProfileActionState): boolean {
+  return loading || loadFailed || formOpen || deletePending;
+}
+
+export function modelProfileListHidden({
+  formOpen,
+  deletePending,
+}: Pick<
+  ModelProfileActionState,
+  "formOpen" | "deletePending"
+>): boolean {
+  return formOpen || deletePending;
+}
+
 export function ModelProfileSection({
   onToast,
   onProfileCountChange,
@@ -64,6 +103,19 @@ export function ModelProfileSection({
   const [deleteTarget, setDeleteTarget] =
     useState<ModelProfileResponse | null>(null);
   const [deleteSubmitting, setDeleteSubmitting] = useState(false);
+  const [formTarget, setFormTarget] = useState<
+    "create" | ModelProfileResponse | null
+  >(null);
+  const actionsLocked = modelProfileActionsLocked({
+    loading,
+    loadFailed,
+    formOpen: formTarget !== null,
+    deletePending: deleteTarget !== null || deleteSubmitting,
+  });
+  const listHidden = modelProfileListHidden({
+    formOpen: formTarget !== null,
+    deletePending: deleteTarget !== null || deleteSubmitting,
+  });
 
   const handleProfilesLoaded = useCallback(
     (state: ModelProfileState) => {
@@ -115,13 +167,29 @@ export function ModelProfileSection({
     [onToast],
   );
 
-  const handleEdit = useCallback(() => {
-    onToast("模型编辑表单将在下一步提供", "info");
-  }, [onToast]);
+  const handleEdit = useCallback((profile: ModelProfileResponse) => {
+    setFormTarget(profile);
+  }, []);
 
   const handleAdd = useCallback(() => {
-    onToast("模型创建表单将在下一步提供", "info");
-  }, [onToast]);
+    setFormTarget("create");
+  }, []);
+
+  const handleSaved = useCallback(
+    (profile: ModelProfileResponse) => {
+      const next = settleSavedProfile(profiles, profile);
+      setProfiles(next);
+      setFormTarget(null);
+      onProfileCountChange(next.length);
+      onToast(
+        formTarget === "create"
+          ? "模型 Profile 已添加"
+          : "模型 Profile 已更新",
+        "success",
+      );
+    },
+    [formTarget, onProfileCountChange, onToast, profiles],
+  );
 
   const handleRetry = useCallback(() => {
     setLoading(true);
@@ -170,14 +238,31 @@ export function ModelProfileSection({
             管理用于生成 SQL 的 OpenAI-compatible 模型 Profile
           </p>
         </div>
-        <Button type="button" size="sm" onClick={handleAdd}>
+        <Button
+          type="button"
+          size="sm"
+          onClick={handleAdd}
+          disabled={actionsLocked}
+        >
           <Plus className="h-4 w-4" aria-hidden="true" />
           添加模型
         </Button>
       </div>
 
+      {formTarget !== null ? (
+        <div className="mt-6">
+          <ModelProfileForm
+            key={formTarget === "create" ? "create" : formTarget.id}
+            mode={formTarget === "create" ? "create" : "edit"}
+            profile={formTarget === "create" ? undefined : formTarget}
+            onSaved={handleSaved}
+            onCancel={() => setFormTarget(null)}
+          />
+        </div>
+      ) : null}
+
       <div className="mt-6">
-        {loading ? (
+        {listHidden ? null : loading ? (
           <div
             role="status"
             className="rounded-lg border border-[var(--color-border)] bg-white p-6 text-center text-sm text-[var(--color-text-tertiary)] shadow-sm"

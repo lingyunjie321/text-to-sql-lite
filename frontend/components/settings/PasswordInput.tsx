@@ -9,6 +9,7 @@ interface PasswordInputProps {
   placeholder?: string;
   disabled?: boolean;
   id?: string;
+  autoComplete?: string;
 }
 
 export function PasswordInput({
@@ -17,6 +18,7 @@ export function PasswordInput({
   placeholder = "••••••••",
   disabled = false,
   id,
+  autoComplete = "off",
 }: PasswordInputProps) {
   const [visible, setVisible] = useState(false);
 
@@ -30,7 +32,7 @@ export function PasswordInput({
         placeholder={placeholder}
         disabled={disabled}
         className="h-10 flex-1 rounded-l-md border border-r-0 border-[var(--color-border-strong)] bg-white px-3 text-sm text-[var(--color-text-primary)] placeholder:text-[var(--color-text-tertiary)] focus:border-[var(--color-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/20 disabled:cursor-not-allowed disabled:bg-[var(--color-bg-muted)] disabled:text-[var(--color-text-tertiary)]"
-        autoComplete="off"
+        autoComplete={autoComplete}
       />
       <button
         type="button"
