@@ -13,6 +13,7 @@ from app.connectors.errors import ErrorType
 from app.schema_linking import SchemaLinkingResult
 
 PROMPT_VERSION = "stage1-retrieval-routing-v1"
+MYSQL_PROMPT_VERSION = "stage3-mysql-v1"
 
 
 class GeneratedSQL(BaseModel):
@@ -56,6 +57,7 @@ class GenerationContext:
 class LLMMessage:
     role: Literal["system", "user"]
     content: str
+    prompt_version: str = PROMPT_VERSION
 
 
 @dataclass(frozen=True, slots=True)

@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import logging
 import math
 import queue
 import threading
@@ -43,6 +44,8 @@ from app.connectors.metadata import (
 from app.connectors.metadata_queries_mysql import build_metadata_queries
 from app.connectors.models import ExecutionResult, ResultColumn
 from app.connectors.types import normalize_value
+
+logger = logging.getLogger(__name__)
 
 
 class MySQLConnector:
@@ -191,9 +194,16 @@ class MySQLConnector:
         body_error: BaseException | None = None
         try:
             conn = self._pool.connection()
+            reusable = True
+            transaction_started = False
             try:
-                conn.begin()
-                _set_mysql_read_only(conn)
+                try:
+                    _start_mysql_read_only_transaction(conn)
+                    transaction_started = True
+                except BaseException:
+                    reusable = False
+                    self._pool.discard(conn)
+                    raise
                 _set_mysql_timeout(
                     conn, self._statement_timeout_seconds
                 )
@@ -207,11 +217,17 @@ class MySQLConnector:
                 finally:
                     self._snapshot_connection.reset(token)
             finally:
-                try:
-                    conn.rollback()
-                except Exception:
-                    pass
-                self._pool.putback(conn)
+                cleanup_error = None
+                if reusable and transaction_started:
+                    cleanup_error = _rollback_or_discard(
+                        self._pool,
+                        conn,
+                    )
+                    reusable = cleanup_error is None
+                if reusable:
+                    self._pool.putback(conn)
+                if cleanup_error is not None and body_error is None:
+                    raise cleanup_error
         except BaseException as error:
             if body_error is not None:
                 raise body_error
@@ -312,9 +328,16 @@ class MySQLConnector:
                     dialect="mysql",
                 )
             conn = self._pool.connection()
+            reusable = True
+            transaction_started = False
             try:
-                conn.begin()
-                _set_mysql_read_only(conn)
+                try:
+                    _start_mysql_read_only_transaction(conn)
+                    transaction_started = True
+                except BaseException:
+                    reusable = False
+                    self._pool.discard(conn)
+                    raise
                 effective_timeout = (
                     float(self._statement_timeout_seconds)
                     if timeout_seconds is None
@@ -328,15 +351,17 @@ class MySQLConnector:
                     dialect="mysql",
                 )
                 conn.commit()
+                transaction_started = False
                 return result
-            except Exception:
-                try:
-                    conn.rollback()
-                except Exception:
-                    pass
+            except BaseException:
+                if reusable and transaction_started:
+                    reusable = (
+                        _rollback_or_discard(self._pool, conn) is None
+                    )
                 raise
             finally:
-                self._pool.putback(conn)
+                if reusable:
+                    self._pool.putback(conn)
         except Exception as error:
             raise normalize_database_error(error) from None
 
@@ -355,9 +380,16 @@ class MySQLConnector:
                     dialect="mysql",
                 )
             conn = self._pool.connection()
+            reusable = True
+            transaction_started = False
             try:
-                conn.begin()
-                _set_mysql_read_only(conn)
+                try:
+                    _start_mysql_read_only_transaction(conn)
+                    transaction_started = True
+                except BaseException:
+                    reusable = False
+                    self._pool.discard(conn)
+                    raise
                 effective_timeout = (
                     float(self._statement_timeout_seconds)
                     if timeout_seconds is None
@@ -370,15 +402,17 @@ class MySQLConnector:
                     dialect="mysql",
                 )
                 conn.commit()
+                transaction_started = False
                 return result
-            except Exception:
-                try:
-                    conn.rollback()
-                except Exception:
-                    pass
+            except BaseException:
+                if reusable and transaction_started:
+                    reusable = (
+                        _rollback_or_discard(self._pool, conn) is None
+                    )
                 raise
             finally:
-                self._pool.putback(conn)
+                if reusable:
+                    self._pool.putback(conn)
         except Exception as error:
             raise normalize_database_error(error) from None
 
@@ -443,18 +477,21 @@ class _ConnectionPool:
     def putback(self, conn: pymysql.Connection) -> None:
         """Return a connection to the pool."""
         if self.closed:
-            try:
-                conn.close()
-            except Exception:
-                pass
+            self.discard(conn)
             return
         try:
             self._queue.put_nowait(conn)
         except queue.Full:
-            try:
-                conn.close()
-            except Exception:
-                pass
+            self.discard(conn)
+
+    def discard(self, conn: pymysql.Connection) -> None:
+        """Close an unsafe connection and release one pool slot."""
+        with self._lock:
+            self._created = max(0, self._created - 1)
+        try:
+            conn.close()
+        except Exception:
+            logger.warning("mysql_connection_close_failed")
 
     def close(self) -> None:
         """标记池已关闭并关闭池中全部空闲连接。"""
@@ -464,23 +501,28 @@ class _ConnectionPool:
                 conn = self._queue.get_nowait()
             except queue.Empty:
                 break
-            try:
-                conn.close()
-            except Exception:
-                pass
+            self.discard(conn)
 
 
 # ── MySQL session helpers ────────────────────────────────────────
 
 
-def _set_mysql_read_only(conn: pymysql.Connection) -> None:
-    """Set the current transaction to read-only (MySQL 5.7.20+ / 8.0+)."""
+def _start_mysql_read_only_transaction(conn: pymysql.Connection) -> None:
+    """Atomically start a read-only transaction or propagate failure."""
+    with conn.cursor() as cursor:
+        cursor.execute("START TRANSACTION READ ONLY")
+
+
+def _rollback_or_discard(
+    pool: _ConnectionPool,
+    conn: pymysql.Connection,
+) -> Exception | None:
     try:
-        with conn.cursor() as cursor:
-            cursor.execute("SET TRANSACTION READ ONLY")
-    except Exception:
-        # Best-effort — older MySQL versions may not support this.
-        pass
+        conn.rollback()
+    except Exception as error:
+        pool.discard(conn)
+        return error
+    return None
 
 
 def _set_mysql_timeout(
@@ -609,10 +651,12 @@ def _read_metadata_from_connection(
     *,
     dialect: str,
 ) -> SchemaSnapshot:
-    schema_list = scope.schema_parameters
+    schema_list = list(scope.schemas)
     table_list = scope.table_parameters
-    param_count = max(len(schema_list), len(table_list), 1)
-    queries = build_metadata_queries(param_count)
+    queries = build_metadata_queries(
+        schema_count=len(schema_list),
+        table_count=len(table_list),
+    )
 
     # Build flattened parameters — each IN clause gets its own set of
     # placeholders and values.

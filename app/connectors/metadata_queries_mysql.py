@@ -1,13 +1,11 @@
 """Parameterised metadata queries for MySQL using ``information_schema``.
 
-All queries accept two positional parameters for schema and table
-filtering::
+All queries accept flattened schema and table parameters::
 
-    cursor.execute(SQL, (schema_list, table_list))
+    cursor.execute(SQL, (*schemas, *tables))
 
-Where *schema_list* and *table_list* are ``tuple[str, ...]``.  The
-driver's parameter substitution handles ``%s`` placeholders correctly
-for the ``IN (…)`` clauses.
+The query builder renders independent ``%s`` counts for the Schema and
+table ``IN (…)`` clauses.
 
 .. note::
 
@@ -29,11 +27,14 @@ from app.connectors.metadata_queries_mysql_family import (
 )
 
 
-def build_metadata_queries(count: int) -> dict[str, str]:
-    """Build parameterised metadata queries for MySQL with *count*
-    schema/table placeholders."""
+def build_metadata_queries(
+    schema_count: int,
+    table_count: int | None = None,
+) -> dict[str, str]:
+    """Build MySQL metadata queries with exact placeholder counts."""
     return build_family_queries(
-        count,
+        schema_count,
+        table_count,
         table_columns_raw=MYSQL_TABLE_COLUMNS_RAW,
         primary_keys_raw=MYSQL_PRIMARY_KEYS_RAW,
         foreign_keys_raw=MYSQL_FOREIGN_KEYS_RAW,
@@ -44,7 +45,7 @@ def build_metadata_queries(count: int) -> dict[str, str]:
 # ── Default queries (single schema / single table) ──────────────
 
 
-_default_queries = build_metadata_queries(1)
+_default_queries = build_metadata_queries(1, 1)
 
 TABLE_COLUMNS_SQL: str = _default_queries["table_columns"]
 PRIMARY_KEYS_SQL: str = _default_queries["primary_keys"]

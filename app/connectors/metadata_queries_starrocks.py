@@ -5,8 +5,8 @@ StarRocks is MySQL-protocol compatible but has limitations:
 - Primary keys available via the PRIMARY KEY table model (StarRocks 3.x).
 - Unique indexes are implemented through the PRIMARY KEY model.
 
-All queries accept two positional parameters for schema and table
-filtering (``%s`` placeholders, matching the pymysql driver).
+All queries accept flattened schema and table parameters using independent
+``%s`` placeholder counts supported by the pymysql driver.
 
 Only the dialect-specific SQL templates are declared below; the shared
 rendering machinery and the primary-key template (identical to MySQL)
@@ -83,11 +83,14 @@ ORDER BY tc.TABLE_SCHEMA, tc.TABLE_NAME, tc.CONSTRAINT_NAME
 """
 
 
-def build_metadata_queries(count: int) -> dict[str, str]:
-    """Build parameterised metadata queries for StarRocks with *count*
-    schema/table placeholders."""
+def build_metadata_queries(
+    schema_count: int,
+    table_count: int | None = None,
+) -> dict[str, str]:
+    """Build StarRocks queries with separate placeholder counts."""
     return build_family_queries(
-        count,
+        schema_count,
+        table_count,
         table_columns_raw=_TABLE_COLUMNS_RAW,
         primary_keys_raw=MYSQL_PRIMARY_KEYS_RAW,
         foreign_keys_raw=_FOREIGN_KEYS_RAW,
@@ -97,7 +100,7 @@ def build_metadata_queries(count: int) -> dict[str, str]:
 
 # ── Default queries (single schema / single table) ──────────────
 
-_default_queries = build_metadata_queries(1)
+_default_queries = build_metadata_queries(1, 1)
 
 TABLE_COLUMNS_SQL: str = _default_queries["table_columns"]
 PRIMARY_KEYS_SQL: str = _default_queries["primary_keys"]

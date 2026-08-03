@@ -11,7 +11,8 @@ from app.connectors.metadata import (
     build_schema_snapshot,
 )
 from app.generation import GenerationContext, build_generation_messages
-from app.generation.models import PROMPT_VERSION
+from app.generation.models import MYSQL_PROMPT_VERSION, PROMPT_VERSION
+from app.generation.prompt import SYSTEM_PROMPT
 from app.schema_linking import (
     CandidateField,
     CandidateTable,
@@ -174,6 +175,26 @@ def test_prompt_is_deterministic_and_contains_explicit_safety_rules() -> None:
     assert "allowed_functions" in system
     assert "clarification_reason" in system
     assert "json" in system
+
+
+def test_mysql_prompt_is_separate_and_keeps_postgresql_prompt_unchanged(
+) -> None:
+    postgres_messages = build_generation_messages(_context())
+    mysql_messages = build_generation_messages(
+        replace(_context(), dialect="mysql")
+    )
+    mysql_payload = json.loads(mysql_messages[1].content)
+
+    assert postgres_messages[0].content == SYSTEM_PROMPT
+    assert postgres_messages[0].prompt_version == PROMPT_VERSION
+    assert "MySQL" in mysql_messages[0].content
+    assert "PostgreSQL" not in mysql_messages[0].content
+    assert mysql_messages[0].prompt_version == MYSQL_PROMPT_VERSION
+    assert mysql_messages[1].prompt_version == MYSQL_PROMPT_VERSION
+    assert mysql_payload["prompt_version"] == MYSQL_PROMPT_VERSION
+    assert mysql_payload["dialect"] == "mysql"
+    assert "COUNT" in mysql_payload["allowed_functions"]
+    assert "DATE_TRUNC" not in mysql_payload["allowed_functions"]
 
 
 def test_prompt_serializes_only_candidate_schema_context() -> None:

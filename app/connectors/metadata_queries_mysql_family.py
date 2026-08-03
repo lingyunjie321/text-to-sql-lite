@@ -31,8 +31,9 @@ MYSQL_TABLE_COLUMNS_RAW = """
 SELECT
     c.TABLE_SCHEMA AS schema_name,
     c.TABLE_NAME AS table_name,
-    'table' AS relation_kind,
-    NULL AS table_comment,
+    CASE WHEN t.TABLE_TYPE = 'VIEW' THEN 'view' ELSE 'table' END
+        AS relation_kind,
+    t.TABLE_COMMENT AS table_comment,
     c.COLUMN_NAME AS column_name,
     c.ORDINAL_POSITION AS ordinal_position,
     c.DATA_TYPE AS data_type,
@@ -40,8 +41,12 @@ SELECT
     CASE WHEN c.IS_NULLABLE = 'YES' THEN TRUE ELSE FALSE END AS nullable,
     c.COLUMN_COMMENT AS column_comment
 FROM INFORMATION_SCHEMA.COLUMNS AS c
+JOIN INFORMATION_SCHEMA.TABLES AS t
+  ON t.TABLE_SCHEMA = c.TABLE_SCHEMA
+ AND t.TABLE_NAME = c.TABLE_NAME
 WHERE c.TABLE_SCHEMA IN ({schema_placeholders})
   AND c.TABLE_NAME IN ({table_placeholders})
+  AND t.TABLE_TYPE IN ('BASE TABLE', 'VIEW')
 ORDER BY c.TABLE_SCHEMA, c.TABLE_NAME, c.ORDINAL_POSITION
 """
 
@@ -120,22 +125,26 @@ def build_in_clause(count: int) -> str:
 
 
 def build_family_queries(
-    count: int,
+    schema_count: int,
+    table_count: int | None = None,
     *,
     table_columns_raw: str,
     primary_keys_raw: str,
     foreign_keys_raw: str,
     unique_indexes_raw: str,
 ) -> dict[str, str]:
-    """按 *count* 渲染四个元数据查询模板的占位符。
+    """分别按 Schema 和表数量渲染四个元数据查询模板。
 
     参数为各方言的原始 SQL 模板（含 ``{schema_placeholders}`` 与
     ``{table_placeholders}`` 格式化键）；返回键固定的查询字典，
     键为 ``table_columns`` / ``primary_keys`` / ``foreign_keys`` /
     ``unique_indexes``。
     """
-    placeholders_schema = build_in_clause(count)
-    placeholders_table = build_in_clause(count)
+    effective_table_count = (
+        schema_count if table_count is None else table_count
+    )
+    placeholders_schema = build_in_clause(schema_count)
+    placeholders_table = build_in_clause(effective_table_count)
     return {
         "table_columns": table_columns_raw.format(
             schema_placeholders=placeholders_schema,

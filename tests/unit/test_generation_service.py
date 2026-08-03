@@ -147,7 +147,7 @@ def _fabricated_path() -> tuple[JoinPath, ...]:
     "context",
     [
         replace(CONTEXT, question="   "),
-        replace(CONTEXT, dialect="mysql"),
+        replace(CONTEXT, dialect="sqlite"),
         replace(CONTEXT, max_result_rows=0),
         replace(CONTEXT, max_result_rows=1001),
         replace(CONTEXT, max_result_rows=True),

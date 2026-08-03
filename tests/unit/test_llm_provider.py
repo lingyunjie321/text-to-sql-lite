@@ -9,7 +9,7 @@ import pytest
 
 from app.config import LLMSettings
 from app.connectors.errors import ErrorType
-from app.generation.models import PROMPT_VERSION
+from app.generation.models import MYSQL_PROMPT_VERSION, PROMPT_VERSION
 from app.generation import (
     LLMMessage,
     LLMProviderError,
@@ -192,6 +192,30 @@ def test_provider_sends_openai_compatible_structured_request() -> None:
         "temperature": 0,
     }
     assert "stage5-test-secret" not in bytes(request.data or b"").decode()
+
+
+def test_provider_reports_the_prompt_version_attached_to_messages() -> None:
+    transport = FakeTransport(
+        body=_response(
+            {"sql": "SELECT 1", "clarification_reason": None},
+        )
+    )
+    provider = OpenAICompatibleLLMProvider(
+        _settings(),
+        transport=transport,
+    )
+    messages = tuple(
+        LLMMessage(
+            role=message.role,
+            content=message.content,
+            prompt_version=MYSQL_PROMPT_VERSION,
+        )
+        for message in _messages()
+    )
+
+    result = provider.generate(messages)
+
+    assert result.prompt_version == MYSQL_PROMPT_VERSION
 
 
 def test_provider_applies_the_stricter_per_call_timeout() -> None:

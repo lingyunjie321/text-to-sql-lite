@@ -14,6 +14,12 @@ from app.connectors.metadata import (
     empty_schema_snapshot,
     normalize_metadata_scope,
 )
+from app.connectors.metadata_queries_mysql import (
+    build_metadata_queries as build_mysql_metadata_queries,
+)
+from app.connectors.metadata_queries_starrocks import (
+    build_metadata_queries as build_starrocks_metadata_queries,
+)
 
 
 FILM_ID = ColumnMetadata(
@@ -196,6 +202,39 @@ def test_empty_snapshot_has_stable_literal_fingerprint() -> None:
     assert first.schema_version == (
         "1df03ce977cb0b0e0385a833b9d97d29408c0f63c134d1a780dea68ddc1cc9b7"
     )
+
+
+def test_mysql_metadata_uses_exact_schema_and_table_placeholder_counts(
+) -> None:
+    queries = build_mysql_metadata_queries(
+        schema_count=1,
+        table_count=3,
+    )
+
+    assert queries["table_columns"].count("%s") == 4
+    assert queries["primary_keys"].count("%s") == 4
+    assert queries["foreign_keys"].count("%s") == 4
+    assert queries["unique_indexes"].count("%s") == 4
+
+
+def test_mysql_metadata_query_distinguishes_tables_and_views() -> None:
+    query = build_mysql_metadata_queries(
+        schema_count=1,
+        table_count=1,
+    )["table_columns"]
+
+    assert "JOIN INFORMATION_SCHEMA.TABLES AS t" in query
+    assert "t.TABLE_TYPE = 'VIEW'" in query
+    assert "THEN 'view'" in query
+
+
+def test_starrocks_metadata_keeps_shared_separate_placeholder_counts() -> None:
+    queries = build_starrocks_metadata_queries(
+        schema_count=2,
+        table_count=3,
+    )
+
+    assert all(query.count("%s") == 5 for query in queries.values())
 
 
 def test_scope_deduplicates_and_sorts_qualified_tables() -> None:

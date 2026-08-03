@@ -274,5 +274,9 @@ class OpenAICompatibleLLMProvider:
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             model=self._settings.model,
-            prompt_version=PROMPT_VERSION,
+            prompt_version=(
+                messages[0].prompt_version
+                if messages
+                else PROMPT_VERSION
+            ),
         )

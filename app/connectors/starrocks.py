@@ -218,10 +218,12 @@ def _read_metadata_starrocks(
     dialect: str,
 ) -> SchemaSnapshot:
     """Read metadata using StarRocks-specific information_schema queries."""
-    schema_list = scope.schema_parameters
+    schema_list = list(scope.schemas)
     table_list = scope.table_parameters
-    param_count = max(len(schema_list), len(table_list), 1)
-    queries = build_metadata_queries(param_count)
+    queries = build_metadata_queries(
+        schema_count=len(schema_list),
+        table_count=len(table_list),
+    )
 
     flat_params = tuple(schema_list + table_list)
 
