@@ -90,6 +90,8 @@ describe("ModelProfileForm", () => {
     expect(markup).toContain('name="id"');
     expect(markup).not.toMatch(/<input[^>]*readOnly=""[^>]*name="id"/);
     expect(markup.match(/autoComplete="new-password"/g)).toHaveLength(1);
+    expect(markup).not.toContain('placeholder="••••••••"');
+    expect(markup).toContain("可选：无鉴权本地服务可留空");
     expect(markup).toContain("Embedding（可选增强）");
     expect(markup).not.toContain('name="embeddingBaseUrl"');
     expect(markup).not.toContain("保存后会清除 Embedding 配置和凭据");
@@ -116,6 +118,8 @@ describe("ModelProfileForm", () => {
     expect(markup).toContain("留空则保留当前凭据");
     expect(markup).toContain("清除已保存凭据");
     expect(markup.match(/autoComplete="new-password"/g)).toHaveLength(2);
+    expect(markup).not.toContain('placeholder="••••••••"');
+    expect(markup.match(/留空则保留；测试时可能需重新输入/g)).toHaveLength(2);
     expect(markup).not.toContain("sentinel-secret");
   });
 
@@ -206,7 +210,7 @@ describe("ModelProfileForm", () => {
         validResponse,
         createModelFormState(validResponse).value,
       ),
-    ).toBe("测试不会复用已保存凭据，请重新输入生成模型 API Key");
+    ).toBeNull();
     expect(
       credentialReentryMessage(
         { ...validResponse, generation_credential_status: "missing" },
@@ -217,15 +221,37 @@ describe("ModelProfileForm", () => {
       ),
     ).toBeNull();
     expect(
-      credentialReentryMessage(validResponse, {
-        ...createModelFormState(validResponse).value,
-        baseUrl: "http://127.0.0.1:1234/v1",
+      credentialReentryMessage(embeddingResponse, {
+        ...createModelFormState(embeddingResponse).value,
+        baseUrl: "https://alternate.example.test/v1",
       }),
-    ).toBeNull();
+    ).toBe("测试不会复用已保存凭据，请重新输入生成模型 API Key");
     expect(
-      credentialReentryMessage(validResponse, {
-        ...createModelFormState(validResponse).value,
+      credentialReentryMessage(embeddingResponse, {
+        ...createModelFormState(embeddingResponse).value,
+        baseUrl: "https://models.example.test/v1/",
         clearApiKey: true,
+      }),
+    ).toBe("测试不会复用已保存凭据，请重新输入生成模型 API Key");
+    expect(
+      credentialReentryMessage(embeddingResponse, {
+        ...createModelFormState(embeddingResponse).value,
+        apiKey: "current-test-key",
+        embeddingBaseUrl: "https://alternate-embedding.example.test/v1",
+      }),
+    ).toBe("测试不会复用已保存凭据，请重新输入 Embedding API Key");
+    expect(
+      credentialReentryMessage(embeddingResponse, {
+        ...createModelFormState(embeddingResponse).value,
+        apiKey: "current-test-key",
+        embeddingBaseUrl: "https://embedding.example.test/v1/",
+      }),
+    ).toBe("测试不会复用已保存凭据，请重新输入 Embedding API Key");
+    expect(
+      credentialReentryMessage(embeddingResponse, {
+        ...createModelFormState(embeddingResponse).value,
+        apiKey: "current-test-key",
+        embeddingBaseUrl: "http://127.0.0.1:1234/v1",
       }),
     ).toBeNull();
   });

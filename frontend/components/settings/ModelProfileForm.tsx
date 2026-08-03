@@ -139,6 +139,20 @@ function isHttpUrl(value: string): boolean {
   }
 }
 
+function isLoopbackUrl(value: string): boolean {
+  try {
+    const hostname = new URL(value).hostname.toLowerCase();
+    return (
+      hostname === "localhost" ||
+      hostname === "[::1]" ||
+      hostname === "::1" ||
+      hostname.startsWith("127.")
+    );
+  } catch {
+    return false;
+  }
+}
+
 export function validateModelFormValue(
   value: ModelProfileFormValue,
 ): ModelFormErrors {
@@ -185,18 +199,16 @@ export function credentialReentryMessage(
 
   if (
     profile.generation_credential_status === "configured" &&
-    value.baseUrl === profile.base_url &&
     value.apiKey.trim() === "" &&
-    !value.clearApiKey
+    !isLoopbackUrl(value.baseUrl)
   ) {
     return "测试不会复用已保存凭据，请重新输入生成模型 API Key";
   }
   if (
     value.embeddingEnabled &&
     profile.embedding_credential_status === "configured" &&
-    value.embeddingBaseUrl === profile.embedding_base_url &&
     value.embeddingApiKey.trim() === "" &&
-    !value.clearEmbeddingApiKey
+    !isLoopbackUrl(value.embeddingBaseUrl)
   ) {
     return "测试不会复用已保存凭据，请重新输入 Embedding API Key";
   }
@@ -435,6 +447,11 @@ export function ModelProfileForm({
             id="model-api-key"
             value={value.apiKey}
             onChange={(apiKey) => update({ apiKey })}
+            placeholder={
+              mode === "edit"
+                ? "留空则保留；测试时可能需重新输入"
+                : "可选：无鉴权本地服务可留空"
+            }
             autoComplete="new-password"
           />
           {mode === "edit" ? (
@@ -556,6 +573,11 @@ export function ModelProfileForm({
                 id="embedding-api-key"
                 value={value.embeddingApiKey}
                 onChange={(embeddingApiKey) => update({ embeddingApiKey })}
+                placeholder={
+                  mode === "edit"
+                    ? "留空则保留；测试时可能需重新输入"
+                    : "可选：无鉴权本地服务可留空"
+                }
                 autoComplete="new-password"
               />
               {mode === "edit" ? (
