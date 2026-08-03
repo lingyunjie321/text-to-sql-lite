@@ -180,15 +180,15 @@ class OpenAICompatibleLLMProvider:
             f"{str(self._settings.base_url).rstrip('/')}"
             "/chat/completions"
         )
+        headers = {"Content-Type": "application/json"}
+        if self._settings.api_key_value is not None:
+            headers["Authorization"] = (
+                f"Bearer {self._settings.api_key_value}"
+            )
         request = Request(
             endpoint,
             data=request_body,
-            headers={
-                "Authorization": (
-                    f"Bearer {self._settings.api_key_value}"
-                ),
-                "Content-Type": "application/json",
-            },
+            headers=headers,
             method="POST",
         )
 

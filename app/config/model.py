@@ -17,7 +17,7 @@ class LLMSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="LLM_", extra="ignore")
 
     base_url: HttpUrl
-    api_key: SecretStr
+    api_key: SecretStr | None = None
     model: str
     timeout_seconds: float = Field(default=30, ge=1, le=120)
     temperature: Literal[0] = 0
@@ -25,12 +25,19 @@ class LLMSettings(BaseSettings):
     max_output_tokens: int = Field(default=2_048, ge=1, le=100_000)
 
     @property
-    def api_key_value(self) -> str:
+    def api_key_value(self) -> str | None:
+        if self.api_key is None:
+            return None
         return self.api_key.get_secret_value()
 
     @field_validator("api_key")
     @classmethod
-    def validate_api_key(cls, value: SecretStr) -> SecretStr:
+    def validate_api_key(
+        cls,
+        value: SecretStr | None,
+    ) -> SecretStr | None:
+        if value is None:
+            return None
         stripped = value.get_secret_value().strip()
         if not stripped or any(
             not 33 <= ord(character) <= 126

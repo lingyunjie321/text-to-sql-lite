@@ -16,7 +16,7 @@ class EmbeddingSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="EMBEDDING_", extra="ignore")
 
     base_url: HttpUrl = Field(repr=False)
-    api_key: SecretStr
+    api_key: SecretStr | None = None
     model: str = Field(repr=False)
     dimension: int = Field(ge=1)
     timeout_seconds: float = Field(default=10, gt=0, le=10)
@@ -24,12 +24,19 @@ class EmbeddingSettings(BaseSettings):
     max_response_bytes: Literal[4_194_304] = 4_194_304
 
     @property
-    def api_key_value(self) -> str:
+    def api_key_value(self) -> str | None:
+        if self.api_key is None:
+            return None
         return self.api_key.get_secret_value()
 
     @field_validator("api_key")
     @classmethod
-    def validate_api_key(cls, value: SecretStr) -> SecretStr:
+    def validate_api_key(
+        cls,
+        value: SecretStr | None,
+    ) -> SecretStr | None:
+        if value is None:
+            return None
         stripped = value.get_secret_value().strip()
         if not stripped or any(
             not 33 <= ord(character) <= 126

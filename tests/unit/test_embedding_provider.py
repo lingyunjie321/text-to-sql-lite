@@ -232,6 +232,24 @@ def test_provider_preserves_input_order_and_sends_compatible_request() -> None:
     assert transport.responses[0].read_amounts == [4_194_305]
 
 
+def test_provider_omits_authorization_when_api_key_is_not_configured() -> None:
+    provider, transport = _provider(
+        body=_response(
+            [{"index": 0, "embedding": [1, 0.0, 0]}]
+        ),
+        settings=_settings(
+            base_url="http://localhost:11434/v1",
+            api_key=None,
+        ),
+    )
+
+    provider.embed(("film",))
+
+    request, _ = transport.calls[0]
+    assert request.get_header("Authorization") is None
+    assert request.get_header("Content-type") == "application/json"
+
+
 def test_provider_applies_stricter_per_call_timeout() -> None:
     provider, transport = _provider(
         body=_response(

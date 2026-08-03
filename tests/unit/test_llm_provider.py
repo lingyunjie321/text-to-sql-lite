@@ -194,6 +194,28 @@ def test_provider_sends_openai_compatible_structured_request() -> None:
     assert "stage5-test-secret" not in bytes(request.data or b"").decode()
 
 
+def test_provider_omits_authorization_when_api_key_is_not_configured() -> None:
+    transport = FakeTransport(
+        body=_response(
+            {"sql": "SELECT 1", "clarification_reason": None},
+        )
+    )
+    provider = OpenAICompatibleLLMProvider(
+        LLMSettings(
+            base_url="http://localhost:11434/v1",
+            api_key=None,
+            model="model-a",
+        ),
+        transport=transport,
+    )
+
+    provider.generate(_messages())
+
+    request, _ = transport.calls[0]
+    assert request.get_header("Authorization") is None
+    assert request.get_header("Content-type") == "application/json"
+
+
 def test_provider_reports_the_prompt_version_attached_to_messages() -> None:
     transport = FakeTransport(
         body=_response(
