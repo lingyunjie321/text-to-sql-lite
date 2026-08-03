@@ -11,9 +11,10 @@ PostgreSQL 16.14、Pagila 3.1.0、`public` Schema 和 13 张授权表；本地 P
 
 后端已经完成本地 ModelProfile / DatasourceProfile、SQLite 非敏感配置持久化、
 进程内凭据、动态数据库运行时和 Profile-ID 查询入口。数据源可以测试连接、发现
-metadata、保存 allowlist，并按 Profile ID 创建或复用 Connector。动态模型切换、
-Embedding 可选化和前端 Profile 闭环仍未实现，因此当前设置页还不能代表完整的
-本地工具体验。
+metadata、保存 allowlist，并按 Profile ID 创建或复用 Connector。模型可以在保存
+前测试连接，并按 Profile ID 创建或复用单模型运行时；未配置 Embedding 时自动使用
+BM25-only。前端 Profile 闭环属于阶段 5，因此当前设置页还不能代表完整的本地工具
+体验。
 
 PostgreSQL/Pagila 是正式评测基线。MySQL 后端已在锁定的 MySQL 8.4.10 + 官方
 Sakila 环境完成 Connector 和 Profile-ID API 真实验证，并在账号权限和事务两层
@@ -32,8 +33,11 @@ Sakila 环境完成 Connector 和 Profile-ID API 真实验证，并在账号权�
   deprecated，不能指定复杂度或 Top-K。
 - **本地 Profile 与动态数据源**：ModelProfile 与 DatasourceProfile 的非敏感
   字段保存到本地 SQLite；API Key 和数据库密码只保存在当前进程内存；新查询只需
-  提交两个 Profile ID。DatasourceProfile 会按需创建/复用 Connector，模型
-  Provider 在阶段 4 前仍使用静态配置。
+  提交两个 Profile ID。DatasourceProfile 会按需创建/复用 Connector，ModelProfile
+  会把同一个 OpenAI-compatible 模型映射到 simple、standard、complex 三条路由。
+- **离线与可选 Embedding**：静态模型和 Embedding 配置组都可省略；本地
+  Ollama、vLLM、LM Studio 等回环 OpenAI-compatible 服务允许 HTTP 且可以不使用
+  API Key。未配置 Embedding 时使用 BM25；可降级的 Embedding 故障不会阻断基础查询。
 - **结构发现与授权隔离**：metadata 返回账号可发现的非系统 Schema、表/视图、
   字段、主键和外键，但不会扩大 allowlist；只有显式 PUT 并在线校验成功的对象才
   能进入 AI 查询范围，空或失效范围一律 fail closed。
@@ -78,8 +82,8 @@ Embedding 文档构建、融合、Rerank 和 Prompt 之前；Schema、语义、E
 - Docker Desktop 或兼容的 Docker Engine + Compose
 - 首次获取 Pagila fixture 时能够访问 GitHub；获取 Sakila fixture 时能够访问
   MySQL 官方下载站
-- 一个 OpenAI-compatible Chat Completions 服务
-- 一个 OpenAI-compatible Embeddings 服务
+- 一个 OpenAI-compatible Chat Completions 服务（可在启动后通过 Profile 配置）
+- 可选的 OpenAI-compatible Embeddings 服务
 - 一个 ASGI server（例如 Uvicorn；本项目不把部署服务器固定为运行时依赖）
 - 完整仓库检出；当前 wheel 不包含 `evaluation/`、`infrastructure/` 和运行所需
   的语义 manifest，不能脱离仓库独立部署
@@ -179,9 +183,9 @@ Uvicorn 只是启动示例，未写入 `pyproject.toml`，也不属于当前资�
 
 启动时会加载 `.env`；如配置了静态数据库，则连接数据库、读取授权元数据并校验
 锁定语义 manifest。无静态数据库配置时应用仍可启动并提供 Profile API。应用还会
-创建当前静态 LLM/Embedding runtime，并初始化默认位于
+按完整配置组创建可选的静态 LLM/Embedding runtime，并初始化默认位于
 `~/.text-to-sql-lite/config.db` 的本地 Profile Store。Profile 模块导入本身不会
-创建目录或文件；模型或 Embedding 的必需启动配置在阶段 4 前仍会 fail closed。
+创建目录或文件；没有静态模型和 Embedding 配置时仍可完全通过本地 Profile 工作。
 
 ### 6. 发起查询
 
@@ -210,7 +214,7 @@ curl --fail-with-body \
 失败时只返回脱敏 `error`，不会返回当前或历史 SQL。交互式 OpenAPI 文档默认
 位于 `http://127.0.0.1:8000/docs`。
 
-阶段 3 推荐的新查询形式只提交 Profile ID：
+推荐的新查询形式只提交 Profile ID：
 
 ```json
 {
@@ -222,12 +226,10 @@ curl --fail-with-body \
 }
 ```
 
-该请求只有在两个 Profile 已经保存，模型 Profile 与当前静态模型身份匹配，且
-DatasourceProfile 的密码仍在进程内存时才会进入 Workflow。数据源 runtime 按需
-动态创建和复用；Profile 更新或删除后旧连接会关闭，更新后读取到的旧 Profile
-也不能重新缓存运行时。任一解析或连接失败都返回
-明确的 404、409 或 503，不会回退到默认数据源或默认模型。动态 Model Provider
-属于阶段 4。
+该请求只有在两个 Profile 已经保存，且 DatasourceProfile 的密码仍在进程内存时
+才会进入 Workflow。数据源与模型 runtime 都按需创建和复用；Profile 更新或删除后
+对应缓存立即失效，旧 Profile 不能重新缓存运行时。任一解析或连接失败都返回明确的
+404、409 或 503，不会回退到默认数据源或默认模型。
 
 ## 配置说明
 
@@ -245,8 +247,8 @@ DatasourceProfile 的密码仍在进程内存时才会进入 Workflow。数据�
 
 ## API 约束
 
-当前后端公开 15 个业务操作：health、config、query，模型 Profile 5 个 CRUD，
-以及数据源 Profile 5 个 CRUD、连接测试和 metadata。查询端点接受七个字段：
+当前后端公开 16 个业务操作：health、config、query，模型 Profile 5 个 CRUD 与
+连接测试，以及数据源 Profile 5 个 CRUD、连接测试和 metadata。查询端点接受七个字段：
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
@@ -266,6 +268,7 @@ Profile 模式不能与任一 override 混用。除上述兼容字段外，API �
 
 | 方法与路径 | 用途 |
 |---|---|
+| `POST /api/v1/local/models/test` | 使用临时配置测试生成模型与可选 Embedding，不保存 Profile 或凭据 |
 | `POST /api/v1/local/models` | 创建模型 Profile，可同时提交 write-only API Key |
 | `GET /api/v1/local/models` | 列出模型 Profile 与凭据状态 |
 | `GET /api/v1/local/models/{id}` | 读取一个模型 Profile |
@@ -281,7 +284,7 @@ Profile 模式不能与任一 override 混用。除上述兼容字段外，API �
 
 SQLite 只保存响应可见的非敏感字段；API Key、密码和完整 DSN 不写入数据库。
 进程重启后 Profile 仍保留，但凭据状态恢复为 `missing`，需要重新输入。第一版不
-引入通用迁移框架或自制加密；数据库 `user_version` 非 0/1 时会 fail closed。
+引入通用迁移框架或自制加密；数据库 `user_version` 非 0/1/2 时会 fail closed。
 创建和更新数据源时会在线验证 allowlist。metadata 的 catalog 与详细结构读取
 共享 30 秒预算。metadata 发现范围不等于查询授权范围；
 Workflow 只接收保存后的非空 allowlist，失效或不匹配时不会回退到完整 metadata。
@@ -419,9 +422,9 @@ frontend/           Next.js 本地界面；当前尚未切换到后端 Profile
 
 ## 项目状态与路线图
 
-核心 PostgreSQL/Pagila MVP 闭环与本地工具阶段 3 的动态数据库后端已经实现，
-但完整产品与正式评测资格仍为 `not_passed`。动态模型 Provider、Embedding 可选化
-和前端配置闭环属于本地工具阶段 4～5；业务知识与 Few-shot、
+核心 PostgreSQL/Pagila MVP 闭环与本地工具阶段 4 的后端已经实现，
+但完整产品与正式评测资格仍为 `not_passed`。前端配置闭环属于本地工具阶段 5；
+业务知识与 Few-shot、
 Session / Checkpoint / Memory 等增强路线是另一套历史阶段编号，当前版本均不能
 宣称已支持。
 

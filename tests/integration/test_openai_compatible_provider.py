@@ -10,6 +10,9 @@ from app.generation import (
     LLMProviderError,
     OpenAICompatibleLLMProvider,
 )
+from app.local.credential_store import ModelCredentials
+from app.local.model_runtime import ModelRuntimeService
+from app.local.profile_models import ModelProfile
 
 
 class RecordingHandler(BaseHTTPRequestHandler):
@@ -130,6 +133,37 @@ def test_provider_uses_real_openai_compatible_http_protocol() -> None:
     assert RecordingHandler.request_payload["response_format"] == {
         "type": "json_object"
     }
+
+
+@pytest.mark.integration
+def test_dynamic_model_runtime_supports_no_auth_loopback_and_one_route() -> None:
+    RecordingHandler.request_headers = {}
+    server = ThreadingHTTPServer(("127.0.0.1", 0), RecordingHandler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        profile = ModelProfile(
+            id="local-model",
+            name="Local model",
+            provider_type="openai_compatible",
+            base_url=f"http://127.0.0.1:{server.server_port}/v1",
+            model_name="local-compatible-model",
+        )
+        service = ModelRuntimeService()
+
+        result = service.test_connection(profile, ModelCredentials())
+        runtime = service.build_runtime(profile, ModelCredentials())
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+    assert result.generation_status == "connected"
+    assert "Authorization" not in RecordingHandler.request_headers
+    routes = runtime.model_routing.route_table.routes
+    assert {route.primary.provider_key for route in routes} == {"primary"}
+    assert len({route.primary.model_config_sha256 for route in routes}) == 1
+    assert all(route.fallback is None for route in routes)
 
 
 @pytest.mark.integration

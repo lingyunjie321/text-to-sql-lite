@@ -283,11 +283,12 @@ def test_openapi_exposes_only_the_specified_post_endpoint() -> None:
     schema = app.openapi()
 
     # POST /api/v1/text-to-sql 是核心契约；GET /health 与 GET /api/v1/config
-    # 是只读辅助端点；/local 路由提供 Profile 与阶段 3 数据源能力。
+    # 是只读辅助端点；/local 路由提供 Profile、数据源和阶段 4 模型测试能力。
     assert set(schema["paths"]) == {
         "/api/v1/text-to-sql",
         "/api/v1/config",
         "/api/v1/local/models",
+        "/api/v1/local/models/test",
         "/api/v1/local/models/{profile_id}",
         "/api/v1/local/datasources",
         "/api/v1/local/datasources/{profile_id}",

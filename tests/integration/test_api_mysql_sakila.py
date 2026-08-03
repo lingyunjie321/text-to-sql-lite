@@ -21,12 +21,15 @@ from app.generation import (
     GenerationResult,
     GeneratedSQL,
     LLMMessage,
+    ModelProviderFactory,
 )
 from app.generation.models import MYSQL_PROMPT_VERSION
 from app.local.credential_store import InMemoryCredentialStore
 from app.local.datasource_runtime import DatasourceRuntimeService
 from app.local.datasource_service import DatasourceProfileService
 from app.local.model_service import ModelProfileService
+from app.local.model_runtime import ModelRuntimeService
+from app.local.model_runtime_registry import ModelRuntimeRegistry
 from app.local.profile_models import DatasourceProfile, ModelProfile
 from app.local.profile_resolver import StaticProfileResolver
 from app.local.profile_store import LocalProfileStore
@@ -152,7 +155,24 @@ def test_profile_ids_execute_mysql_sakila_without_leaking_credentials(
 
     store = LocalProfileStore(tmp_path / "config.db")
     credentials = InMemoryCredentialStore()
-    model_profiles = ModelProfileService(store, credentials)
+    provider = ScriptedProvider(
+        "SELECT actor_id, first_name, last_name FROM actor "
+        "ORDER BY actor_id LIMIT 2"
+    )
+    model_runtime_service = ModelRuntimeService(
+        model_factory=ModelProviderFactory(
+            provider_builder=lambda settings: provider
+        )
+    )
+    model_runtime_registry = ModelRuntimeRegistry(
+        runtime_service=model_runtime_service,
+        credential_store=credentials,
+    )
+    model_profiles = ModelProfileService(
+        store,
+        credentials,
+        runtime_registry=model_runtime_registry,
+    )
     model_profile = ModelProfile(
         id=model_profile_id,
         name="Local deterministic model",
@@ -165,10 +185,6 @@ def test_profile_ids_execute_mysql_sakila_without_leaking_credentials(
         generation_api_key=SecretStr(model_api_key),
     )
 
-    provider = ScriptedProvider(
-        "SELECT actor_id, first_name, last_name FROM actor "
-        "ORDER BY actor_id LIMIT 2"
-    )
     model_routing = single_provider_test_routing(provider)
     embedding_provider = DeterministicEmbeddingProvider()
     runtime_service = DatasourceRuntimeService(
@@ -207,9 +223,11 @@ def test_profile_ids_execute_mysql_sakila_without_leaking_credentials(
         model_profiles=model_profiles,
         datasource_profiles=datasource_profiles,
         contexts={},
-        active_model=model_profile,
+        active_model=None,
         active_datasources={},
         runtime_registry=registry,
+        model_runtime_registry=model_runtime_registry,
+        context_factory=WorkflowContextFactory(),
     )
     sink = RecordingSink()
     services = ApplicationServices(
@@ -223,6 +241,8 @@ def test_profile_ids_execute_mysql_sakila_without_leaking_credentials(
         embedding_provider=embedding_provider,
         datasource_runtime_service=runtime_service,
         runtime_registry=registry,
+        model_runtime_service=model_runtime_service,
+        model_runtime_registry=model_runtime_registry,
     )
     app = create_app(
         services=services,
@@ -243,6 +263,7 @@ def test_profile_ids_execute_mysql_sakila_without_leaking_credentials(
             )
     finally:
         registry.close_all()
+        model_runtime_registry.close_all()
         credentials.clear_all()
 
     body = response.json()

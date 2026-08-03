@@ -547,3 +547,65 @@ MySQL 已贯通独立方言、Prompt 版本、SQLGlot 校验、只读事务和�
 仍未完成且不属于阶段 3：动态 Model Provider、模型测试接口、Embedding 可选化、
 BM25-only 启动、前端 Profile 闭环和凭据持久化。精确设计与错误码见
 `docs/local-datasource-phase3.md`。
+
+## 13. 阶段 4 实施后状态附录（2026-08-03）
+
+阶段 4 在动态数据库链路上增加动态模型运行时，不改变 LangGraph、Workflow
+State、SQL 生成契约、SQLGlot 安全门或修复节点。当前 Profile-ID 查询链为：
+
+```text
+POST /api/v1/text-to-sql
+→ StaticProfileResolver（读取两个 Profile）
+→ RuntimeRegistry（动态 Connector）
+  + ModelRuntimeRegistry（动态模型与可选 Embedding）
+→ WorkflowContextFactory（组合请求上下文）
+→ Text-to-SQL Workflow
+```
+
+一个 ModelProfile 只创建一个生成 Provider，并确定性映射到 simple、standard、
+complex 三条主路由；动态 Profile 不启用 fallback。模型 Profile 更新、Key 更新或
+删除都会使对应缓存失效，下一次查询按新身份重建。静态多模型路由和 deprecated
+override 仍仅用于兼容旧路径，不参与 Profile 模式的回退。
+
+模型连接测试新增 `POST /api/v1/local/models/test`。它接收不含 ID/name 的临时配置，
+执行一次最小结构化生成，并在配置 Embedding 时执行单文本向量调用。临时对象不会
+写入 SQLite、Credential Store、Runtime Registry、Trace 或查询历史。生成失败返回
+稳定脱敏的 422/503/504；Embedding 失败返回 HTTP 200、`embedding=unavailable`，
+明确表示 BM25-only 仍可用。
+
+启动配置现在按完整组可选：没有静态数据库、LLM 或 Embedding 环境变量时应用仍可
+启动并提供 Profile API。远程 endpoint 必须使用 HTTPS；`localhost` 与 IP loopback
+允许 HTTP。生成与 Embedding Key 均可省略，此时 Provider 不发送 Authorization
+Header，适用于本地 Ollama、vLLM、LM Studio 等 OpenAI-compatible 服务。
+
+Embedding 策略为：
+
+```text
+未配置 → WorkflowContext.retrieval_runtime = None → BM25-only
+已配置且可用 → BM25 + Embedding + Fusion
+已配置但出现批准的超时/连接/限流/无效响应 → 同一授权范围与 Schema 版本内降级 BM25
+```
+
+阶段 4 新增或明确的职责：
+
+| 模块 | 职责 |
+|---|---|
+| `app/local/model_runtime.py` | 从 Profile 构造单模型路由、可选 Embedding，并执行临时连接测试 |
+| `app/local/model_runtime_registry.py` | 按 Profile 与进程内 Key 修订号缓存、失效模型 runtime |
+| `app/local/profile_resolver.py` | 将动态数据库与动态模型组合成请求级 WorkflowContext |
+| `app/api/routes/models.py` | 模型测试与 CRUD 的脱敏 HTTP 边界 |
+| `app/api/bootstrap.py` | 允许静态数据库/模型/Embedding 配置组分别缺省并统一清理资源 |
+
+阶段 4 后仍未完成的是前端模型设置、默认模型选择、工作台 Profile 选择以及旧
+localStorage 敏感配置迁移；这些属于阶段 5。API Key 和数据库密码仍只在当前进程
+内存中保存，重启后需要重新输入；阶段 4 没有引入 Keychain 或其他持久化 Secret。
+精确设计与实施计划见 `docs/superpowers/specs/2026-08-03-local-model-phase4-design.md`
+和 `docs/superpowers/plans/2026-08-03-local-model-phase4.md`。
+
+阶段 4 完成时的本机验证证据：Python compileall 通过；unit + security
+`1443 passed`，分支覆盖率 `86%`；回环 OpenAI-compatible 生成/Embedding、
+Embedding 超时降级及合成评测 `10 passed`；`pip check` 无破损依赖；前端 Vitest
+`49 passed`，production build 通过。真实 Pagila 未执行，因为当前进程未设置
+`TEXT_TO_SQL_DATABASE_DSN`；MySQL 本地配置存在但 53306 服务未启动，因此本轮不把
+真实 PostgreSQL/MySQL E2E 计为通过。非 Gold 的 Stage 1 合成校准 freeze 已按当前
+受控代码重新绑定；Pagila Gold Case、正式 baseline 与历史参考文档均未修改。
