@@ -142,11 +142,20 @@ function isHttpUrl(value: string): boolean {
 function isLoopbackUrl(value: string): boolean {
   try {
     const hostname = new URL(value).hostname.toLowerCase();
+    const ipv4Octets = hostname.split(".");
+    const isIpv4Loopback =
+      ipv4Octets.length === 4 &&
+      ipv4Octets.every(
+        (octet) => /^\d{1,3}$/.test(octet) && Number(octet) <= 255,
+      ) &&
+      Number(ipv4Octets[0]) === 127;
     return (
       hostname === "localhost" ||
       hostname === "[::1]" ||
       hostname === "::1" ||
-      hostname.startsWith("127.")
+      hostname === "[0:0:0:0:0:0:0:1]" ||
+      hostname === "0:0:0:0:0:0:0:1" ||
+      isIpv4Loopback
     );
   } catch {
     return false;

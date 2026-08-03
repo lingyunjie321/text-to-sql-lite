@@ -229,6 +229,20 @@ describe("ModelProfileForm", () => {
     expect(
       credentialReentryMessage(embeddingResponse, {
         ...createModelFormState(embeddingResponse).value,
+        baseUrl: "https://127.attacker.test/v1",
+      }),
+    ).toBe("测试不会复用已保存凭据，请重新输入生成模型 API Key");
+    expect(
+      credentialReentryMessage(embeddingResponse, {
+        ...createModelFormState(embeddingResponse).value,
+        baseUrl: "http://127.0.0.1:1234/v1",
+        apiKey: "",
+        embeddingEnabled: false,
+      }),
+    ).toBeNull();
+    expect(
+      credentialReentryMessage(embeddingResponse, {
+        ...createModelFormState(embeddingResponse).value,
         baseUrl: "https://models.example.test/v1/",
         clearApiKey: true,
       }),
@@ -238,6 +252,13 @@ describe("ModelProfileForm", () => {
         ...createModelFormState(embeddingResponse).value,
         apiKey: "current-test-key",
         embeddingBaseUrl: "https://alternate-embedding.example.test/v1",
+      }),
+    ).toBe("测试不会复用已保存凭据，请重新输入 Embedding API Key");
+    expect(
+      credentialReentryMessage(embeddingResponse, {
+        ...createModelFormState(embeddingResponse).value,
+        apiKey: "current-test-key",
+        embeddingBaseUrl: "https://127.attacker.test/v1",
       }),
     ).toBe("测试不会复用已保存凭据，请重新输入 Embedding API Key");
     expect(
