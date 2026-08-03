@@ -1,11 +1,10 @@
 "use client";
 
 import { useState, useCallback, useEffect } from "react";
-import { Cpu, Database, Info, ChevronDown } from "lucide-react";
-import { ModelConfigSection } from "./ModelConfigSection";
+import { Cpu, Database, Info } from "lucide-react";
+import { ModelProfileSection } from "./ModelProfileSection";
 import { DatabaseConfigSection } from "./DatabaseConfigSection";
 import { AboutSection } from "./AboutSection";
-import { getModelConfig, isModelConfigured } from "@/lib/model-config";
 import { getDbConfig, isDbConfigured } from "@/lib/datasource-config";
 
 type SectionId = "models" | "database" | "about";
@@ -31,10 +30,10 @@ interface ToastState {
 export function SettingsLayout() {
   const [activeSection, setActiveSection] = useState<SectionId>("models");
   const [toast, setToast] = useState<ToastState | null>(null);
-  const [mobileExpanded, setMobileExpanded] = useState<Set<SectionId>>(
-    new Set(["models"]),
-  );
   const [configVersion, setConfigVersion] = useState(0);
+  const [modelProfileCount, setModelProfileCount] = useState<
+    number | null | undefined
+  >(undefined);
 
   const showToast = useCallback(
     (message: string, type: "success" | "info" | "error" = "info") => {
@@ -50,30 +49,11 @@ export function SettingsLayout() {
     return () => clearTimeout(timer);
   }, [toast]);
 
-  const toggleMobile = useCallback((id: SectionId) => {
-    setMobileExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
-  }, []);
-
   const handleConfigCleared = useCallback(() => {
     setConfigVersion((v) => v + 1);
   }, []);
 
   // Status badges for sidebar
-  const modelConfigured = (() => {
-    try {
-      return isModelConfigured(getModelConfig());
-    } catch {
-      return false;
-    }
-  })();
   const dbConfigured = (() => {
     try {
       return isDbConfigured(getDbConfig());
@@ -82,10 +62,25 @@ export function SettingsLayout() {
     }
   })();
 
+  const statusFor = (id: SectionId): string | null => {
+    if (id === "models") {
+      if (modelProfileCount === undefined) return "加载中";
+      if (modelProfileCount === null) return "不可用";
+      return modelProfileCount > 0 ? "已配置" : "未配置";
+    }
+    if (id === "database") return dbConfigured ? "已配置" : "未配置";
+    return null;
+  };
+
   const renderSection = (id: SectionId) => {
     switch (id) {
       case "models":
-        return <ModelConfigSection key={configVersion} onToast={showToast} />;
+        return (
+          <ModelProfileSection
+            onToast={showToast}
+            onProfileCountChange={setModelProfileCount}
+          />
+        );
       case "database":
         return <DatabaseConfigSection key={configVersion} onToast={showToast} />;
       case "about":
@@ -119,24 +114,14 @@ export function SettingsLayout() {
         </div>
       )}
 
-      {/* Desktop: sidebar + content */}
-      <div className="hidden gap-6 md:flex">
+      <div className="md:flex md:gap-6">
         {/* Sidebar */}
-        <aside className="w-56 shrink-0">
+        <aside className="hidden w-56 shrink-0 md:block">
           <nav className="space-y-1">
             {navItems.map((item) => {
               const { Icon } = item;
               const isActive = activeSection === item.id;
-              const badge =
-                item.id === "models"
-                  ? modelConfigured
-                    ? "已配置"
-                    : "未配置"
-                  : item.id === "database"
-                    ? dbConfigured
-                      ? "已配置"
-                      : "未配置"
-                    : null;
+              const badge = statusFor(item.id);
               return (
                 <button
                   key={item.id}
@@ -168,67 +153,49 @@ export function SettingsLayout() {
           </nav>
         </aside>
 
-        {/* Content */}
         <div className="min-w-0 flex-1">
+          {/* Mobile: navigation only. Content is mounted once below. */}
+          <nav className="mb-4 grid grid-cols-1 gap-2 sm:grid-cols-3 md:hidden">
+            {navItems.map((item) => {
+              const { Icon } = item;
+              const isActive = activeSection === item.id;
+              const badge = statusFor(item.id);
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => setActiveSection(item.id)}
+                  className={`flex w-full items-center justify-between rounded-lg border px-4 py-3 text-left shadow-sm ${
+                    isActive
+                      ? "border-[var(--color-primary)] bg-[var(--color-primary-light)]"
+                      : "border-[var(--color-border)] bg-white"
+                  }`}
+                >
+                  <span className="flex items-center gap-2 text-sm font-medium text-[var(--color-text-primary)]">
+                    <Icon className="h-4 w-4 text-[var(--color-text-tertiary)]" />
+                    {item.label}
+                  </span>
+                  <span className="flex items-center gap-2">
+                    {badge && (
+                      <span
+                        className={`text-xs ${
+                          badge === "已配置"
+                            ? "text-[var(--color-success)]"
+                            : "text-[var(--color-text-tertiary)]"
+                        }`}
+                      >
+                        {badge}
+                      </span>
+                    )}
+                  </span>
+                </button>
+              );
+            })}
+          </nav>
+
+          {/* Shared desktop/mobile content instance. */}
           {renderSection(activeSection)}
         </div>
-      </div>
-
-      {/* Mobile: accordion */}
-      <div className="space-y-3 md:hidden">
-        {navItems.map((item) => {
-          const { Icon } = item;
-          const isExpanded = mobileExpanded.has(item.id);
-          const badge =
-            item.id === "models"
-              ? modelConfigured
-                ? "已配置"
-                : "未配置"
-              : item.id === "database"
-                ? dbConfigured
-                  ? "已配置"
-                  : "未配置"
-                : null;
-          return (
-            <div
-              key={item.id}
-              className="overflow-hidden rounded-lg border border-[var(--color-border)] bg-white shadow-sm"
-            >
-              <button
-                onClick={() => toggleMobile(item.id)}
-                className="flex w-full items-center justify-between px-4 py-3"
-              >
-                <span className="flex items-center gap-2 text-sm font-medium text-[var(--color-text-primary)]">
-                  <Icon className="h-4 w-4 text-[var(--color-text-tertiary)]" />
-                  {item.label}
-                </span>
-                <span className="flex items-center gap-2">
-                  {badge && (
-                    <span
-                      className={`text-xs ${
-                        badge === "已配置"
-                          ? "text-[var(--color-success)]"
-                          : "text-[var(--color-text-tertiary)]"
-                      }`}
-                    >
-                      {badge}
-                    </span>
-                  )}
-                  <ChevronDown
-                    className={`h-4 w-4 text-[var(--color-text-tertiary)] transition-transform duration-150 ${
-                      isExpanded ? "rotate-180" : ""
-                    }`}
-                  />
-                </span>
-              </button>
-              {isExpanded && (
-                <div className="border-t border-[var(--color-border)] p-4">
-                  {renderSection(item.id)}
-                </div>
-              )}
-            </div>
-          );
-        })}
       </div>
     </div>
   );
