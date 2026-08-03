@@ -7,26 +7,24 @@
 
 > 本文同时记录两条不同的交付路线：原有的“增强能力
 > Stage 0～5”和当前的“本地工具交付阶段 0～6”。本轮“本地工具
-> 阶段 3”专指动态数据库连接，不是下文原有的 Session/Checkpoint/Memory
-> Stage 3。
+> 阶段 4”专指动态模型与离线模式，不是下文原有的多数据库/多方言
+> Stage 4。
 
-## 当前编码任务：本地工具阶段 3
+## 当前编码任务：本地工具阶段 4
 
-- `DatasourceProfile` 可按 ID 动态创建、复用、失效和关闭 PostgreSQL/MySQL
-  Connector；不依赖默认 `.env` 数据源。
-- 数据源接口补齐连接测试与完整非系统 metadata 发现。metadata 只用于展示，
-  绝不自动扩大 `allowed_schemas` / `allowed_tables`。
-- 创建或更新 allowlist 时必须在线验证为当前账号可发现对象的子集；查询只使用
-  Profile allowlist，并在空、失效或不匹配时 fail closed。
-- Metadata 的 catalog 与详细结构读取共享固定 30 秒端到端预算；500 个关系、
-  10,000 个字段和 5,000 个外键上限按完整对象边界截断并返回 `truncated`。
-- MySQL 使用原子只读事务和数据库只读账号双重边界；MySQL 生成、SQLGlot 校验
-  与真实执行使用独立方言和 Prompt 版本；合法 MySQL SQL 的指纹按 MySQL 语法
-  归一，纯格式变化不能绕过循环检测。
-- 标准查询仍只提交 `datasource_id` 与 `model_profile_id`。模型 Provider 和
-  Embedding 仍由现有静态配置提供，动态模型与 BM25-only 留到阶段 4。
+- `ModelProfile` 可按 ID 动态创建、复用和失效 OpenAI-compatible 生成 Provider；
+  不依赖默认 `.env` 模型。
+- 新增保存前模型测试；临时配置和 Key 不写入 Profile Store、运行时缓存、日志、
+  Trace 或查询历史。
+- 单个生成模型默认映射到 simple、standard、complex 三条主路由；动态 Profile
+  不启用 fallback，高级多模型路由继续只保留在底层兼容路径。
+- Embedding 未配置时允许启动并使用 BM25-only；配置后使用现有融合检索，批准的
+  Embedding 故障只降级到同授权、同 Schema 版本的 BM25。
+- 非 loopback endpoint 必须使用 HTTPS；只有 localhost 和 IP loopback 允许 HTTP。
+- 标准查询仍只提交 `datasource_id` 与 `model_profile_id`，动态模型与阶段 3 的动态
+  PostgreSQL/MySQL 数据源在 Resolver 边界组合，不修改 Workflow。
 - `model_overrides` 和 `datasource_override` 继续作为 deprecated 兼容路径；
-  StarRocks 继续标记实验，不进入动态 Profile。
+  前端 Profile 闭环留到阶段 5，StarRocks 继续标记实验。
 - 不修改 Workflow 图、节点、State、三次修复、32 步限制、Schema Linking、
   Comparator 或 Gold。
 
@@ -730,8 +728,9 @@ SQLite 只保存 Profile 公开字段；API Key、密码和完整 DSN 不得进�
 合法的路由配置。Fallback 只有在配置了独立 Provider 且显式为至少一条路由开启
 时才生效，并且必须满足同一数据边界及 Token 上限约束。凭据只通过
 Secret/环境变量注入；本地 Profile 写入端点接收的凭据是另一个受控来源，
-只在当前单进程内存中存活。启动时校验配置；缺少数据库、声明的生成模型路由或
-Embedding 必要配置时不得以宽松模式运行。
+只在当前单进程内存中存活。启动时校验静态配置；数据库、生成模型或 Embedding
+配置均允许完全缺省并等待本地 Profile，但任一静态配置只提供部分必要字段时必须
+fail closed。Embedding 完全缺省时使用 BM25-only，不得扩大授权或使用陈旧索引。
 
 ## 14. 日志与 Trace
 

@@ -468,7 +468,46 @@ Schema 字段依据已锁定的 Pagila 3.1.0、commit
 - 不新增无理由 skip；unit+security 分支覆盖率不低于 83%；Gold 内容和
   `16 verified / 2 draft` 状态不变。
 
-## 15. 增强能力 Stage 1：检索与路由增强门禁
+## 15. 本地工具阶段 4：动态模型与离线模式门禁
+
+### 动态 Provider 与模型测试
+
+- `POST /api/v1/local/models/test` 使用临时 Provider 验证项目结构化生成契约；
+  完成后不保存 Profile、Key、运行时、模型响应、Prompt、Trace 或历史。
+- 生成测试失败返回稳定脱敏错误；生成成功但可选 Embedding 失败时明确返回
+  `embedding=unavailable`，并说明 BM25-only 仍可用，不把增强检索失败伪装成
+  整体生成模型失败。
+- 单个动态生成 Provider 精确映射 simple、standard、complex 三条主路由；动态
+  Profile 不启用 fallback，请求不能指定 Route 或 Provider。
+- `ModelRuntimeRegistry` 按 Model Profile ID 并发单建、复用和失败重试；endpoint、
+  model、Embedding 配置或任一 Key 变化后旧运行时不得继续使用。
+- Profile Resolver 将已解析的数据源运行时与模型运行时显式组合；任一 Profile、
+  凭据或运行时失败都在 Workflow 前拒绝，不回退默认 `.env` 资源。
+
+### Embedding 可选化与安全降级
+
+- `embedding_base_url`、`embedding_model`、`embedding_dimension` 必须全有或全无；
+  未配置时不创建 RetrievalRuntime，Schema Linking 直接走 BM25-only。
+- 配置 Embedding 时继续先授权过滤再建文档、索引和打分；索引键保持数据源、授权
+  摘要、Schema/语义、Embedding 模型与维数、策略版本隔离。
+- 超时、连接、限流、无效响应和维数不匹配只在同授权、同 Schema 版本且 BM25
+  有安全候选时按既有矩阵降级；不得扩大权限、使用陈旧索引或隐藏降级。
+- 静态生成模型和 Embedding 允许完全缺省；无静态配置时应用可启动并等待 Profile，
+  任一静态配置半配置时启动失败。
+
+### 安全与通过线
+
+- API Key 可为空以支持无鉴权 loopback 服务；配置 Key 时只存在进程内存，未配置
+  时不发送 Authorization Header。非 loopback HTTP、URL 凭据、query、fragment
+  和重定向继续拒绝。
+- SQLite 迁移只增加非敏感 Embedding 维数字段；Key 不得命中数据库、WAL/SHM、
+  OpenAPI、响应、异常、日志或 Trace。
+- 无静态 LLM/Embedding 的 BM25-only Profile 查询、动态 PostgreSQL/Pagila 和
+  MySQL/Sakila 链路可达；旧普通请求、Override 和静态多模型路由保持兼容。
+- 不新增无理由 skip；unit+security 分支覆盖率不低于 83%；Workflow 图、节点、
+  State、Comparator、Gold 内容与 `16 verified / 2 draft` 状态不变。
+
+## 16. 增强能力 Stage 1：检索与路由增强门禁
 
 ### 功能完成
 
