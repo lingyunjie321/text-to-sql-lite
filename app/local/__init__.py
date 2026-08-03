@@ -7,6 +7,12 @@ from app.local.datasource_runtime import (
     DatasourceRuntimeService,
 )
 from app.local.profile_models import DatasourceProfile, ModelProfile
+from app.local.model_runtime import (
+    ModelConnectionTestResult,
+    ModelRuntime,
+    ModelRuntimeError,
+    ModelRuntimeService,
+)
 from app.local.runtime_registry import RuntimeRegistry
 
 __all__ = [
@@ -16,5 +22,9 @@ __all__ = [
     "DatasourceRuntimeError",
     "DatasourceRuntimeService",
     "ModelProfile",
+    "ModelConnectionTestResult",
+    "ModelRuntime",
+    "ModelRuntimeError",
+    "ModelRuntimeService",
     "RuntimeRegistry",
 ]

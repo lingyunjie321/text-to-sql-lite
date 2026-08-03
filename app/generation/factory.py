@@ -9,6 +9,8 @@ from app.generation.provider import LLMProvider, OpenAICompatibleLLMProvider
 from app.generation.routing import (
     ModelRoutingRuntime,
     build_configured_model_routing_runtime,
+    build_single_provider_routing_runtime,
+    model_config_sha256,
 )
 
 
@@ -43,4 +45,27 @@ class ModelProviderFactory:
         return build_configured_model_routing_runtime(
             settings=settings,
             providers=providers,
+        )
+
+    def create_single(
+        self,
+        settings: LLMSettings,
+        *,
+        data_boundary_id: str,
+    ) -> ModelRoutingRuntime:
+        if (
+            not isinstance(settings, LLMSettings)
+            or not isinstance(data_boundary_id, str)
+            or not data_boundary_id
+            or data_boundary_id != data_boundary_id.strip()
+        ):
+            raise ValueError("model routing settings are invalid")
+        provider = self._provider_builder(settings)
+        return build_single_provider_routing_runtime(
+            provider=provider,
+            model_config_sha256_value=model_config_sha256(settings),
+            max_input_tokens=settings.max_input_tokens,
+            max_output_tokens=settings.max_output_tokens,
+            timeout_seconds=settings.timeout_seconds,
+            data_boundary_id=data_boundary_id,
         )
