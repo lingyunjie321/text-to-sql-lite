@@ -13,8 +13,8 @@ PostgreSQL 16.14、Pagila 3.1.0、`public` Schema 和 13 张授权表；本地 P
 进程内凭据、动态数据库运行时和 Profile-ID 查询入口。数据源可以测试连接、发现
 metadata、保存 allowlist，并按 Profile ID 创建或复用 Connector。模型可以在保存
 前测试连接，并按 Profile ID 创建或复用单模型运行时；未配置 Embedding 时自动使用
-BM25-only。前端 Profile 闭环属于阶段 5，因此当前设置页还不能代表完整的本地工具
-体验。
+BM25-only。浏览器端已经完成模型配置、数据库配置、Schema 授权选择与
+Profile-ID Workbench 查询闭环。
 
 PostgreSQL/Pagila 是正式评测基线。MySQL 后端已在锁定的 MySQL 8.4.10 + 官方
 Sakila 环境完成 Connector 和 Profile-ID API 真实验证，并在账号权限和事务两层
@@ -199,10 +199,11 @@ Compose 当前没有把宿主机端口显式绑定到 `127.0.0.1`，Docker 可�
 `~/.text-to-sql-lite/config.db` 的本地 Profile Store。Profile 模块导入本身不会
 创建目录或文件；没有静态模型和 Embedding 配置时仍可完全通过本地 Profile 工作。
 
-当前浏览器已完成模型 Profile 设置闭环；数据库设置页仍是旧的本地表单，不能作为
-正式 DatasourceProfile 使用。现阶段请通过后端 OpenAPI（`http://127.0.0.1:8000/docs`）
-或 API 完成数据源测试、metadata 读取、allowlist 保存和 Profile-ID 查询。不要在
-旧数据库表单中保存真实密码。对应操作见 [添加数据库](docs/添加数据库.md)。
+浏览器设置页已经接入正式 ModelProfile 与 DatasourceProfile API。用户可以测试模型、
+测试 PostgreSQL/MySQL、读取 metadata、勾选允许查询的表或视图，并把当前模型和数据源
+交给 Workbench。浏览器只持久化两个非敏感 Profile ID；API Key、数据库密码和 DSN
+不会写入 localStorage。对应操作见 [添加模型](docs/添加模型.md) 与
+[添加数据库](docs/添加数据库.md)。
 
 ### 6. 发起查询
 
@@ -434,13 +435,13 @@ infrastructure/     锁定 Pagila/MySQL Compose、初始化和 fixture manifest
 tests/              unit、security 和 integration 测试
 tools/              Pagila/Sakila fixture 与正式评测命令
 docs/               主规格、验收规格、ADR、设计和实施记录
-frontend/           Next.js 本地界面；当前尚未切换到后端 Profile
+frontend/           Next.js 本地界面；通过 BFF 管理 Profile 并发起 ID-only 查询
 ```
 
 ## 项目状态与路线图
 
-核心 PostgreSQL/Pagila MVP 闭环与本地工具阶段 4 的后端已经实现，
-但完整产品与正式评测资格仍为 `not_passed`。前端配置闭环属于本地工具阶段 5；
+核心 PostgreSQL/Pagila MVP、本地工具后端和阶段 5 浏览器 Profile 闭环已经实现，
+但完整产品与正式评测资格仍为 `not_passed`。
 业务知识与 Few-shot、
 Session / Checkpoint / Memory 等增强路线是另一套历史阶段编号，当前版本均不能
 宣称已支持。

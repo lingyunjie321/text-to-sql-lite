@@ -13,8 +13,10 @@
 - 本地工具阶段 2：后端 Profile 模型、SQLite 非敏感持久化、进程内凭据、CRUD
   和 Profile-ID 查询契约已完成
 - 本地工具阶段 3：PostgreSQL/MySQL 动态数据源、连接测试、metadata、allowlist
-  在线验证、RuntimeRegistry 与 MySQL/Sakila 真实闭环已完成；动态模型与前端闭环
-  未完成
+  在线验证、RuntimeRegistry 与 MySQL/Sakila 真实闭环已完成
+- 本地工具阶段 4：动态模型、单模型默认路由、可选 Embedding 与离线启动已完成
+- 本地工具阶段 5：浏览器模型/数据源 Profile、Schema 授权选择和 Workbench
+  Profile-ID 查询闭环已完成；浏览器不持久化 Secret 或 DSN
 - 阶段 1 结构整理：已完成配置、工厂/Bootstrap、API 路由、依赖与公开模型摘要的
   模块化；资格仍为 `not_passed`
 - 本地工具阶段 6：统一启动器、可安装 CLI、前后端生命周期收尾和交付文档已落地；
@@ -343,11 +345,11 @@ stage1.real_environment_validated=false
 ### 当前产品边界
 
 - 静态 Pagila Bootstrap 仍固定 `public` Schema 和 13 张表；DatasourceProfile
-  可以动态创建 PostgreSQL/MySQL Connector，但 ModelProfile 仍只能匹配启动时
-  已有的静态 Provider 路由。
+  可以动态创建 PostgreSQL/MySQL Connector，ModelProfile 可以动态创建单模型
+  OpenAI-compatible runtime；两者均可在无对应静态 `.env` 配置时使用。
 - API 是同步单轮接口；没有 `session_id`、Checkpoint 或长期 Memory。
 - 固定请求身份只适合本地演示；尚无完整认证、用户级隔离或多租户数据模型。
-- MySQL 动态数据源后端已完成真实 Sakila 验证；前端配置闭环仍未完成。
+- MySQL 动态数据源后端已完成真实 Sakila 验证；前端配置闭环已完成。
   StarRocks 维持实验状态，不进入动态 Profile；当前也没有跨数据源 QueryPlan 或
   受限结果合并。
 - 没有动态 Few-shot、业务指标知识库、业务 RAG 或参考 SQL 审批生命周期。

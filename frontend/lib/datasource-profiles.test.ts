@@ -75,6 +75,71 @@ describe("DatasourceProfile response parsing", () => {
     expect(metadata.schemas[0]?.relations[0]?.columns[0]?.name).toBe("actor_id");
     expect(profile.allowed_tables).toEqual(["public.actor"]);
   });
+
+  it("strictly parses every foreign-key response field", () => {
+    const foreignKey = {
+      name: "film_actor_actor_id_fkey",
+      source_schema: "public",
+      source_table: "film_actor",
+      source_columns: ["actor_id"],
+      target_schema: "public",
+      target_table: "actor",
+      target_columns: ["actor_id"],
+    };
+
+    const metadata = parseDatasourceMetadataResponse({
+      datasource_id: profile.id,
+      schemas: [],
+      foreign_keys: [foreignKey],
+      truncated: false,
+      limits,
+    });
+
+    expect(metadata.foreign_keys).toEqual([foreignKey]);
+  });
+
+  it.each([
+    null,
+    { source_schema: "public" },
+    {
+      name: "bad-fkey",
+      source_schema: "public",
+      source_table: "film_actor",
+      source_columns: "actor_id",
+      target_schema: "public",
+      target_table: "actor",
+      target_columns: ["actor_id"],
+    },
+    {
+      name: "bad-fkey",
+      source_schema: "public",
+      source_table: "film_actor",
+      source_columns: ["actor_id"],
+      target_schema: "public",
+      target_table: "actor",
+      target_columns: [1],
+    },
+    {
+      name: "bad-fkey",
+      source_schema: "public",
+      source_table: "film_actor",
+      source_columns: ["actor_id"],
+      target_schema: "public",
+      target_table: "actor",
+      target_columns: ["actor_id"],
+      unexpected: "must-not-be-accepted",
+    },
+  ])("rejects a malformed foreign-key response: %j", (foreignKey) => {
+    expect(() =>
+      parseDatasourceMetadataResponse({
+        datasource_id: profile.id,
+        schemas: [],
+        foreign_keys: [foreignKey],
+        truncated: false,
+        limits,
+      }),
+    ).toThrow();
+  });
 });
 
 describe("DatasourceProfile request building", () => {

@@ -39,6 +39,23 @@ describe("DatasourceProfileForm", () => {
     expect(markup).not.toContain("DSN");
   });
 
+  it("explains that an edit test needs the saved password to be re-entered", () => {
+    const markup = renderToStaticMarkup(
+      <DatasourceProfileForm
+        mode="edit"
+        profile={profile}
+        onSaved={() => undefined}
+        onCancel={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain("留空则保留当前密码");
+    expect(markup).toContain(
+      "已保存密码不会回显；测试连接时请重新输入当前密码。",
+    );
+    expect(markup).not.toContain("database-secret");
+  });
+
   it("shows schema, table, view, and columns without auto-selecting metadata", () => {
     const markup = renderToStaticMarkup(
       <DatasourceSchemaTree

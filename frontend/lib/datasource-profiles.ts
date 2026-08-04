@@ -92,17 +92,19 @@ export interface MetadataSchema {
 export interface DatasourceMetadataResponse {
   datasource_id: string;
   schemas: MetadataSchema[];
-  foreign_keys: Array<{
-    name: string;
-    source_schema: string;
-    source_table: string;
-    source_columns: string[];
-    target_schema: string;
-    target_table: string;
-    target_columns: string[];
-  }>;
+  foreign_keys: MetadataForeignKey[];
   truncated: boolean;
   limits: MetadataLimits;
+}
+
+export interface MetadataForeignKey {
+  name: string;
+  source_schema: string;
+  source_table: string;
+  source_columns: string[];
+  target_schema: string;
+  target_table: string;
+  target_columns: string[];
 }
 
 type JsonParser<T> = (value: unknown) => T;
@@ -219,6 +221,42 @@ function parseMetadataSchema(value: unknown): MetadataSchema {
   return { name: value.name, relations: value.relations.map(parseMetadataRelation) };
 }
 
+const FOREIGN_KEY_FIELDS = new Set([
+  "name",
+  "source_schema",
+  "source_table",
+  "source_columns",
+  "target_schema",
+  "target_table",
+  "target_columns",
+]);
+
+function parseMetadataForeignKey(value: unknown): MetadataForeignKey {
+  if (
+    !isRecord(value) ||
+    Object.keys(value).length !== FOREIGN_KEY_FIELDS.size ||
+    Object.keys(value).some((key) => !FOREIGN_KEY_FIELDS.has(key)) ||
+    !isString(value.name) ||
+    !isString(value.source_schema) ||
+    !isString(value.source_table) ||
+    !isStringArray(value.source_columns) ||
+    !isString(value.target_schema) ||
+    !isString(value.target_table) ||
+    !isStringArray(value.target_columns)
+  ) {
+    throw invalidResponseError();
+  }
+  return {
+    name: value.name,
+    source_schema: value.source_schema,
+    source_table: value.source_table,
+    source_columns: value.source_columns,
+    target_schema: value.target_schema,
+    target_table: value.target_table,
+    target_columns: value.target_columns,
+  };
+}
+
 export function parseDatasourceMetadataResponse(
   value: unknown,
 ): DatasourceMetadataResponse {
@@ -234,7 +272,7 @@ export function parseDatasourceMetadataResponse(
   return {
     datasource_id: value.datasource_id,
     schemas: value.schemas.map(parseMetadataSchema),
-    foreign_keys: value.foreign_keys as DatasourceMetadataResponse["foreign_keys"],
+    foreign_keys: value.foreign_keys.map(parseMetadataForeignKey),
     truncated: value.truncated,
     limits: parseLimits(value.limits),
   };

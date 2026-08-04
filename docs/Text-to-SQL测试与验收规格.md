@@ -5,7 +5,8 @@
 > 容差。权限和危险 SQL Case 单独统计，安全门禁在所有阶段保持 100%。
 
 > 本文中原有的阶段 0～5 统一称为“增强能力 Stage”。当前
-> “本地工具阶段 5”当前只交付模型设置前端闭环，其独立门禁见第 15.1 节；
+> “本地工具阶段 5”已交付模型、数据源设置与 Workbench Profile-ID 查询闭环，
+> 其独立门禁见第 15.1 节；
 > 原业务知识/Few-shot 门禁仍见第 16 节且含义不变。
 
 ## 1. 测试分层
@@ -507,14 +508,22 @@ Schema 字段依据已锁定的 Pagila 3.1.0、commit
 - 不新增无理由 skip；unit+security 分支覆盖率不低于 83%；Workflow 图、节点、
   State、Comparator、Gold 内容与 `16 verified / 2 draft` 状态不变。
 
-## 15.1 本地工具阶段 5：模型设置前端闭环门禁
+## 15.1 本地工具阶段 5：浏览器 Profile 闭环门禁
 
-- 浏览器只通过 BFF 调用模型 Profile API；BFF 不接受上游 URL/Header。
-- ModelProfile CRUD 和 `/test` 全部可达并保留脱敏 HTTP 语义。
-- API Key 只存在写请求和组件瞬时状态，Profile 响应、localStorage 和历史均不包含。
-- 编辑时省略 Key 表示保留，`null` 表示清除。
-- 当前选择只保存合法 `model_profile_id`，失效或删除后清理。
-- 旧 `text-to-sql-model-config` 被删除且不上传。
+- 浏览器只通过 BFF 调用模型和数据源 Profile API；BFF 不接受浏览器指定的上游
+  URL、Authorization Header 或任意路径。
+- ModelProfile 与 DatasourceProfile CRUD、两个 `/test` 和 datasource metadata
+  全部可达并保留脱敏 HTTP 语义；前端逐字段解析响应，畸形外键结构必须拒绝。
+- API Key 和数据库密码只存在写请求和组件瞬时状态；Profile 响应、localStorage、
+  查询历史和 Workbench 请求均不包含 Secret 或 DSN。
+- 编辑时省略凭据表示保留，`null` 表示清除；已保存密码不回显，编辑页明确提示连接
+  测试需要重新输入当前密码。
+- 当前选择只保存合法 `model_profile_id` 与 `datasource_profile_id`，失效或删除后清理。
+- 旧 `text-to-sql-model-config` 与 `text-to-sql-db-config` 被删除且不读取、不迁移、不上传。
+- metadata 只生成展示树，不自动扩大 `allowed_schemas` 或 `allowed_tables`；授权以用户
+  主动勾选并保存的表/视图为准。
+- 未选择两个 Profile 时 Workbench 阻止查询；正常浏览器请求只包含问题、两个 Profile
+  ID 和 `debug=false`，不得发送 Override、Host、API Key、密码、DSN 或 allowlist。
 - 普通设置 UI 不显示多路模型和 fallback。
 
 ## 16. 增强能力 Stage 1：检索与路由增强门禁

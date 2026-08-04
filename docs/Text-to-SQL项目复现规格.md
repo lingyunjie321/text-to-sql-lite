@@ -7,20 +7,24 @@
 
 > 本文同时记录两条不同的交付路线：原有的“增强能力
 > Stage 0～5”和当前的“本地工具交付阶段 0～6”。本轮“本地工具
-> 阶段 5”专指本地模型设置前端闭环，不是下文原有的缓存、导出和生产治理
+> 阶段 5”专指本地浏览器配置与查询闭环，不是下文原有的缓存、导出和生产治理
 > Stage 5。
 
-## 当前编码任务：本地工具阶段 5
+## 当前实现基线：本地工具阶段 5 已完成
 
-- 本批只实现模型 Profile 设置前端闭环：列表、保存前测试、CRUD、当前模型 ID，
-  以及旧模型 localStorage Secret 清理。
-- 浏览器通过 BFF 调用既有模型 Profile API；API Key 只存在写请求和组件瞬时状态，
-  不写入 Profile 响应、localStorage 或历史。
-- 编辑时省略 Key 表示保留，显式 `null` 表示清除；当前选择只保存合法的
-  `model_profile_id`，失效或删除后清理。
+- 浏览器通过 Next.js BFF 管理 ModelProfile 与 DatasourceProfile：连接测试、CRUD、
+  datasource metadata、表/视图授权和当前选择均已接入正式后端接口。
+- API Key 和数据库密码只存在写请求、组件瞬时状态与后端进程内存，不写入 Profile
+  响应、localStorage、查询历史或 Trace；旧浏览器 Secret 键首次加载时直接删除。
+- 编辑时省略凭据表示保留，显式 `null` 表示清除；localStorage 只保存合法的
+  `model_profile_id` 与 `datasource_profile_id`，失效或删除后清理。
+- Workbench 未选择两个 Profile 时拒绝查询；正常请求只发送 `question`、
+  `datasource_id`、`model_profile_id` 和 `debug=false`，不发送 Override、Host、DSN、
+  Secret 或 allowlist。
+- metadata 只用于展示可发现结构；只有用户主动勾选并保存到 `allowed_schemas` 与
+  `allowed_tables` 的表或视图才进入查询范围。
 - 普通设置 UI 不显示多路模型或 fallback；不修改既有后端 Profile 语义、动态运行时、
   Workflow 图、节点、State、三次修复、32 步限制、Schema Linking、Comparator 或 Gold。
-- 数据源 Profile、Schema 选择和 Workbench 的 Profile-ID 查询仍是后续切片。
 
 ## 必须实现
 
@@ -192,10 +196,10 @@ SQL attempt、校验/执行结果、错误、修复计数和观测数据。完�
 | 0 现状基线 | 架构、测试、风险与重构范围 | 不改业务行为 |
 | 1 可读性整理 | 配置、工厂、Bootstrap 和 API 职责分离 | 保持对外行为 |
 | 2 本地 Profile | Profile、SQLite 非敏感配置、内存凭据和 ID 查询 | 只绑定现有静态 runtime |
-| 3 动态数据库 | 连接测试、metadata、RuntimeRegistry、PostgreSQL/MySQL | MySQL 安全修复需真实环境 |
+| 3 动态数据库 | 连接测试、metadata、RuntimeRegistry、PostgreSQL/MySQL | PostgreSQL/Pagila 与 MySQL/Sakila 真实验证已完成 |
 | 4 模型与离线 | 动态 Provider、单模型默认路由、可选 Embedding | 本地 HTTP 仅允许 loopback |
-| 5 前端闭环 | 设置页、Schema 选择和 Profile-ID Workbench（总体阶段目标） | 当前首个切片仅模型设置；Schema 选择和 Profile-ID Workbench 为后续阶段 5 切片 |
-| 6 本地交付 | 统一启动、安装、真实数据库验证和交接 | 不引入 SaaS/多租户 |
+| 5 前端闭环 | 设置页、Schema 选择和 Profile-ID Workbench | 已完成模型/数据源 Profile、授权树、当前选择与 ID-only 查询 |
+| 6 本地交付 | 统一启动、安装、真实数据库验证和交接 | 已完成统一启动与交接；不引入 SaaS/多租户 |
 
 ## 3. 系统架构与请求链路
 

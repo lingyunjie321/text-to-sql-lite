@@ -265,14 +265,19 @@ export function DatasourceProfileForm({ mode, profile, onSaved, onCancel }: Form
       </div>
 
       {mode === "edit" && profile?.password_status === "configured" ? (
-        <label className="mt-3 flex items-center gap-2 text-sm text-[var(--color-text-secondary)]">
-          <input
-            type="checkbox"
-            checked={value.clearPassword}
-            onChange={(event) => patchValue({ clearPassword: event.target.checked, password: "" })}
-          />
-          清除后端进程内保存的密码
-        </label>
+        <div className="mt-3 space-y-2">
+          <p className="text-xs text-[var(--color-text-tertiary)]">
+            已保存密码不会回显；测试连接时请重新输入当前密码。
+          </p>
+          <label className="flex items-center gap-2 text-sm text-[var(--color-text-secondary)]">
+            <input
+              type="checkbox"
+              checked={value.clearPassword}
+              onChange={(event) => patchValue({ clearPassword: event.target.checked, password: "" })}
+            />
+            清除后端进程内保存的密码
+          </label>
+        </div>
       ) : null}
 
       <div className="mt-5 flex items-center gap-3">
