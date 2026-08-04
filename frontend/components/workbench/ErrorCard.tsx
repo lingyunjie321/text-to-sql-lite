@@ -3,7 +3,7 @@
 import { Button } from "@/components/ui/Button";
 import { StatusBadge } from "./StatusBadge";
 import { MetaInfo } from "./MetaInfo";
-import type { FinalStatus, QueryResponse } from "@/lib/types";
+import type { QueryResponse } from "@/lib/types";
 
 interface ErrorCardProps {
   response: QueryResponse;

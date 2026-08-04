@@ -2,7 +2,7 @@
 
 ## 当前快照
 
-- 记录日期：2026-08-03
+- 记录日期：2026-08-04
 - 包版本：`0.1.0`
 - 当前分支：`main`
 - 定位：工程预览，不是生产发布
@@ -17,6 +17,8 @@
   未完成
 - 阶段 1 结构整理：已完成配置、工厂/Bootstrap、API 路由、依赖与公开模型摘要的
   模块化；资格仍为 `not_passed`
+- 本地工具阶段 6：统一启动器、可安装 CLI、前后端生命周期收尾和交付文档已落地；
+  真实环境资格仍沿用各锁定集成报告，不把确定性测试冒充真实验证
 - 当前 Gold：`16 verified / 2 draft`；旧正式冻结不能作为当前代码的资格证据
 - 增强 Stage 1 历史正式配置：用户已确认三模型组合；本次只将非 Gold 校准冻结
   重新绑定到当前受控代码，未重建 Pagila 正式 baseline
@@ -351,7 +353,7 @@ stage1.real_environment_validated=false
 - 没有动态 Few-shot、业务指标知识库、业务 RAG 或参考 SQL 审批生命周期。
 - 没有结果缓存、异步导出、Dashboard、告警、限流、熔断、资源组、Secret
   轮换、部署升级回滚和数据保留演练。
-- Python 包不固定 ASGI server；部署方需要自行选择运行服务器。
+- 本地启动固定 Uvicorn 0.52.0；生产部署仍需按部署文档自行评估运行参数。
 - 当前 wheel 不携带 `evaluation/`、`infrastructure/` 和语义 manifest，生产
   Bootstrap 依赖完整仓库检出。
 - 仓库包含 [MIT License](LICENSE)；仍应遵循其中的使用与免责条款。

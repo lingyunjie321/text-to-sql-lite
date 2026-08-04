@@ -31,11 +31,14 @@ function createLocalStorageMock() {
 const localStorageMock = createLocalStorageMock();
 
 beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-08-04T00:00:00.000Z"));
   localStorageMock.clear();
   vi.stubGlobal("window", { localStorage: localStorageMock });
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 

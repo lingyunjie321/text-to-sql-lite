@@ -14,7 +14,11 @@ dependencies = [
   "pydantic-settings==2.14.2",
   "sqlglot==30.13.0",
   "langgraph==1.2.9",
+  "uvicorn==0.52.0",
 ]
+
+[project.scripts]
+text-to-sql-lite = "app.cli:main"
 
 [project.optional-dependencies]
 test = [

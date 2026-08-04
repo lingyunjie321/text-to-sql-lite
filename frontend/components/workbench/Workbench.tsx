@@ -52,26 +52,7 @@ export function Workbench() {
   const [turns, setTurns] = useState<ConversationTurn[]>([]);
   const [inputValue, setInputValue] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const conversationIdRef = useRef<string>(
-    `conv-${Date.now()}`,
-  );
-
-  // Handle URL params (?q= for sample questions, ?conversation= for history restore)
-  useEffect(() => {
-    const q = searchParams.get("q");
-    if (q) {
-      // Decode and fill input, then auto-submit
-      const decoded = decodeURIComponent(q);
-      setInputValue(decoded);
-      // Clear the URL param
-      router.replace("/");
-      // Auto-submit after a brief delay to let state settle
-      setTimeout(() => {
-        submitQuestion(decoded);
-      }, 100);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams]);
+  const conversationIdRef = useRef<string | null>(null);
 
   const submitQuestion = useCallback(
     async (
@@ -86,6 +67,9 @@ export function Workbench() {
 
       const turnId = options?.turnId || `turn-${Date.now()}`;
       const isSupplement = options?.isSupplement ?? false;
+      const conversationId =
+        conversationIdRef.current ?? `conv-${Date.now()}`;
+      conversationIdRef.current = conversationId;
 
       // Add user message + loading turn
       setTurns((prev) => [
@@ -118,7 +102,7 @@ export function Workbench() {
         );
 
         // Save to localStorage
-        saveRecord(conversationIdRef.current, trimmed, response);
+        saveRecord(conversationId, trimmed, response);
       } catch {
         // Network error — construct a FAILED_INTERNAL response
         const errorResponse: QueryResponse = {
@@ -141,7 +125,7 @@ export function Workbench() {
         );
 
         saveRecord(
-          conversationIdRef.current,
+          conversationId,
           trimmed,
           errorResponse,
         );
@@ -151,6 +135,18 @@ export function Workbench() {
     },
     [isLoading],
   );
+
+  // Handle URL params (?q= for sample questions, ?conversation= for history restore)
+  useEffect(() => {
+    const q = searchParams.get("q");
+    if (!q) return;
+    const decoded = decodeURIComponent(q);
+    router.replace("/");
+    const timer = window.setTimeout(() => submitQuestion(decoded), 100);
+    return () => window.clearTimeout(timer);
+    // This runs only for a URL-provided question; submit state must not retrigger it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [router, searchParams]);
 
   const handleSubmit = useCallback(() => {
     submitQuestion(inputValue);
@@ -176,13 +172,9 @@ export function Workbench() {
     [turns, submitQuestion],
   );
 
-  const handleClarificationSkip = useCallback(
-    (turnId: string) => {
-      // Mark the turn as skipped (just leave it as is, user can continue)
-      // The clarification card stays in the conversation as history
-    },
-    [],
-  );
+  const handleClarificationSkip = useCallback(() => {
+    // The clarification card stays in the conversation as history.
+  }, []);
 
   const handleRetry = useCallback(
     (turnId: string) => {

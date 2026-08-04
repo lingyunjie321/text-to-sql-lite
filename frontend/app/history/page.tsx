@@ -22,7 +22,10 @@ export default function HistoryPage() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
   useEffect(() => {
-    setConversations(loadConversations());
+    const frame = requestAnimationFrame(() => {
+      setConversations(loadConversations());
+    });
+    return () => cancelAnimationFrame(frame);
   }, []);
 
   const filtered = searchQuery

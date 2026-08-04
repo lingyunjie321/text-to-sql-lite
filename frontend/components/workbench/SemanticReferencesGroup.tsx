@@ -20,9 +20,9 @@ const typeConfig: Record<
 
 const typeOrder: SemanticReference["type"][] = ["caliber", "metric", "glossary", "few_shot"];
 
-function ReferenceItem({ ref: item }: { ref: SemanticReference }) {
+function ReferenceItem({ reference }: { reference: SemanticReference }) {
   const [expanded, setExpanded] = useState(false);
-  const cfg = typeConfig[item.type] ?? typeConfig.glossary;
+  const cfg = typeConfig[reference.type] ?? typeConfig.glossary;
   const { Icon } = cfg;
 
   return (
@@ -36,17 +36,17 @@ function ReferenceItem({ ref: item }: { ref: SemanticReference }) {
             {cfg.label}
           </span>
           <span className="text-sm font-medium text-[var(--color-text-primary)]">
-            {item.title}
+            {reference.title}
           </span>
         </div>
         <span
           className={`shrink-0 tabular-nums text-xs ${
-            item.score > 0.8
+            reference.score > 0.8
               ? "text-[var(--color-success)]"
               : "text-[var(--color-text-tertiary)]"
           }`}
         >
-          {typeof item.score === "number" ? item.score.toFixed(2) : "—"}
+          {typeof reference.score === "number" ? reference.score.toFixed(2) : "—"}
         </span>
       </div>
       <div className="mt-1 pl-1">
@@ -55,9 +55,9 @@ function ReferenceItem({ ref: item }: { ref: SemanticReference }) {
             expanded ? "" : "line-clamp-2"
           }`}
         >
-          {item.content}
+          {reference.content}
         </p>
-        {item.content.length > 80 && (
+        {reference.content.length > 80 && (
           <button
             onClick={() => setExpanded(!expanded)}
             className="mt-1 inline-flex items-center gap-0.5 text-xs text-[var(--color-primary)] hover:underline"
@@ -81,7 +81,7 @@ export function SemanticReferencesGroup({ references }: SemanticReferencesGroupP
     return (
       <div className="divide-y divide-[var(--color-border)]">
         {sorted.map((item, idx) => (
-          <ReferenceItem key={`${item.type}-${idx}`} ref={item} />
+          <ReferenceItem key={`${item.type}-${idx}`} reference={item} />
         ))}
       </div>
     );
@@ -106,7 +106,7 @@ export function SemanticReferencesGroup({ references }: SemanticReferencesGroupP
             </div>
             <div className="divide-y divide-[var(--color-border)] rounded-md border border-[var(--color-border)]">
               {group.items.map((item, idx) => (
-                <ReferenceItem key={`${group.type}-${idx}`} ref={item} />
+                <ReferenceItem key={`${group.type}-${idx}`} reference={item} />
               ))}
             </div>
           </div>

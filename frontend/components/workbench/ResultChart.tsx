@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useSyncExternalStore } from "react";
 import {
   BarChart,
   Bar,
@@ -22,15 +22,16 @@ interface ResultChartProps {
 }
 
 function useIsDesktop() {
-  const [isDesktop, setIsDesktop] = useState(false);
-  useEffect(() => {
+  const subscribe = useCallback((notify: () => void) => {
     const mq = window.matchMedia("(min-width: 768px)");
-    setIsDesktop(mq.matches);
-    const handler = (e: MediaQueryListEvent) => setIsDesktop(e.matches);
-    mq.addEventListener("change", handler);
-    return () => mq.removeEventListener("change", handler);
+    mq.addEventListener("change", notify);
+    return () => mq.removeEventListener("change", notify);
   }, []);
-  return isDesktop;
+  return useSyncExternalStore(
+    subscribe,
+    () => window.matchMedia("(min-width: 768px)").matches,
+    () => false,
+  );
 }
 
 // Detect if a column contains date/time values

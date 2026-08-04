@@ -79,12 +79,13 @@ Embedding 文档构建、融合、Rerank 和 Prompt 之前；Schema、语义、E
 ## 环境要求
 
 - Python `>=3.12,<3.15`
+- Node.js 20.9.0+ 与 npm（前端当前在 Node.js 24 验证）
 - Docker Desktop 或兼容的 Docker Engine + Compose
 - 首次获取 Pagila fixture 时能够访问 GitHub；获取 Sakila fixture 时能够访问
   MySQL 官方下载站
 - 一个 OpenAI-compatible Chat Completions 服务（可在启动后通过 Profile 配置）
 - 可选的 OpenAI-compatible Embeddings 服务
-- 一个 ASGI server（例如 Uvicorn；本项目不把部署服务器固定为运行时依赖）
+- Uvicorn 已作为运行时依赖固定，由统一启动命令启动
 - 完整仓库检出；当前 wheel 不包含 `evaluation/`、`infrastructure/` 和运行所需
   的语义 manifest，不能脱离仓库独立部署
 
@@ -97,8 +98,19 @@ git clone https://github.com/lingyunjie321/text-to-sql-lite.git
 cd text-to-sql-lite
 
 python3.12 -m venv .venv
-.venv/bin/python -m pip install -e '.[test]'
+.venv/bin/python -m pip install '.[test]'
+cd frontend && npm install && cd ..
 ```
+
+如果只使用自己的数据库和模型，可以跳过 Pagila fixture 与 `.env` 配置，直接运行：
+
+```bash
+.venv/bin/text-to-sql-lite start
+```
+
+命令会检查环境、创建 `~/.text-to-sql-lite`、启动后端与前端，并打开
+`http://127.0.0.1:3000`。按 `Ctrl+C` 会统一停止两个服务并释放连接。完整说明见
+[本地安装与启动](docs/本地安装与启动.md)。
 
 ### 2. 获取锁定的 Pagila 数据
 
@@ -165,18 +177,18 @@ Compose 当前没有把宿主机端口显式绑定到 `127.0.0.1`，Docker 可�
 发布到所有网络接口。只应在受信开发机或有防火墙保护的环境运行，不要把该
 数据库端口暴露到不可信网络。
 
-### 5. 启动 API
+### 5. 启动本地工具
 
-项目导出标准 ASGI 应用 `app.main:app`。可以使用现有部署环境中的任意 ASGI
-server；以下以 Uvicorn 为例：
+推荐使用统一命令：
 
 ```bash
-.venv/bin/python -m pip install uvicorn
-.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+.venv/bin/text-to-sql-lite start
+# 等价入口：make dev
 ```
 
-Uvicorn 只是启动示例，未写入 `pyproject.toml`，也不属于当前资格冻结；正式
-部署应自行固定和验证 ASGI server 版本。
+不希望自动打开浏览器时使用 `--no-open`。后端默认监听 `127.0.0.1:8000`，前端
+默认监听 `127.0.0.1:3000`；可通过 `text-to-sql-lite start --help` 查看端口参数。
+项目仍导出标准 ASGI 应用 `app.main:app`，需要单独调试后端时可以直接运行 Uvicorn。
 
 生产容器化部署（含 `Dockerfile` 构建、环境契约、升级与回滚预案）见
 [部署与回滚](docs/部署与回滚.md)。
@@ -186,6 +198,11 @@ Uvicorn 只是启动示例，未写入 `pyproject.toml`，也不属于当前资�
 按完整配置组创建可选的静态 LLM/Embedding runtime，并初始化默认位于
 `~/.text-to-sql-lite/config.db` 的本地 Profile Store。Profile 模块导入本身不会
 创建目录或文件；没有静态模型和 Embedding 配置时仍可完全通过本地 Profile 工作。
+
+当前浏览器已完成模型 Profile 设置闭环；数据库设置页仍是旧的本地表单，不能作为
+正式 DatasourceProfile 使用。现阶段请通过后端 OpenAPI（`http://127.0.0.1:8000/docs`）
+或 API 完成数据源测试、metadata 读取、allowlist 保存和 Profile-ID 查询。不要在
+旧数据库表单中保存真实密码。对应操作见 [添加数据库](docs/添加数据库.md)。
 
 ### 6. 发起查询
 

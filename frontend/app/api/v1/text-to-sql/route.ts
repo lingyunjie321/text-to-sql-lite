@@ -84,7 +84,7 @@ export async function POST(request: NextRequest) {
     }
 
     return NextResponse.json(data, { status: response.status });
-  } catch (error) {
+  } catch {
     // Network error — backend unreachable
     return NextResponse.json(
       {
