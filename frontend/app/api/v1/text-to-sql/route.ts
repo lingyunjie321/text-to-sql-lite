@@ -44,10 +44,9 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    // Whitelist-strip the body: only the six fields declared by the backend
-    // QueryRequest contract survive (question, datasource_id, schemas, debug,
-    // model_overrides, datasource_override). Everything else — including legacy
-    // model_config / datasource_config — is dropped to avoid 422 (extra="forbid").
+    // Whitelist-strip the body to the backend QueryRequest contract. Everything
+    // else — including legacy model_config / datasource_config — is dropped to
+    // avoid 422 (extra="forbid").
     const cleanBody = sanitizeQueryRequest(body);
 
     // Phase 4a: Build headers with optional API key injection

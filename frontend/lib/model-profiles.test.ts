@@ -93,6 +93,9 @@ describe("ModelProfileForm", () => {
     expect(markup).not.toContain('placeholder="••••••••"');
     expect(markup).toContain("可选：无鉴权本地服务可留空");
     expect(markup).toContain("Embedding（可选增强）");
+    expect(markup).toContain(
+      'role="switch" aria-checked="false" aria-label="启用 Embedding"',
+    );
     expect(markup).not.toContain('name="embeddingBaseUrl"');
     expect(markup).not.toContain("保存后会清除 Embedding 配置和凭据");
     expect(markup).toContain("连接状态：未测试");

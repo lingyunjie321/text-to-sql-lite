@@ -7,13 +7,43 @@ import { ConversationFlow, type ConversationTurn } from "./ConversationFlow";
 import { InputDock } from "./InputDock";
 import { queryTextToSql } from "@/lib/api";
 import { saveRecord } from "@/lib/history";
-import { getModelConfig, isModelConfigured } from "@/lib/model-config";
 import { getDbConfig, isDbConfigured } from "@/lib/datasource-config";
 import type {
+  QueryRequest,
   QueryResponse,
-  ModelEndpointOverride,
   DatasourceOverride,
+  StoredDbConfig,
 } from "@/lib/types";
+
+export function buildWorkbenchQueryRequest(
+  question: string,
+  storedDbConfig: StoredDbConfig,
+): QueryRequest {
+  let datasourceOverride: DatasourceOverride | undefined;
+  let datasourceId = "pagila";
+  if (isDbConfigured(storedDbConfig)) {
+    datasourceId = storedDbConfig.datasource_id || "pagila";
+    if (storedDbConfig.connection.mode === "form") {
+      datasourceOverride = {
+        host: storedDbConfig.connection.host || "",
+        port: storedDbConfig.connection.port || 0,
+        database: storedDbConfig.connection.database || "",
+        username: storedDbConfig.connection.username || "",
+        password: storedDbConfig.connection.password || "",
+        type: storedDbConfig.type,
+        schemas: storedDbConfig.auth.schemas,
+        allowed_tables: storedDbConfig.auth.allowed_tables,
+      };
+    }
+  }
+
+  return {
+    question,
+    datasource_id: datasourceId,
+    debug: false,
+    ...(datasourceOverride && { datasource_override: datasourceOverride }),
+  };
+}
 
 export function Workbench() {
   const router = useRouter();
@@ -73,56 +103,10 @@ export function Workbench() {
       setInputValue("");
 
       try {
-        // 读取前端配置（存 localStorage）
-        const storedModelConfig = getModelConfig();
         const storedDbConfig = getDbConfig();
-
-        // Phase 2b: 构建 model_overrides（仅传用户覆写的 tier，不含 enabled 字段）
-        let modelOverrides: Record<string, ModelEndpointOverride> | undefined;
-        if (isModelConfigured(storedModelConfig)) {
-          const tiers = ["simple", "standard", "complex", "fallback"] as const;
-          const overrides: Record<string, ModelEndpointOverride> = {};
-          for (const tier of tiers) {
-            const ep = storedModelConfig.models[tier];
-            if (ep?.enabled) {
-              overrides[tier] = {
-                base_url: ep.base_url,
-                api_key: ep.api_key,
-                model_name: ep.model_name,
-              };
-            }
-          }
-          if (Object.keys(overrides).length > 0) {
-            modelOverrides = overrides;
-          }
-        }
-
-        // Phase 2b: 构建 datasource_override（表单模式才传）
-        let datasourceOverride: DatasourceOverride | undefined;
-        let datasourceId = "pagila";
-        if (isDbConfigured(storedDbConfig)) {
-          datasourceId = storedDbConfig.datasource_id || "pagila";
-          if (storedDbConfig.connection.mode === "form") {
-            datasourceOverride = {
-              host: storedDbConfig.connection.host || "",
-              port: storedDbConfig.connection.port || 0,
-              database: storedDbConfig.connection.database || "",
-              username: storedDbConfig.connection.username || "",
-              password: storedDbConfig.connection.password || "",
-              type: storedDbConfig.type,
-              schemas: storedDbConfig.auth.schemas,
-              allowed_tables: storedDbConfig.auth.allowed_tables,
-            };
-          }
-        }
-
-        const response = await queryTextToSql({
-          question: trimmed,
-          datasource_id: datasourceId,
-          debug: false,
-          ...(modelOverrides && { model_overrides: modelOverrides }),
-          ...(datasourceOverride && { datasource_override: datasourceOverride }),
-        });
+        const response = await queryTextToSql(
+          buildWorkbenchQueryRequest(trimmed, storedDbConfig),
+        );
 
         // Update the turn with the response
         setTurns((prev) =>

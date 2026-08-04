@@ -3,13 +3,22 @@
 import { useState, useCallback, useEffect } from "react";
 import { Info, Trash2, ShieldAlert } from "lucide-react";
 import { Button } from "@/components/ui/Button";
-import { clearModelConfig } from "@/lib/model-config";
 import { clearDbConfig } from "@/lib/datasource-config";
 import { checkBackendHealth } from "@/lib/health";
+import {
+  clearSelectedModelProfileId,
+  removeLegacyModelConfig,
+} from "@/lib/profile-selection";
 
 interface AboutSectionProps {
   onToast: (message: string, type?: "success" | "info" | "error") => void;
   onConfigCleared: () => void;
+}
+
+export function clearBrowserPreferences(): void {
+  clearSelectedModelProfileId();
+  removeLegacyModelConfig();
+  clearDbConfig();
 }
 
 export function AboutSection({ onToast, onConfigCleared }: AboutSectionProps) {
@@ -36,10 +45,9 @@ export function AboutSection({ onToast, onConfigCleared }: AboutSectionProps) {
       setConfirming(true);
       return;
     }
-    clearModelConfig();
-    clearDbConfig();
+    clearBrowserPreferences();
     setConfirming(false);
-    onToast("所有配置已清除", "success");
+    onToast("浏览器偏好已清除", "success");
     onConfigCleared();
   }, [confirming, onToast, onConfigCleared]);
 
@@ -92,12 +100,11 @@ export function AboutSection({ onToast, onConfigCleared }: AboutSectionProps) {
             <Info className="mt-0.5 h-4 w-4 shrink-0 text-[var(--color-info)]" />
             <div className="text-sm text-[var(--color-text-secondary)]">
               <p>
-                当前配置存储在浏览器 localStorage 中，仅适用于演示。清除浏览器数据会导致配置丢失。
+                模型 Profile 保存在本地后端，API Key 仅保存在当前后端进程内存。
               </p>
               <div className="mt-2 space-y-0.5 text-xs text-[var(--color-text-tertiary)]">
-                <p>存储位置：</p>
-                <p>• 模型配置：localStorage[&quot;text-to-sql-model-config&quot;]</p>
-                <p>• 数据库配置：localStorage[&quot;text-to-sql-db-config&quot;]</p>
+                <p>浏览器仅保存当前模型 Profile ID 和旧数据库演示配置。</p>
+                <p>清除浏览器偏好不会删除后端模型 Profile。</p>
               </div>
             </div>
           </div>
@@ -105,7 +112,7 @@ export function AboutSection({ onToast, onConfigCleared }: AboutSectionProps) {
             {confirming ? (
               <div className="flex items-center gap-3">
                 <span className="text-sm text-[var(--color-error)]">
-                  确定要清除所有配置吗？此操作不可撤销。
+                  确定要清除浏览器偏好吗？后端模型 Profile 会保留。
                 </span>
                 <Button
                   variant="danger"
@@ -125,7 +132,7 @@ export function AboutSection({ onToast, onConfigCleared }: AboutSectionProps) {
             ) : (
               <Button variant="danger" size="sm" onClick={handleClear}>
                 <Trash2 className="h-3.5 w-3.5" />
-                清除所有配置
+                清除浏览器偏好
               </Button>
             )}
           </div>
@@ -140,8 +147,8 @@ export function AboutSection({ onToast, onConfigCleared }: AboutSectionProps) {
         <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
           <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
           <p>
-            API Key 和数据库密码存储在 localStorage 中，存在 XSS
-            窃取风险。生产环境请使用后端加密存储。
+            模型 API Key 不保存在浏览器。旧数据库演示配置可能包含数据库密码，
+            仍存在 XSS 窃取风险，仅用于当前兼容路径。
           </p>
         </div>
       </div>

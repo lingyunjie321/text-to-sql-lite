@@ -137,34 +137,6 @@ export interface RepairHistoryEntry {
   fingerprint: string;
 }
 
-// ========================
-// 新增：请求体配置类型（用于设置页面配置传递）
-// ========================
-
-export interface ModelEndpoint {
-  base_url: string;
-  api_key: string;
-  model_name: string;
-  enabled: boolean;
-}
-
-// ========================
-// 新增：localStorage 存储类型
-// ========================
-
-export type ModelTier = "simple" | "standard" | "complex" | "fallback";
-
-export interface StoredModelConfig {
-  version: 1;
-  models: {
-    simple: ModelEndpoint;
-    standard: ModelEndpoint;
-    complex: ModelEndpoint;
-    fallback: ModelEndpoint;
-  };
-  updatedAt: string;
-}
-
 export interface StoredDbConfig {
   version: 1;
   datasource_id: string;

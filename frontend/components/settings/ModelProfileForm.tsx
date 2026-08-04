@@ -15,7 +15,6 @@ import {
 } from "../../lib/model-profiles";
 import { Button } from "../ui/Button";
 import { PasswordInput } from "./PasswordInput";
-import { ToggleSwitch } from "./ToggleSwitch";
 
 const PROFILE_ID_PATTERN = /^[a-z0-9](?:[a-z0-9_-]{0,62}[a-z0-9])?$/;
 
@@ -493,11 +492,26 @@ export function ModelProfileForm({
               未开启时使用 BM25-only。
             </p>
           </div>
-          <ToggleSwitch
-            checked={value.embeddingEnabled}
-            onChange={(embeddingEnabled) => update({ embeddingEnabled })}
-            ariaLabel="启用 Embedding"
-          />
+          <button
+            type="button"
+            role="switch"
+            aria-checked={value.embeddingEnabled}
+            aria-label="启用 Embedding"
+            onClick={() =>
+              update({ embeddingEnabled: !value.embeddingEnabled })
+            }
+            className={`relative inline-flex h-[22px] w-10 shrink-0 cursor-pointer items-center rounded-full transition-colors duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)] focus-visible:ring-offset-2 ${
+              value.embeddingEnabled
+                ? "bg-[var(--color-primary)]"
+                : "bg-gray-300"
+            }`}
+          >
+            <span
+              className={`inline-block h-[18px] w-[18px] transform rounded-full bg-white shadow-sm transition-transform duration-200 ${
+                value.embeddingEnabled ? "translate-x-5" : "translate-x-0.5"
+              }`}
+            />
+          </button>
         </div>
 
         {willClearEmbedding(profile, value) ? (
