@@ -10,6 +10,10 @@ import {
   createModelProfile,
   listModelProfiles,
   parseModelProfileResponse,
+  replaceModelProfile,
+  testModelConnection,
+  type ModelProfileFormValue,
+  type ModelProfileResponse,
 } from "./model-profiles";
 
 const validResponse = {
@@ -280,6 +284,70 @@ describe("ModelProfileForm", () => {
     ).toBeNull();
   });
 
+  it("warns that a configured generation credential will be cleared only for a changed normalized endpoint without a replacement", async () => {
+    const { generationCredentialSaveWarning } = await import(
+      "../components/settings/ModelProfileForm"
+    );
+    const original = createModelValue(embeddingResponse);
+
+    expect(
+      generationCredentialSaveWarning(embeddingResponse, {
+        ...original,
+        baseUrl: "https://alternate.example.test/v1",
+      }),
+    ).toBe(
+      "生成模型 Base URL 已变更；未输入新 API Key 时，保存会清除当前凭据。",
+    );
+    expect(
+      generationCredentialSaveWarning(embeddingResponse, {
+        ...original,
+        baseUrl: "https://MODELS.EXAMPLE.TEST:443/v1",
+      }),
+    ).toBeNull();
+    expect(
+      generationCredentialSaveWarning(embeddingResponse, {
+        ...original,
+        baseUrl: "https://alternate.example.test/v1",
+        apiKey: "replacement-key",
+      }),
+    ).toBeNull();
+  });
+
+  it("warns that a configured embedding credential will be cleared for endpoint or model identity changes", async () => {
+    const { embeddingCredentialSaveWarning } = await import(
+      "../components/settings/ModelProfileForm"
+    );
+    const original = createModelValue(embeddingResponse);
+    const expected =
+      "Embedding 地址或模型已变更；未输入新 API Key 时，保存会清除当前凭据。";
+
+    expect(
+      embeddingCredentialSaveWarning(embeddingResponse, {
+        ...original,
+        embeddingBaseUrl: "https://alternate-embedding.example.test/v1",
+      }),
+    ).toBe(expected);
+    expect(
+      embeddingCredentialSaveWarning(embeddingResponse, {
+        ...original,
+        embeddingModel: "text-embedding-3-large",
+      }),
+    ).toBe(expected);
+    expect(
+      embeddingCredentialSaveWarning(embeddingResponse, {
+        ...original,
+        embeddingBaseUrl: "https://EMBEDDING.EXAMPLE.TEST:443/v1",
+      }),
+    ).toBeNull();
+    expect(
+      embeddingCredentialSaveWarning(embeddingResponse, {
+        ...original,
+        embeddingModel: "text-embedding-3-large",
+        embeddingApiKey: "replacement-key",
+      }),
+    ).toBeNull();
+  });
+
   it("maps test responses to useful generation and embedding outcomes", async () => {
     const { connectionTestState } = await import(
       "../components/settings/ModelProfileForm"
@@ -490,7 +558,7 @@ describe("profile API client", () => {
     });
   });
 
-  it("keeps stable backend errors while discarding unexpected secret-like fields", async () => {
+  it("keeps a structured backend error ahead of 422 mapping while discarding unexpected secret-like fields", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(
@@ -502,7 +570,7 @@ describe("profile API client", () => {
               api_key: "sentinel-secret",
             },
           }),
-          { status: 404, headers: { "Content-Type": "application/json" } },
+          { status: 422, headers: { "Content-Type": "application/json" } },
         ),
       ),
     );
@@ -516,4 +584,77 @@ describe("profile API client", () => {
       );
     });
   });
+
+  it.each([
+    [
+      "create",
+      () =>
+        createModelProfile(
+          buildModelWriteRequest(editValue, { mode: "create" }),
+        ),
+    ],
+    [
+      "replace",
+      () =>
+        replaceModelProfile(
+          editValue.id,
+          buildModelWriteRequest(editValue, { mode: "edit" }),
+        ),
+    ],
+    [
+      "connection test",
+      () => testModelConnection(buildModelTestRequest(editValue)),
+    ],
+  ])(
+    "maps a FastAPI 422 array from %s to one stable error without leaking validation input",
+    async (_operation, request) => {
+      const sentinel = "https://sentinel-private-endpoint.example.test/v1";
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          Response.json(
+            {
+              detail: [
+                {
+                  type: "url_parsing",
+                  loc: ["body", "base_url"],
+                  msg: `Input should be a valid URL: ${sentinel}`,
+                  input: sentinel,
+                },
+              ],
+            },
+            { status: 422 },
+          ),
+        ),
+      );
+
+      await expect(request()).rejects.toSatisfy((error: unknown) => {
+        return (
+          error instanceof ProfileApiError &&
+          error.code === "PROFILE_VALIDATION_ERROR" &&
+          error.message === "模型配置校验失败，请检查填写内容。" &&
+          !`${error.code} ${error.message}`.includes(sentinel)
+        );
+      });
+    },
+  );
 });
+
+function createModelValue(
+  profile: ModelProfileResponse,
+): ModelProfileFormValue {
+  return {
+    id: profile.id,
+    name: profile.name,
+    baseUrl: profile.base_url,
+    modelName: profile.model_name,
+    apiKey: "",
+    clearApiKey: false,
+    embeddingEnabled: profile.embedding_base_url !== null,
+    embeddingBaseUrl: profile.embedding_base_url ?? "",
+    embeddingModel: profile.embedding_model ?? "",
+    embeddingDimension: profile.embedding_dimension?.toString() ?? "",
+    embeddingApiKey: "",
+    clearEmbeddingApiKey: false,
+  };
+}

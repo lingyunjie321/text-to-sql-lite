@@ -271,7 +271,7 @@ async function readJson(response: Response): Promise<unknown | undefined> {
   }
 }
 
-function parseError(value: unknown): ProfileApiError {
+function parseError(value: unknown, status: number): ProfileApiError {
   if (
     isRecord(value) &&
     isRecord(value.detail) &&
@@ -279,6 +279,12 @@ function parseError(value: unknown): ProfileApiError {
     isString(value.detail.message)
   ) {
     return new ProfileApiError(value.detail.message, value.detail.code);
+  }
+  if (status === 422) {
+    return new ProfileApiError(
+      "模型配置校验失败，请检查填写内容。",
+      "PROFILE_VALIDATION_ERROR",
+    );
   }
   return new ProfileApiError();
 }
@@ -296,7 +302,7 @@ export async function requestProfileApi<T>(
   }
 
   const body = await readJson(response);
-  if (!response.ok) throw parseError(body);
+  if (!response.ok) throw parseError(body, response.status);
   if (body === undefined) throw invalidResponseError();
   return parse(body);
 }
@@ -344,7 +350,7 @@ export async function deleteModelProfile(id: string): Promise<void> {
   }
 
   if (response.status === 204) return;
-  throw parseError(await readJson(response));
+  throw parseError(await readJson(response), response.status);
 }
 
 export const testModelConnection = (body: ModelConnectionTestRequest) =>

@@ -161,6 +161,59 @@ function isLoopbackUrl(value: string): boolean {
   }
 }
 
+function normalizedUrl(value: string): string | null {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+function hasSameNormalizedUrl(left: string, right: string): boolean {
+  const normalizedLeft = normalizedUrl(left);
+  return normalizedLeft !== null && normalizedLeft === normalizedUrl(right);
+}
+
+export function generationCredentialSaveWarning(
+  profile: ModelProfileResponse | undefined,
+  value: ModelProfileFormValue,
+): string | null {
+  if (
+    profile?.generation_credential_status !== "configured" ||
+    value.apiKey.trim() !== "" ||
+    value.clearApiKey ||
+    hasSameNormalizedUrl(profile.base_url, value.baseUrl)
+  ) {
+    return null;
+  }
+  return "生成模型 Base URL 已变更；未输入新 API Key 时，保存会清除当前凭据。";
+}
+
+export function embeddingCredentialSaveWarning(
+  profile: ModelProfileResponse | undefined,
+  value: ModelProfileFormValue,
+): string | null {
+  if (
+    profile?.embedding_credential_status !== "configured" ||
+    profile.embedding_base_url === null ||
+    !value.embeddingEnabled ||
+    value.embeddingApiKey.trim() !== "" ||
+    value.clearEmbeddingApiKey
+  ) {
+    return null;
+  }
+  const identityChanged =
+    !hasSameNormalizedUrl(
+      profile.embedding_base_url,
+      value.embeddingBaseUrl,
+    ) || profile.embedding_model !== value.embeddingModel.trim();
+  return identityChanged
+    ? "Embedding 地址或模型已变更；未输入新 API Key 时，保存会清除当前凭据。"
+    : null;
+}
+
 export function validateModelFormValue(
   value: ModelProfileFormValue,
 ): ModelFormErrors {
@@ -358,6 +411,11 @@ export function ModelProfileForm({
   };
 
   const reentryHint = credentialReentryMessage(profile, value);
+  const generationSaveWarning = generationCredentialSaveWarning(
+    profile,
+    value,
+  );
+  const embeddingSaveWarning = embeddingCredentialSaveWarning(profile, value);
 
   return (
     <form
@@ -457,12 +515,18 @@ export function ModelProfileForm({
             onChange={(apiKey) => update({ apiKey })}
             placeholder={
               mode === "edit"
-                ? "留空则保留；测试时可能需重新输入"
+                ? generationSaveWarning === null
+                  ? "留空则保留；测试时可能需重新输入"
+                  : "请输入新凭据，避免保存时清除"
                 : "可选：无鉴权本地服务可留空"
             }
             autoComplete="new-password"
           />
-          {mode === "edit" ? (
+          {generationSaveWarning !== null ? (
+            <p role="alert" className="mt-1 text-xs text-amber-700">
+              {generationSaveWarning}
+            </p>
+          ) : mode === "edit" ? (
             <p className="mt-1 text-xs text-[var(--color-text-tertiary)]">
               留空则保留当前凭据
             </p>
@@ -598,12 +662,18 @@ export function ModelProfileForm({
                 onChange={(embeddingApiKey) => update({ embeddingApiKey })}
                 placeholder={
                   mode === "edit"
-                    ? "留空则保留；测试时可能需重新输入"
+                    ? embeddingSaveWarning === null
+                      ? "留空则保留；测试时可能需重新输入"
+                      : "请输入新凭据，避免保存时清除"
                     : "可选：无鉴权本地服务可留空"
                 }
                 autoComplete="new-password"
               />
-              {mode === "edit" ? (
+              {embeddingSaveWarning !== null ? (
+                <p role="alert" className="mt-1 text-xs text-amber-700">
+                  {embeddingSaveWarning}
+                </p>
+              ) : mode === "edit" ? (
                 <p className="mt-1 text-xs text-[var(--color-text-tertiary)]">
                   留空则保留当前凭据
                 </p>
