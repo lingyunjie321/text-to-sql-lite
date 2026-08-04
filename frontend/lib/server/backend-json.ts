@@ -8,20 +8,28 @@ type ForwardBackendJsonOptions = {
 };
 
 const MODEL_API_PATH = "/api/v1/local/models";
+const DATASOURCE_API_PATH = "/api/v1/local/datasources";
 const PROFILE_ID_PATTERN = /^[a-z0-9](?:[a-z0-9_-]{0,62}[a-z0-9])?$/;
 
 function errorResponse(status: number, code: string, message: string): Response {
   return Response.json({ detail: { code, message } }, { status });
 }
 
-function normalizeModelPath(path: string): string | null {
-  if (path === MODEL_API_PATH || path === `${MODEL_API_PATH}/test`) {
+function normalizeProfilePath(path: string): string | null {
+  const apiPath = path.startsWith(`${DATASOURCE_API_PATH}/`) || path === DATASOURCE_API_PATH
+    ? DATASOURCE_API_PATH
+    : MODEL_API_PATH;
+  if (path === apiPath || path === `${apiPath}/test`) {
     return path;
   }
 
-  const profileIdSegment = path.slice(`${MODEL_API_PATH}/`.length);
+  const metadataSuffix = apiPath === DATASOURCE_API_PATH ? "/metadata" : "";
+  const itemPath = metadataSuffix && path.endsWith(metadataSuffix)
+    ? path.slice(0, -metadataSuffix.length)
+    : path;
+  const profileIdSegment = itemPath.slice(`${apiPath}/`.length);
   if (
-    !path.startsWith(`${MODEL_API_PATH}/`) ||
+    !itemPath.startsWith(`${apiPath}/`) ||
     profileIdSegment.includes("/") ||
     path.includes("?") ||
     path.includes("#")
@@ -32,7 +40,9 @@ function normalizeModelPath(path: string): string | null {
   try {
     const profileId = decodeURIComponent(profileIdSegment);
     if (!PROFILE_ID_PATTERN.test(profileId)) return null;
-    return `${MODEL_API_PATH}/${encodeURIComponent(profileId)}`;
+    return `${apiPath}/${encodeURIComponent(profileId)}${
+      path.endsWith(metadataSuffix) && metadataSuffix ? metadataSuffix : ""
+    }`;
   } catch {
     return null;
   }
@@ -47,7 +57,7 @@ export async function forwardBackendJson(
   request: Request,
   options: ForwardBackendJsonOptions,
 ): Promise<Response> {
-  const normalizedPath = normalizeModelPath(path);
+  const normalizedPath = normalizeProfilePath(path);
   if (normalizedPath === null) {
     return errorResponse(500, "INVALID_BACKEND_PATH", "后端请求路径无效。");
   }

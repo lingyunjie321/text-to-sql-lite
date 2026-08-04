@@ -3,10 +3,11 @@
 import { useState, useCallback, useEffect } from "react";
 import { Info, Trash2, ShieldAlert } from "lucide-react";
 import { Button } from "@/components/ui/Button";
-import { clearDbConfig } from "@/lib/datasource-config";
 import { checkBackendHealth } from "@/lib/health";
 import {
   clearSelectedModelProfileId,
+  clearSelectedDatasourceProfileId,
+  removeLegacyDatasourceConfig,
   removeLegacyModelConfig,
 } from "@/lib/profile-selection";
 
@@ -17,8 +18,9 @@ interface AboutSectionProps {
 
 export function clearBrowserPreferences(): void {
   clearSelectedModelProfileId();
+  clearSelectedDatasourceProfileId();
   removeLegacyModelConfig();
-  clearDbConfig();
+  removeLegacyDatasourceConfig();
 }
 
 export function AboutSection({ onToast, onConfigCleared }: AboutSectionProps) {
@@ -100,11 +102,12 @@ export function AboutSection({ onToast, onConfigCleared }: AboutSectionProps) {
             <Info className="mt-0.5 h-4 w-4 shrink-0 text-[var(--color-info)]" />
             <div className="text-sm text-[var(--color-text-secondary)]">
               <p>
-                模型 Profile 保存在本地后端，API Key 仅保存在当前后端进程内存。
+                模型和数据源 Profile 保存在本地后端，凭据仅保存在当前后端进程内存。
               </p>
               <div className="mt-2 space-y-0.5 text-xs text-[var(--color-text-tertiary)]">
-                <p>浏览器仅保存当前模型 Profile ID 和旧数据库演示配置。</p>
-                <p>清除浏览器偏好不会删除后端模型 Profile。</p>
+                <p>localStorage 仅保存当前模型和数据源的 Profile ID。</p>
+                <p>查询历史只保留在当前浏览器会话。</p>
+                <p>清除浏览器偏好不会删除后端 Profile。</p>
               </div>
             </div>
           </div>
@@ -112,7 +115,7 @@ export function AboutSection({ onToast, onConfigCleared }: AboutSectionProps) {
             {confirming ? (
               <div className="flex items-center gap-3">
                 <span className="text-sm text-[var(--color-error)]">
-                  确定要清除浏览器偏好吗？后端模型 Profile 会保留。
+                  确定要清除浏览器偏好吗？后端 Profile 会保留。
                 </span>
                 <Button
                   variant="danger"
@@ -147,8 +150,7 @@ export function AboutSection({ onToast, onConfigCleared }: AboutSectionProps) {
         <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
           <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
           <p>
-            模型 API Key 不保存在浏览器。旧数据库演示配置可能包含数据库密码，
-            仍存在 XSS 窃取风险，仅用于当前兼容路径。
+            模型 API Key、数据库密码和 DSN 都不会保存在浏览器，也不会进入查询历史。
           </p>
         </div>
       </div>

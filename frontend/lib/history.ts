@@ -23,7 +23,7 @@ const MAX_RECORDS_PER_CONVERSATION = 100;
 export function loadConversations(): Conversation[] {
   if (typeof window === "undefined") return [];
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const raw = window.sessionStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw) as Conversation[];
     if (!Array.isArray(parsed)) return [];
@@ -42,7 +42,7 @@ function saveConversations(conversations: Conversation[]): boolean {
         .sort((a, b) => b.updatedAt - a.updatedAt)
         .slice(0, MAX_CONVERSATIONS);
     }
-    window.localStorage.setItem(
+    window.sessionStorage.setItem(
       STORAGE_KEY,
       JSON.stringify(conversations),
     );
@@ -53,7 +53,7 @@ function saveConversations(conversations: Conversation[]): boolean {
       const trimmed = conversations
         .sort((a, b) => b.updatedAt - a.updatedAt)
         .slice(0, MAX_CONVERSATIONS - 5);
-      window.localStorage.setItem(
+      window.sessionStorage.setItem(
         STORAGE_KEY,
         JSON.stringify(trimmed),
       );
@@ -118,7 +118,7 @@ export function deleteConversation(id: string): void {
 
 export function clearAllConversations(): void {
   if (typeof window === "undefined") return;
-  window.localStorage.removeItem(STORAGE_KEY);
+  window.sessionStorage.removeItem(STORAGE_KEY);
 }
 
 export function searchConversations(query: string): Conversation[] {

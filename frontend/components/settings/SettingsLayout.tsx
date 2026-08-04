@@ -3,10 +3,10 @@
 import { useState, useCallback, useEffect } from "react";
 import { Cpu, Database, Info } from "lucide-react";
 import { ModelProfileSection } from "./ModelProfileSection";
-import { DatabaseConfigSection } from "./DatabaseConfigSection";
+import { DatasourceProfileSection } from "./DatasourceProfileSection";
 import { AboutSection } from "./AboutSection";
 import { modelProfileCountStatus } from "./model-profile-coordinator";
-import { getDbConfig, isDbConfigured } from "@/lib/datasource-config";
+import { removeLegacyDatasourceConfig } from "@/lib/profile-selection";
 
 type SectionId = "models" | "database" | "about";
 
@@ -35,6 +35,13 @@ export function SettingsLayout() {
   const [modelProfileCount, setModelProfileCount] = useState<
     number | null | undefined
   >(undefined);
+  const [datasourceProfileCount, setDatasourceProfileCount] = useState<
+    number | null | undefined
+  >(undefined);
+
+  useEffect(() => {
+    removeLegacyDatasourceConfig();
+  }, []);
 
   const showToast = useCallback(
     (message: string, type: "success" | "info" | "error" = "info") => {
@@ -54,20 +61,13 @@ export function SettingsLayout() {
     setConfigVersion((v) => v + 1);
   }, []);
 
-  // Status badges for sidebar
-  const dbConfigured = (() => {
-    try {
-      return isDbConfigured(getDbConfig());
-    } catch {
-      return false;
-    }
-  })();
-
   const statusFor = (id: SectionId): string | null => {
     if (id === "models") {
       return modelProfileCountStatus(modelProfileCount);
     }
-    if (id === "database") return dbConfigured ? "已配置" : "未配置";
+    if (id === "database") {
+      return modelProfileCountStatus(datasourceProfileCount);
+    }
     return null;
   };
 
@@ -81,7 +81,13 @@ export function SettingsLayout() {
           />
         );
       case "database":
-        return <DatabaseConfigSection key={configVersion} onToast={showToast} />;
+        return (
+          <DatasourceProfileSection
+            key={configVersion}
+            onToast={showToast}
+            onProfileCountChange={setDatasourceProfileCount}
+          />
+        );
       case "about":
         return (
           <AboutSection

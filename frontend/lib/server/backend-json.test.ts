@@ -185,7 +185,6 @@ describe("forwardBackendJson", () => {
   });
 
   it.each([
-    "/api/v1/local/datasources",
     "/api/v1/local/models/..",
     "/api/v1/local/models/%2E%2E",
     "/api/v1/local/models/model-1/extra",
@@ -193,6 +192,9 @@ describe("forwardBackendJson", () => {
     "/api/v1/local/models#fragment",
     "/api/v1/local/models/http:%2F%2Fevil.example",
     "https://evil.example/api/v1/local/models",
+    "/api/v1/local/datasources/..",
+    "/api/v1/local/datasources/local-postgres/metadata/extra",
+    "/api/v1/local/datasources?redirect=/api/v1/local/models",
   ])("rejects non-model or unsafe path %s", async (path) => {
     const fetchImpl = vi.fn<typeof fetch>();
 

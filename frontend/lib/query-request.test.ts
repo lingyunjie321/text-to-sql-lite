@@ -1,17 +1,14 @@
 import { describe, expect, it } from "vitest";
-import {
-  sanitizeDatasourceOverride,
-  sanitizeModelOverrides,
-  sanitizeQueryRequest,
-} from "./query-request";
+import { sanitizeQueryRequest } from "./query-request";
 
 describe("sanitizeQueryRequest", () => {
-  it("keeps all six contract fields when well-typed", () => {
+  it("keeps only the Profile query contract fields when well-typed", () => {
     const result = sanitizeQueryRequest({
       question: "列出所有演员",
       datasource_id: "pagila",
-      schemas: ["public"],
       debug: true,
+      model_profile_id: "local-model",
+      schemas: ["public"],
       model_overrides: {
         simple: { base_url: "https://x", api_key: "k", model_name: "m" },
       },
@@ -20,12 +17,8 @@ describe("sanitizeQueryRequest", () => {
     expect(result).toEqual({
       question: "列出所有演员",
       datasource_id: "pagila",
-      schemas: ["public"],
       debug: true,
-      model_overrides: {
-        simple: { base_url: "https://x", api_key: "k", model_name: "m" },
-      },
-      datasource_override: { host: "db.local", port: 5432 },
+      model_profile_id: "local-model",
     });
   });
 
@@ -55,12 +48,21 @@ describe("sanitizeQueryRequest", () => {
     expect("debug" in result).toBe(false);
   });
 
-  it("filters non-string elements out of schemas arrays", () => {
+  it("never forwards browser credentials, overrides, schemas, or allowlists", () => {
     const result = sanitizeQueryRequest({
       question: "q",
-      schemas: ["public", 42, null, "sales"],
+      model_profile_id: "local-model",
+      schemas: ["public"],
+      model_overrides: { simple: { api_key: "model-secret" } },
+      datasource_override: {
+        password: "database-secret",
+        host: "localhost",
+        allowed_tables: ["public.actor"],
+      },
+      dsn: "postgresql://user:secret@localhost/pagila",
     });
-    expect(result.schemas).toEqual(["public", "sales"]);
+    expect(result).toEqual({ question: "q", model_profile_id: "local-model" });
+    expect(JSON.stringify(result)).not.toContain("secret");
   });
 
   it("returns an empty object for non-object bodies", () => {
@@ -70,102 +72,4 @@ describe("sanitizeQueryRequest", () => {
     expect(sanitizeQueryRequest(undefined)).toEqual({});
   });
 
-  it("omits override keys entirely when they sanitize to nothing", () => {
-    const result = sanitizeQueryRequest({
-      question: "q",
-      model_overrides: "not-an-object",
-      datasource_override: {},
-    });
-    expect("model_overrides" in result).toBe(false);
-    expect("datasource_override" in result).toBe(false);
-  });
-});
-
-describe("sanitizeModelOverrides", () => {
-  it("strips frontend-only fields like enabled from each tier", () => {
-    const result = sanitizeModelOverrides({
-      simple: {
-        base_url: "https://api.example.com",
-        api_key: "sk-xxx",
-        model_name: "gpt-4o-mini",
-        enabled: true,
-      },
-    });
-    expect(result).toEqual({
-      simple: {
-        base_url: "https://api.example.com",
-        api_key: "sk-xxx",
-        model_name: "gpt-4o-mini",
-      },
-    });
-  });
-
-  it("keeps tiers with partial fields (backend ModelOverride is all-optional)", () => {
-    const result = sanitizeModelOverrides({
-      complex: { model_name: "o1" },
-    });
-    expect(result).toEqual({ complex: { model_name: "o1" } });
-  });
-
-  it("drops tiers that have no valid fields or are not objects", () => {
-    const result = sanitizeModelOverrides({
-      simple: { enabled: true, base_url: 42 },
-      standard: null,
-      complex: "oops",
-      fallback: { api_key: "k" },
-    });
-    expect(result).toEqual({ fallback: { api_key: "k" } });
-  });
-
-  it("returns undefined when nothing survives", () => {
-    expect(sanitizeModelOverrides({ simple: { enabled: true } })).toBeUndefined();
-    expect(sanitizeModelOverrides("junk")).toBeUndefined();
-    expect(sanitizeModelOverrides(undefined)).toBeUndefined();
-  });
-});
-
-describe("sanitizeDatasourceOverride", () => {
-  it("keeps all nine contract fields", () => {
-    const input = {
-      datasource_id: "my-db",
-      type: "postgresql",
-      host: "db.local",
-      port: 5432,
-      database: "pagila",
-      username: "postgres",
-      password: "secret",
-      schemas: ["public"],
-      allowed_tables: ["film", "actor"],
-    };
-    expect(sanitizeDatasourceOverride(input)).toEqual(input);
-  });
-
-  it("strips unknown fields (extra=forbid protection)", () => {
-    const result = sanitizeDatasourceOverride({
-      host: "db.local",
-      dsn: "postgresql://u:p@h:5432/db",
-      mode: "form",
-    });
-    expect(result).toEqual({ host: "db.local" });
-  });
-
-  it("accepts only integer ports", () => {
-    expect(sanitizeDatasourceOverride({ port: 5432 })).toEqual({ port: 5432 });
-    expect(sanitizeDatasourceOverride({ port: "5432" })).toBeUndefined();
-    expect(sanitizeDatasourceOverride({ port: 5432.5 })).toBeUndefined();
-  });
-
-  it("filters non-string elements from schemas and allowed_tables", () => {
-    const result = sanitizeDatasourceOverride({
-      schemas: ["public", 1],
-      allowed_tables: [],
-    });
-    expect(result).toEqual({ schemas: ["public"], allowed_tables: [] });
-  });
-
-  it("returns undefined for non-objects or when nothing survives", () => {
-    expect(sanitizeDatasourceOverride(null)).toBeUndefined();
-    expect(sanitizeDatasourceOverride("dsn-string")).toBeUndefined();
-    expect(sanitizeDatasourceOverride({ unknown: 1 })).toBeUndefined();
-  });
 });

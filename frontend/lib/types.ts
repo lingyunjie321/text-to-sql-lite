@@ -37,38 +37,11 @@ export type ErrorType =
 // Query Request
 // ========================
 
-// ========================
-// Model / Datasource Override types (Phase 2)
-// ========================
-
-// 与后端 ModelOverride 一致：全部可选，extra="forbid"
-export interface ModelEndpointOverride {
-  base_url?: string;
-  api_key?: string;
-  model_name?: string;
-}
-
-// 与后端 DatasourceOverride 一致：全部可选，extra="forbid"
-export interface DatasourceOverride {
-  datasource_id?: string;
-  type?: string;
-  host?: string;
-  port?: number;
-  database?: string;
-  username?: string;
-  password?: string;
-  schemas?: string[];
-  allowed_tables?: string[];
-}
-
 export interface QueryRequest {
   question: string;
-  datasource_id?: string;
-  schemas?: string[];
-  debug?: boolean;
-  // --- 前端配置传递（仅传覆写值，不传 enabled 等前端专用字段）---
-  model_overrides?: Record<string, ModelEndpointOverride>;
-  datasource_override?: DatasourceOverride;
+  datasource_id: string;
+  model_profile_id: string;
+  debug: boolean;
 }
 
 export interface ResponseColumn {
@@ -135,26 +108,6 @@ export interface RepairHistoryEntry {
   error_type: string;
   fix_strategy: string;
   fingerprint: string;
-}
-
-export interface StoredDbConfig {
-  version: 1;
-  datasource_id: string;
-  type: "postgresql" | "mysql" | "starrocks";
-  connection: {
-    mode: "form" | "dsn";
-    host?: string;
-    port?: number;
-    database?: string;
-    username?: string;
-    password?: string;
-    dsn?: string;
-  };
-  auth: {
-    schemas: string[];
-    allowed_tables: string[];
-  };
-  updatedAt: string;
 }
 
 // ========================

@@ -7,43 +7,81 @@ import { ConversationFlow, type ConversationTurn } from "./ConversationFlow";
 import { InputDock } from "./InputDock";
 import { queryTextToSql } from "@/lib/api";
 import { saveRecord } from "@/lib/history";
-import { getDbConfig, isDbConfigured } from "@/lib/datasource-config";
-import type {
-  QueryRequest,
-  QueryResponse,
-  DatasourceOverride,
-  StoredDbConfig,
-} from "@/lib/types";
+import { listDatasourceProfiles } from "@/lib/datasource-profiles";
+import { listModelProfiles } from "@/lib/model-profiles";
+import {
+  clearSelectedDatasourceProfileId,
+  clearSelectedModelProfileId,
+  getSelectedDatasourceProfileId,
+  getSelectedModelProfileId,
+  removeLegacyDatasourceConfig,
+} from "@/lib/profile-selection";
+import type { QueryRequest, QueryResponse } from "@/lib/types";
 
 export function buildWorkbenchQueryRequest(
   question: string,
-  storedDbConfig: StoredDbConfig,
+  datasourceId: string,
+  modelProfileId: string,
 ): QueryRequest {
-  let datasourceOverride: DatasourceOverride | undefined;
-  let datasourceId = "pagila";
-  if (isDbConfigured(storedDbConfig)) {
-    datasourceId = storedDbConfig.datasource_id || "pagila";
-    if (storedDbConfig.connection.mode === "form") {
-      datasourceOverride = {
-        host: storedDbConfig.connection.host || "",
-        port: storedDbConfig.connection.port || 0,
-        database: storedDbConfig.connection.database || "",
-        username: storedDbConfig.connection.username || "",
-        password: storedDbConfig.connection.password || "",
-        type: storedDbConfig.type,
-        schemas: storedDbConfig.auth.schemas,
-        allowed_tables: storedDbConfig.auth.allowed_tables,
-      };
-    }
-  }
-
   return {
     question,
     datasource_id: datasourceId,
+    model_profile_id: modelProfileId,
     debug: false,
-    ...(datasourceOverride && { datasource_override: datasourceOverride }),
   };
 }
+
+interface WorkbenchProfileDependencies {
+  getModelId: () => string | null;
+  getDatasourceId: () => string | null;
+  listModelIds: () => Promise<string[]>;
+  listDatasourceIds: () => Promise<string[]>;
+  clearModelId: () => void;
+  clearDatasourceId: () => void;
+}
+
+type WorkbenchProfileSelection =
+  | { ok: true; modelProfileId: string; datasourceId: string }
+  | { ok: false; message: string };
+
+export async function resolveWorkbenchProfileSelection(
+  dependencies: WorkbenchProfileDependencies,
+): Promise<WorkbenchProfileSelection> {
+  const modelProfileId = dependencies.getModelId();
+  const datasourceId = dependencies.getDatasourceId();
+  if (!modelProfileId || !datasourceId) {
+    return {
+      ok: false,
+      message: "请先在设置页配置并选择当前模型和数据源。",
+    };
+  }
+
+  const [modelIds, datasourceIds] = await Promise.all([
+    dependencies.listModelIds(),
+    dependencies.listDatasourceIds(),
+  ]);
+  const modelExists = modelIds.includes(modelProfileId);
+  const datasourceExists = datasourceIds.includes(datasourceId);
+  if (!modelExists) dependencies.clearModelId();
+  if (!datasourceExists) dependencies.clearDatasourceId();
+  if (!modelExists || !datasourceExists) {
+    return {
+      ok: false,
+      message: "当前模型或数据源已不存在，请在设置页重新选择。",
+    };
+  }
+  return { ok: true, modelProfileId, datasourceId };
+}
+
+const profileDependencies: WorkbenchProfileDependencies = {
+  getModelId: getSelectedModelProfileId,
+  getDatasourceId: getSelectedDatasourceProfileId,
+  listModelIds: async () => (await listModelProfiles()).map((profile) => profile.id),
+  listDatasourceIds: async () =>
+    (await listDatasourceProfiles()).map((profile) => profile.id),
+  clearModelId: clearSelectedModelProfileId,
+  clearDatasourceId: clearSelectedDatasourceProfileId,
+};
 
 export function Workbench() {
   const router = useRouter();
@@ -52,7 +90,12 @@ export function Workbench() {
   const [turns, setTurns] = useState<ConversationTurn[]>([]);
   const [inputValue, setInputValue] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [selectionMessage, setSelectionMessage] = useState<string | null>(null);
   const conversationIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    removeLegacyDatasourceConfig();
+  }, []);
 
   const submitQuestion = useCallback(
     async (
@@ -64,6 +107,22 @@ export function Workbench() {
     ) => {
       const trimmed = question.trim();
       if (!trimmed || isLoading) return;
+
+      setIsLoading(true);
+      let selection: WorkbenchProfileSelection;
+      try {
+        selection = await resolveWorkbenchProfileSelection(profileDependencies);
+      } catch {
+        setSelectionMessage("无法读取当前模型和数据源，请确认后端已启动后重试。");
+        setIsLoading(false);
+        return;
+      }
+      if (!selection.ok) {
+        setSelectionMessage(selection.message);
+        setIsLoading(false);
+        return;
+      }
+      setSelectionMessage(null);
 
       const turnId = options?.turnId || `turn-${Date.now()}`;
       const isSupplement = options?.isSupplement ?? false;
@@ -83,13 +142,15 @@ export function Workbench() {
         },
       ]);
 
-      setIsLoading(true);
       setInputValue("");
 
       try {
-        const storedDbConfig = getDbConfig();
         const response = await queryTextToSql(
-          buildWorkbenchQueryRequest(trimmed, storedDbConfig),
+          buildWorkbenchQueryRequest(
+            trimmed,
+            selection.datasourceId,
+            selection.modelProfileId,
+          ),
         );
 
         // Update the turn with the response
@@ -101,7 +162,7 @@ export function Workbench() {
           ),
         );
 
-        // Save to localStorage
+        // Keep non-sensitive query history only for this browser session.
         saveRecord(conversationId, trimmed, response);
       } catch {
         // Network error — construct a FAILED_INTERNAL response
@@ -212,6 +273,23 @@ export function Workbench() {
           />
         </div>
       )}
+
+      {selectionMessage ? (
+        <div
+          role="alert"
+          className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800"
+        >
+          {selectionMessage} 请前往
+          <button
+            type="button"
+            className="mx-1 font-medium text-[var(--color-primary)] underline"
+            onClick={() => router.push("/settings")}
+          >
+            设置页
+          </button>
+          完成配置。
+        </div>
+      ) : null}
 
       <InputDock
         value={inputValue}
